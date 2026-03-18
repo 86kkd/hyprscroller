@@ -72,7 +72,6 @@ public:
     void align_window(int workspace, Direction);
     void admit_window_left(int workspace);
     void expel_window_right(int workspace);
-    void reset_height(int workspace);
     void set_mode(int workspace, Mode);
     void fit_size(int workspace, FitSize);
     void toggle_overview(int workspace);

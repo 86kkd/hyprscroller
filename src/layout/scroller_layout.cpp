@@ -433,11 +433,6 @@ void ScrollerLayout::replaceWindowDataWith(PHLWINDOW, PHLWINDOW)
     // Compatibility hook kept for API symmetry; no metadata replacement needed.
 }
 
-void ScrollerLayout::reset_height(int)
-{
-    // Reserved API for scripted reset-height behavior; intentionally not implemented.
-}
-
 void ScrollerLayout::move_window(int workspace, Direction direction) {
     auto s = getRowForWorkspace(workspace);
     if (s == nullptr) {

@@ -9,8 +9,8 @@
  * of windows and all column-level layout math for movement, resizing,
  * fullscreen/maximized behavior, and alignment.
  *
- * The row/controller layer (in scroller.cpp) composes these primitives
- * to implement workspace-level navigation and monitor integration.
+ * The row/controller layer composes these primitives to implement
+ * workspace-level navigation and monitor integration.
  */
 #pragma once
 

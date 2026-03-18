@@ -176,16 +176,6 @@ namespace {
         layout->expel_window_right(workspace);
     }
 
-    // resetheight: currently reserved for future behavior, kept as a command stub.
-    void dispatch_resetheight(std::string arg) {
-        int workspace;
-        auto layout = layout_for_action(&workspace);
-        if (!layout || workspace == -1)
-            return;
-        (void)arg;
-        layout->reset_height(workspace);
-    }
-
     // setmode row|col: switch between row mode and column mode.
     void dispatch_setmode(std::string arg) {
         int workspace;
@@ -237,16 +227,15 @@ namespace {
 
     // marksdelete <name>: remove a stored mark entry by name.
     void dispatch_marksdelete(std::string arg) {
-        auto layout = layout_for_action(new int);
+        auto layout = layout_for_action(nullptr);
         if (!layout)
             return;
-        (void)arg;
         layout->marks_delete(arg);
     }
 
     // marksvisit <name>: focus and activate the marked window if present.
     void dispatch_marksvisit(std::string arg) {
-        auto layout = layout_for_action(new int);
+        auto layout = layout_for_action(nullptr);
         if (!layout)
             return;
         layout->marks_visit(arg);
@@ -254,7 +243,7 @@ namespace {
 
     // marksreset: clear all marks.
     void dispatch_marksreset(std::string arg) {
-        auto layout = layout_for_action(new int);
+        auto layout = layout_for_action(nullptr);
         if (!layout)
             return;
         (void)arg;

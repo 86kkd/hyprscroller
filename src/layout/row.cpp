@@ -366,13 +366,7 @@ void Row::expel_window_right() {
     // 1. We don't let column resizing make a column smaller than gap
     // 2. We compromise and inherit the ColumnWidth attribute unless it is
     // "Free". In that case, we force OneHalf (the default).
-#if 1
     double maxw = width == ColumnWidth::Free ? active->data()->get_geom_w() : max.w;
-#else
-    double maxw = max.w;
-    if (width == ColumnWidth::Free)
-        width = ColumnWidth::OneHalf;
-#endif
     active = columns.emplace_after(active, new Column(w, width, maxw, max.h));
     // Initialize the position so it is located after its previous column.
     // This helps the heuristic in recalculate_row_geometry().

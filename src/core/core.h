@@ -46,27 +46,6 @@ PHLWINDOW windowFromTarget(SP<Layout::ITarget> target);
 // Resolve workspace/monitor context from pointer position used by keyboard actions.
 PHLMONITOR monitorFromPointingOrCursor();
 
-// Keep logical and animated window position/size in sync.
-void setWindowGeomImmediate(PHLWINDOW window, const Vector2D& pos, const Vector2D& size);
-
-// Update only window position and push animated target when available.
-void setWindowPos(PHLWINDOW window, const Vector2D& pos);
-
-// Update only window size and push animated target when available.
-void setWindowSize(PHLWINDOW window, const Vector2D& size);
-
-// Read current animated window position.
-Vector2D realWindowPosition(PHLWINDOW window);
-
-// Read current animated window size.
-Vector2D realWindowSize(PHLWINDOW window);
-
-// Read target window position animation goal.
-Vector2D goalWindowPosition(PHLWINDOW window);
-
-// Read target window size animation goal.
-Vector2D goalWindowSize(PHLWINDOW window);
-
 // Cross-workspace bookmark table used by marks:* dispatchers.
 class Marks {
 public:
