@@ -16,111 +16,11 @@
 #include <hyprland/src/managers/EventManager.hpp>
 #endif
 
+#include "core/core.h"
 #include "scroller.h"
-#include <unordered_map>
 
 extern HANDLE PHANDLE;
-
-// Convert a layout target into a concrete window pointer.
-static PHLWINDOW windowFromTarget(SP<Layout::ITarget> target) {
-    return target ? target->window() : nullptr;
-}
-
-// Pick the monitor from cursor position and use it as workspace context.
-static PHLMONITOR monitorFromPointingOrCursor() {
-    if (auto monitor = g_pCompositor->getMonitorFromCursor(); monitor)
-        return monitor;
-    return nullptr;
-}
-
-// Update both logical and animation values in one place.
-static void setWindowGeomImmediate(PHLWINDOW window, const Vector2D& pos, const Vector2D& size) {
-    if (!window)
-        return;
-
-    window->m_position = pos;
-    window->m_size     = size;
-
-    if (window->m_realPosition)
-        *window->m_realPosition = pos;
-    if (window->m_realSize)
-        *window->m_realSize = size;
-}
-
-static void setWindowPos(PHLWINDOW window, const Vector2D& pos) {
-    if (!window)
-        return;
-
-    window->m_position = pos;
-    if (window->m_realPosition)
-        *window->m_realPosition = pos;
-}
-
-static void setWindowSize(PHLWINDOW window, const Vector2D& size) {
-    if (!window)
-        return;
-
-    window->m_size = size;
-    if (window->m_realSize)
-        *window->m_realSize = size;
-}
-
-static Vector2D realWindowPosition(PHLWINDOW window) {
-    if (!window)
-        return {};
-
-    if (window->m_realPosition)
-        return window->m_realPosition->value();
-    return window->m_position;
-}
-
-static Vector2D realWindowSize(PHLWINDOW window) {
-    if (!window)
-        return {};
-
-    if (window->m_realSize)
-        return window->m_realSize->value();
-    return window->m_size;
-}
-
-static Vector2D goalWindowPosition(PHLWINDOW window) {
-    if (!window)
-        return {};
-
-    if (window->m_realPosition)
-        return window->m_realPosition->goal();
-    return window->m_position;
-}
-
-static Vector2D goalWindowSize(PHLWINDOW window) {
-    if (!window)
-        return {};
-
-    if (window->m_realSize)
-        return window->m_realSize->goal();
-    return window->m_size;
-}
-
-struct Box {
-    Box() : x(0), y(0), w(0), h(0) {}
-    Box(double x_, double y_, double w_, double h_)
-        : x(x_), y(y_), w(w_), h(h_) {}
-    Box(Vector2D pos, Vector2D size)
-        : x(pos.x), y(pos.y), w(size.x), h(size.y) {}
-    Box(const Box &box)
-        : x(box.x), y(box.y), w(box.w), h(box.h) {}
-
-    void set_size(double w_, double h_) {
-        w = w_;
-        h = h_;
-    }
-    void set_pos(double x_, double y_) {
-        x = x_;
-        y = y_;
-    }
-
-    double x, y, w, h;
-};
+using namespace ScrollerCore;
 
 enum class ColumnWidth {
     OneThird = 0,
@@ -144,51 +44,6 @@ enum class Reorder {
     Lazy
 };
 
-
-class Marks {
-    // Cross-workspace bookmark table used by marks:* dispatchers.
-public:
-    Marks() {}
-    ~Marks() { reset(); }
-    void reset() {
-        marks.clear();
-    }
-    // Add a mark with name for window, overwriting any existing one with that name
-    void add(PHLWINDOW window, const std::string &name) {
-        const auto mark = marks.find(name);
-        if (mark != marks.end()) {
-            mark->second = window;
-            return;
-        }
-        marks[name] = window;
-    }
-    void del(const std::string &name) {
-        const auto mark = marks.find(name);
-        if (mark != marks.end()) {
-            marks.erase(mark);
-        }
-    }
-    // Remove window from list of marks (used when a window gets deleted)
-    void remove(PHLWINDOW window) {
-        for(auto it = marks.begin(); it != marks.end();) {
-            if (it->second.lock() == window)
-                it = marks.erase(it);
-            else
-                it++;
-        }
-    }
-    // If the mark exists, returns that window, otherwise it returns null
-    PHLWINDOW visit(const std::string &name) {
-        const auto mark = marks.find(name);
-        if (mark != marks.end()) {
-            return mark->second.lock();
-        }
-        return nullptr;
-    }
-
-private:
-    std::unordered_map<std::string, PHLWINDOWREF> marks;
-};
 
 static Marks marks;
 

@@ -22,6 +22,7 @@ add_library(hyprscroller SHARED
             src/main.cpp
             src/dispatchers.h
             src/dispatchers.cpp
+            src/core/core.cpp
             src/list.h
             src/scroller.h
             src/scroller.cpp)
