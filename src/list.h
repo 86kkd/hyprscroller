@@ -1,3 +1,5 @@
+#pragma once
+
 #include <algorithm>
 
 template<typename T> class List;
@@ -180,4 +182,3 @@ private:
     ListNode<T> *m_first;
     ListNode<T> *m_last;
 };
-

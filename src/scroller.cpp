@@ -17,10 +17,14 @@
 #endif
 
 #include "core/core.h"
+#include "model/model.h"
 #include "scroller.h"
 
 extern HANDLE PHANDLE;
 using namespace ScrollerCore;
+using namespace ScrollerModel;
+
+#if 0
 
 enum class ColumnWidth {
     OneThird = 0,
@@ -43,9 +47,6 @@ enum class Reorder {
     Auto,
     Lazy
 };
-
-
-static Marks marks;
 
 // Internal window wrapper used by Column to keep geometry, history, and height mode.
 class Window {
@@ -732,6 +733,10 @@ private:
     ListNode<Window *> *active;
     List<Window *> windows;
 };
+#endif
+
+// Global mark storage lives in core module and is shared by dispatcher helpers.
+static Marks marks;
 
 class Row {
     // A row contains all columns for one workspace and owns horizontal navigation.

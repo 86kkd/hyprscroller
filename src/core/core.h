@@ -10,6 +10,7 @@
 
 namespace ScrollerCore {
 
+// Lightweight immutable/mutable bbox used for monitor/column geometry.
 struct Box {
     Box() : x(0), y(0), w(0), h(0) {}
     Box(double x_, double y_, double w_, double h_)
@@ -31,25 +32,48 @@ struct Box {
     double x, y, w, h;
 };
 
+// Convert the generic tiled target used by Hyprland into a concrete window pointer.
 PHLWINDOW windowFromTarget(SP<Layout::ITarget> target);
+
+// Resolve workspace/monitor context from pointer position used by keyboard actions.
 PHLMONITOR monitorFromPointingOrCursor();
 
+// Keep logical and animated window position/size in sync.
 void setWindowGeomImmediate(PHLWINDOW window, const Vector2D& pos, const Vector2D& size);
+
+// Update only window position and push animated target when available.
 void setWindowPos(PHLWINDOW window, const Vector2D& pos);
+
+// Update only window size and push animated target when available.
 void setWindowSize(PHLWINDOW window, const Vector2D& size);
+
+// Read current animated window position.
 Vector2D realWindowPosition(PHLWINDOW window);
+
+// Read current animated window size.
 Vector2D realWindowSize(PHLWINDOW window);
+
+// Read target window position animation goal.
 Vector2D goalWindowPosition(PHLWINDOW window);
+
+// Read target window size animation goal.
 Vector2D goalWindowSize(PHLWINDOW window);
 
+// Cross-workspace bookmark table used by marks:* dispatchers.
 class Marks {
 public:
     Marks() {}
     ~Marks() { reset(); }
+
+    // Remove all marks.
     void reset();
+    // Add/replace a mark for the given name.
     void add(PHLWINDOW window, const std::string &name);
+    // Delete a mark by name.
     void del(const std::string &name);
+    // Remove all marks that refer to a dying window.
     void remove(PHLWINDOW window);
+    // Resolve a name to window pointer, or null if missing.
     PHLWINDOW visit(const std::string &name);
 
 private:
