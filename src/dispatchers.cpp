@@ -9,7 +9,7 @@
 #include <optional>
 
 #include "dispatchers.h"
-#include "scroller.h"
+#include "layout/scroller_layout.h"
 
 extern HANDLE PHANDLE;
 

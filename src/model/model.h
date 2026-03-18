@@ -21,7 +21,7 @@
 
 #include "../list.h"
 #include "../core/core.h"
-#include "../scroller.h"
+#include "../layout/scroller_layout.h"
 
 namespace ScrollerModel {
 

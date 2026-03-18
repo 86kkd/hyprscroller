@@ -26,6 +26,8 @@ add_library(hyprscroller SHARED
             src/list.h
             src/scroller.h
             src/model/model.cpp
+            src/layout/scroller_layout.cpp
+            src/layout/row.cpp
             src/scroller.cpp)
 
 add_compile_definitions(WLR_USE_UNSTABLE)

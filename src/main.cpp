@@ -4,7 +4,7 @@
 
 #include "dispatchers.h"
 #include "hyprlang.hpp"
-#include "scroller.h"
+#include "layout/scroller_layout.h"
 
 HANDLE PHANDLE = nullptr;
 
