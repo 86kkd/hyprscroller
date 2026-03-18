@@ -1,3 +1,11 @@
+/**
+ * @file scroller_layout.h
+ * @brief Layout controller for Hyprscroller's tiled workspace orchestration.
+ *
+ * Declares `ScrollerLayout`, the Hyprland tiled algorithm implementation that
+ * owns workspace rows, translates Hyprland layout callbacks, and exposes
+ * command-facing operations through dispatchers.
+ */
 #pragma once
 
 #include <expected>

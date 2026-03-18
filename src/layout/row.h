@@ -1,3 +1,11 @@
+/**
+ * @file row.h
+ * @brief Row-level workspace controller for scroller layout.
+ *
+ * `Row` owns ordered columns for a single workspace and handles row-level
+ * focus movement, command dispatch behavior, fullscreen/maximize transitions,
+ * overview mode and geometry updates.
+ */
 #pragma once
 
 #include "../core/core.h"

@@ -1,10 +1,10 @@
 /**
- * Shared infrastructure for the refactored scroller layout internals.
+ * @file core.h
+ * @brief Shared geometry/model utilities used by scroller modules.
  *
- * This module centralizes small geometry helpers, Hyprland target/window
- * adapters, animation-aware window geometry accessors, and global mark storage
- * so the model and layout layers can reuse common plumbing without duplicating
- * compositor-specific code.
+ * Centralized helpers for window/monitor adaptation, geometry utilities, and
+ * mark storage are kept here so layout and model layers share the same
+ * low-level behavior.
  */
 #pragma once
 

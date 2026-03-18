@@ -1,5 +1,3 @@
-#pragma once
-
 /**
  * @file model.h
  * @brief Core model layer for scroller layout state.
@@ -14,6 +12,7 @@
  * The row/controller layer (in scroller.cpp) composes these primitives
  * to implement workspace-level navigation and monitor integration.
  */
+#pragma once
 
 #include <string>
 
