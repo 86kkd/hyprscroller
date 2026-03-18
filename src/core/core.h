@@ -1,3 +1,11 @@
+/**
+ * Shared infrastructure for the refactored scroller layout internals.
+ *
+ * This module centralizes small geometry helpers, Hyprland target/window
+ * adapters, animation-aware window geometry accessors, and global mark storage
+ * so the model and layout layers can reuse common plumbing without duplicating
+ * compositor-specific code.
+ */
 #pragma once
 
 #include <string>

@@ -1,5 +1,20 @@
 #pragma once
 
+/**
+ * @file model.h
+ * @brief Core model layer for scroller layout state.
+ *
+ * This module owns the lightweight in-memory objects that represent
+ * tiled layout data independent of monitor/row orchestration.
+ * `Window` stores per-window geometry state (logical height, cached
+ * positions, and height mode), while `Column` manages an ordered stack
+ * of windows and all column-level layout math for movement, resizing,
+ * fullscreen/maximized behavior, and alignment.
+ *
+ * The row/controller layer (in scroller.cpp) composes these primitives
+ * to implement workspace-level navigation and monitor integration.
+ */
+
 #include <string>
 
 #include <hyprutils/math/Vector2D.hpp>
