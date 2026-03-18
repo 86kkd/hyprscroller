@@ -1,14 +1,17 @@
 //#define COLORS_IPC
 
-#include <hyprland/src/desktop/Window.hpp>
+#include <hyprland/src/desktop/view/Window.hpp>
 //#include <hyprland/src/Window.hpp>
 #include <hyprland/src/config/ConfigManager.hpp>
 #include <hyprland/src/config/ConfigValue.hpp>
-#include <hyprland/src/debug/Log.hpp>
+#include <hyprland/src/plugins/PluginAPI.hpp>
 #include <hyprutils/math/Vector2D.hpp>
 #include <hyprland/src/desktop/Workspace.hpp>
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/managers/KeybindManager.hpp>
+#include <hyprland/src/render/Renderer.hpp>
+#include <hyprland/src/layout/space/Space.hpp>
+#include <hyprland/src/helpers/Monitor.hpp>
 #ifdef COLORS_IPC
 #include <hyprland/src/managers/EventManager.hpp>
 #endif
@@ -17,6 +20,86 @@
 #include <unordered_map>
 
 extern HANDLE PHANDLE;
+
+// Convert a layout target into a concrete window pointer.
+static PHLWINDOW windowFromTarget(SP<Layout::ITarget> target) {
+    return target ? target->window() : nullptr;
+}
+
+// Pick the monitor from cursor position and use it as workspace context.
+static PHLMONITOR monitorFromPointingOrCursor() {
+    if (auto monitor = g_pCompositor->getMonitorFromCursor(); monitor)
+        return monitor;
+    return nullptr;
+}
+
+// Update both logical and animation values in one place.
+static void setWindowGeomImmediate(PHLWINDOW window, const Vector2D& pos, const Vector2D& size) {
+    if (!window)
+        return;
+
+    window->m_position = pos;
+    window->m_size     = size;
+
+    if (window->m_realPosition)
+        *window->m_realPosition = pos;
+    if (window->m_realSize)
+        *window->m_realSize = size;
+}
+
+static void setWindowPos(PHLWINDOW window, const Vector2D& pos) {
+    if (!window)
+        return;
+
+    window->m_position = pos;
+    if (window->m_realPosition)
+        *window->m_realPosition = pos;
+}
+
+static void setWindowSize(PHLWINDOW window, const Vector2D& size) {
+    if (!window)
+        return;
+
+    window->m_size = size;
+    if (window->m_realSize)
+        *window->m_realSize = size;
+}
+
+static Vector2D realWindowPosition(PHLWINDOW window) {
+    if (!window)
+        return {};
+
+    if (window->m_realPosition)
+        return window->m_realPosition->value();
+    return window->m_position;
+}
+
+static Vector2D realWindowSize(PHLWINDOW window) {
+    if (!window)
+        return {};
+
+    if (window->m_realSize)
+        return window->m_realSize->value();
+    return window->m_size;
+}
+
+static Vector2D goalWindowPosition(PHLWINDOW window) {
+    if (!window)
+        return {};
+
+    if (window->m_realPosition)
+        return window->m_realPosition->goal();
+    return window->m_position;
+}
+
+static Vector2D goalWindowSize(PHLWINDOW window) {
+    if (!window)
+        return {};
+
+    if (window->m_realSize)
+        return window->m_realSize->goal();
+    return window->m_size;
+}
 
 struct Box {
     Box() : x(0), y(0), w(0), h(0) {}
@@ -63,6 +146,7 @@ enum class Reorder {
 
 
 class Marks {
+    // Cross-workspace bookmark table used by marks:* dispatchers.
 public:
     Marks() {}
     ~Marks() { reset(); }
@@ -108,6 +192,7 @@ private:
 
 static Marks marks;
 
+// Internal window wrapper used by Column to keep geometry, history, and height mode.
 class Window {
 public:
     Window(PHLWINDOW window, double box_h) : window(window), height(WindowHeight::One), box_h(box_h) {}
@@ -116,11 +201,11 @@ public:
     void set_geom_h(double geom_h) { box_h = geom_h; }
     void push_geom() {
         mem.box_h = box_h;
-        mem.pos_y = window.lock()->m_vPosition.y;
+        mem.pos_y = window.lock()->m_position.y;
     }
     void pop_geom() {
         box_h = mem.box_h;
-        window.lock()->m_vPosition.y = mem.pos_y;
+        window.lock()->m_position.y = mem.pos_y;
     }
     WindowHeight get_height() const { return height; }
     void update_height(WindowHeight h, double max) {
@@ -155,6 +240,7 @@ private:
 };
 
 class Column {
+    // A column is a vertical list of one or more windows sharing horizontal bounds.
 public:
     Column(PHLWINDOW cwindow, double maxw, double maxh)
         : height(WindowHeight::One), reorder(Reorder::Auto), initialized(false), maxdim(false) {
@@ -169,9 +255,10 @@ public:
         } else if (column_width == "maximized") {
             width = ColumnWidth::Free;
         } else if (column_width == "floating") {
-            if (cwindow->m_vLastFloatingSize.y > 0) {
+            auto target = cwindow->layoutTarget();
+            if (target && target->lastFloatingSize().y > 0) {
                 width = ColumnWidth::Free;
-                maxw = cwindow->m_vLastFloatingSize.x;
+                maxw = target->lastFloatingSize().x;
             } else {
                 width = ColumnWidth::OneHalf;
             }
@@ -209,6 +296,31 @@ public:
                 return true;
         }
         return false;
+    }
+    bool swap_windows(PHLWINDOW a, PHLWINDOW b) {
+        if (a == b)
+            return false;
+
+        ListNode<Window *> *na = nullptr;
+        ListNode<Window *> *nb = nullptr;
+        for (auto win = windows.first(); win != nullptr; win = win->next()) {
+            const auto w = win->data()->ptr().lock();
+            if (w == a)
+                na = win;
+            else if (w == b)
+                nb = win;
+            if (na && nb)
+                break;
+        }
+        if (!na || !nb)
+            return false;
+
+        windows.swap(na, nb);
+        if (active == na)
+            active = nb;
+        else if (active == nb)
+            active = na;
+        return true;
     }
     void add_active_window(PHLWINDOW window, double maxh) {
         reorder = Reorder::Auto;
@@ -253,8 +365,8 @@ public:
         Vector2D height;
         PHLWINDOW first = windows.first()->data()->ptr().lock();
         PHLWINDOW last = windows.last()->data()->ptr().lock();
-        height.x = first->m_vPosition.y - first->getRealBorderSize();
-        height.y = last->m_vPosition.y + last->m_vSize.y + last->getRealBorderSize();
+        height.x = first->m_position.y - first->getRealBorderSize();
+        height.y = last->m_position.y + last->m_size.y + last->getRealBorderSize();
         return height;
     }
     void scale(const Vector2D &bmin, const Vector2D &start, double scale, double gap) {
@@ -263,23 +375,28 @@ public:
             PHLWINDOW window = win->data()->ptr().lock();
             auto border = window->getRealBorderSize();
             auto gap0 = win == windows.first() ? 0.0 : gap;
-            window->m_vPosition = start + Vector2D(border, border) + (window->m_vPosition - Vector2D(border, border) - bmin) * scale;
-            window->m_vPosition.y += gap0;
+            window->m_position = start + Vector2D(border, border) + (window->m_position - Vector2D(border, border) - bmin) * scale;
+            window->m_position.y += gap0;
             auto gap1 = win == windows.last() ? 0.0 : gap;
-            window->m_vSize.x *= scale;
-            window->m_vSize.y = (window->m_vSize.y + 2.0 * border + gap0 + gap1) * scale - gap0 - gap1 - 2.0 * border;
-            window->m_vSize = Vector2D(std::max(window->m_vSize.x, 1.0), std::max(window->m_vSize.y, 1.0));
-            window->m_vRealSize = window->m_vSize;
-            window->m_vRealPosition = window->m_vPosition;
+            window->m_size.x *= scale;
+            window->m_size.y = (window->m_size.y + 2.0 * border + gap0 + gap1) * scale - gap0 - gap1 - 2.0 * border;
+            window->m_size = Vector2D(std::max(window->m_size.x, 1.0), std::max(window->m_size.y, 1.0));
+            if (window->m_realSize) {
+                *window->m_realSize = window->m_size;
+                *window->m_realPosition = window->m_position;
+            }
         }
     }
     bool toggle_fullscreen(const Box &fullbbox) {
         PHLWINDOW wactive = active->data()->ptr().lock();
-        wactive->m_bIsFullscreen = !wactive->m_bIsFullscreen;
-        if (wactive->m_bIsFullscreen) {
+        const bool will_fullscreen = !wactive->isFullscreen();
+        if (const auto target = wactive->layoutTarget(); target) {
+            target->setFullscreenMode(will_fullscreen ? FSMODE_FULLSCREEN : FSMODE_NONE);
+        }
+        if (will_fullscreen) {
             full = fullbbox;
         }
-        return wactive->m_bIsFullscreen;
+        return will_fullscreen;
     }
     // Sets fullscreen even if the active window is not full screen
     // Used in recalculateMonitor
@@ -313,7 +430,11 @@ public:
         }
     }
     bool fullscreen() const {
-        return active->data()->ptr().lock()->m_bIsFullscreen;
+        if (!active)
+            return false;
+
+        auto window = active->data()->ptr().lock();
+        return window ? window->isFullscreen() : false;
     }
     bool maximized() const {
         return maxdim;
@@ -326,10 +447,12 @@ public:
     void recalculate_col_geometry(const Vector2D &gap_x, double gap) {
         if (fullscreen()) {
             PHLWINDOW wactive = active->data()->ptr().lock();
-            wactive->m_vPosition = Vector2D(full.x, full.y);
-            wactive->m_vSize = Vector2D(full.w, full.h);
-            wactive->m_vRealPosition = wactive->m_vPosition;
-            wactive->m_vRealSize = wactive->m_vSize;
+            wactive->m_position = Vector2D(full.x, full.y);
+            wactive->m_size = Vector2D(full.w, full.h);
+            if (wactive->m_realPosition) {
+                *wactive->m_realPosition = wactive->m_position;
+                *wactive->m_realSize = wactive->m_size;
+            }
         } else {
             // In theory, every window in the Columm should have the same size,
             // but the standard layouts don't follow this rule (to make the code
@@ -346,14 +469,14 @@ public:
             auto gap0 = active == windows.first() ? 0.0 : gap;
             auto gap1 = active == windows.last() ? 0.0 : gap;
             auto border = win->getRealBorderSize();
-            auto a_y0 = std::round(win->m_vPosition.y - border - gap0);
-            auto a_y1 = std::round(win->m_vPosition.y - border - gap0 + wactive->get_geom_h());
+            auto a_y0 = std::round(win->m_position.y - border - gap0);
+            auto a_y1 = std::round(win->m_position.y - border - gap0 + wactive->get_geom_h());
             if (a_y0 < geom.y) {
                 // active starts above, set it on the top edge
-                win->m_vPosition = Vector2D(geom.x + border + gap_x.x, geom.y + border + gap0);
+                win->m_position = Vector2D(geom.x + border + gap_x.x, geom.y + border + gap0);
             } else if (a_y1 > geom.y + geom.h) {
                 // active overflows below the bottom, move to bottom of viewport
-                win->m_vPosition = Vector2D(geom.x + border + gap_x.x, geom.y + geom.h - wactive->get_geom_h() + border + gap0);
+                win->m_position = Vector2D(geom.x + border + gap_x.x, geom.y + geom.h - wactive->get_geom_h() + border + gap0);
             } else {
                 // active window is inside the viewport
                 if (reorder == Reorder::Auto) {
@@ -366,8 +489,8 @@ public:
                         PHLWINDOW prev_window = prev->ptr().lock();
                         auto gap0 = active->prev() == windows.first() ? 0.0 : gap;
                         auto border = prev_window->getRealBorderSize();
-                        auto p_y0 = std::round(prev_window->m_vPosition.y - border - gap0);
-                        auto p_y1 = std::round(prev_window->m_vPosition.y - border - gap0 + prev->get_geom_h());
+                        auto p_y0 = std::round(prev_window->m_position.y - border - gap0);
+                        auto p_y1 = std::round(prev_window->m_position.y - border - gap0 + prev->get_geom_h());
                         if (p_y0 >= geom.y && p_y1 <= geom.y + geom.h) {
                             keep_current = true;
                         }
@@ -377,8 +500,8 @@ public:
                         PHLWINDOW next_window = next->ptr().lock();
                         auto gap0 = active->next() == windows.first() ? 0.0 : gap;
                         auto border = next_window->getRealBorderSize();
-                        auto p_y0 = std::round(next_window->m_vPosition.y - border - gap0);
-                        auto p_y1 = std::round(next_window->m_vPosition.y - border - gap0 + next->get_geom_h());
+                        auto p_y0 = std::round(next_window->m_position.y - border - gap0);
+                        auto p_y1 = std::round(next_window->m_position.y - border - gap0 + next->get_geom_h());
                         if (p_y0 >= geom.y && p_y1 <= geom.y + geom.h) {
                             keep_current = true;
                         }
@@ -391,38 +514,38 @@ public:
                         if (active->next() != nullptr) {
                             if (wactive->get_geom_h() + active->next()->data()->get_geom_h() <= geom.h) {
                                 // set next at the bottom edge of the viewport
-                                win->m_vPosition = Vector2D(geom.x + border + gap_x.x, geom.y + geom.h - wactive->get_geom_h() - active->next()->data()->get_geom_h() + border + gap0);
+                                win->m_position = Vector2D(geom.x + border + gap_x.x, geom.y + geom.h - wactive->get_geom_h() - active->next()->data()->get_geom_h() + border + gap0);
                             } else if (active->prev() != nullptr) {
                                 if (active->prev()->data()->get_geom_h() + wactive->get_geom_h() <= geom.h) {
                                     // set previous at the top edge of the viewport
-                                    win->m_vPosition = Vector2D(geom.x + border + gap_x.x, geom.y + active->prev()->data()->get_geom_h() + border + gap0);
+                                    win->m_position = Vector2D(geom.x + border + gap_x.x, geom.y + active->prev()->data()->get_geom_h() + border + gap0);
                                 } else {
                                     // none of them fit, leave active as it is (only modify x)
-                                    win->m_vPosition.x = geom.x + border + gap_x.x;
+                                    win->m_position.x = geom.x + border + gap_x.x;
                                 }
                             } else {
                                 // nothing above, move active to top of viewport
-                                win->m_vPosition = Vector2D(geom.x + border + gap_x.x, geom.y + border + gap0);
+                                win->m_position = Vector2D(geom.x + border + gap_x.x, geom.y + border + gap0);
                             }
                         } else if (active->prev() != nullptr) {
                             if (active->prev()->data()->get_geom_h() + wactive->get_geom_h() <= geom.h) {
                                 // set previous at the top edge of the viewport
-                                win->m_vPosition = Vector2D(geom.x + border + gap_x.x, geom.y + active->prev()->data()->get_geom_h() + border + gap0);
+                                win->m_position = Vector2D(geom.x + border + gap_x.x, geom.y + active->prev()->data()->get_geom_h() + border + gap0);
                             } else {
                                 // it doesn't fit and nothing above, move active to bottom of viewport
-                                win->m_vPosition = Vector2D(geom.x + border + gap_x.x, geom.y + geom.h - wactive->get_geom_h() + border + gap0);
+                                win->m_position = Vector2D(geom.x + border + gap_x.x, geom.y + geom.h - wactive->get_geom_h() + border + gap0);
                             }
                         } else {
                             // nothing on the right or left, the window is in a correct position
-                            win->m_vPosition.x = geom.x + border + gap_x.x;
+                            win->m_position.x = geom.x + border + gap_x.x;
                         }
                     } else {
                         // the window is in a correct position
-                        win->m_vPosition.x = geom.x + border + gap_x.x;
+                        win->m_position.x = geom.x + border + gap_x.x;
                     }
                 } else {
                     // the window is in a correct position
-                    win->m_vPosition.x = geom.x + border + gap_x.x;
+                    win->m_position.x = geom.x + border + gap_x.x;
                 }
             }
             adjust_windows(active, gap_x, gap);
@@ -449,14 +572,14 @@ public:
     }
     bool move_focus_up(bool focus_wrap) {
         if (active == windows.first()) {
-            CMonitor *monitor = g_pCompositor->getMonitorInDirection('u');
+            PHLMONITOR monitor = g_pCompositor->getMonitorInDirection(Math::fromChar('u'));
             if (monitor == nullptr) {
                 if (focus_wrap)
                     active = windows.last();
                 return true;
             }
             // use default dispatch for movefocus (change monitor)
-            g_pKeybindManager->m_mDispatchers["movefocus"]("u");
+            g_pKeybindManager->m_dispatchers["movefocus"]("u");
             return false;
         }
         reorder = Reorder::Auto;
@@ -465,14 +588,14 @@ public:
     }
     bool move_focus_down(bool focus_wrap) {
         if (active == windows.last()) {
-            CMonitor *monitor = g_pCompositor->getMonitorInDirection('d');
+            PHLMONITOR monitor = g_pCompositor->getMonitorInDirection(Math::fromChar('d'));
             if (monitor == nullptr) {
                 if (focus_wrap)
                     active = windows.first();
                 return true;
             }
             // use default dispatch for movefocus (change monitor)
-            g_pKeybindManager->m_mDispatchers["movefocus"]("d");
+            g_pKeybindManager->m_dispatchers["movefocus"]("d");
             return false;
         }
         reorder = Reorder::Auto;
@@ -500,15 +623,15 @@ public:
         switch (direction) {
         case Direction::Up:
             reorder = Reorder::Lazy;
-            window->m_vPosition.y = geom.y + border + gap0;
+            window->m_position.y = geom.y + border + gap0;
             break;
         case Direction::Down:
             reorder = Reorder::Lazy;
-            window->m_vPosition.y = geom.y + geom.h - border + gap1;
+            window->m_position.y = geom.y + geom.h - border + gap1;
             break;
         case Direction::Center:
             reorder = Reorder::Lazy;
-            window->m_vPosition.y = 0.5 * (geom.y + geom.h - (2.0 * border + gap0 + gap1 + window->m_vSize.y));
+            window->m_position.y = 0.5 * (geom.y + geom.h - (2.0 * border + gap0 + gap1 + window->m_size.y));
             break;
         default:
             break;
@@ -586,8 +709,8 @@ public:
                 Window *win = w->data();
                 PHLWINDOW window = win->ptr().lock();
                 auto border = window->getRealBorderSize();
-                auto c0 = window->m_vPosition.y - border;
-                auto c1 = window->m_vPosition.y - border - gap0 + win->get_geom_h();
+                auto c0 = window->m_position.y - border;
+                auto c1 = window->m_position.y - border - gap0 + win->get_geom_h();
                 if (c0 < geom.y + geom.h && c0 >= geom.y ||
                     c1 > geom.y && c1 <= geom.y + geom.h ||
                     //should never happen as windows are never taller than the screen
@@ -602,8 +725,8 @@ public:
                 Window *win = w->data();
                 PHLWINDOW window = win->ptr().lock();
                 auto border = window->getRealBorderSize();
-                auto c0 = window->m_vPosition.y - border;
-                auto c1 = window->m_vPosition.y - border - gap0 + win->get_geom_h();
+                auto c0 = window->m_position.y - border;
+                auto c1 = window->m_position.y - border - gap0 + win->get_geom_h();
                 if (c0 < geom.y + geom.h && c0 >= geom.y ||
                     c1 > geom.y && c1 <= geom.y + geom.h ||
                     //should never happen as columns are never wider than the screen
@@ -644,7 +767,7 @@ public:
             }
             auto gap0 = from == windows.first() ? 0.0 : gap;
             PHLWINDOW from_window = from->data()->ptr().lock();
-            from_window->m_vPosition.y = geom.y + gap0 + from_window->getRealBorderSize();
+            from_window->m_position.y = geom.y + gap0 + from_window->getRealBorderSize();
 
             adjust_windows(from, gap_x, gap);
         }
@@ -673,7 +796,7 @@ private:
             auto wgap0 = w == windows.first() ? 0.0 : gap;
             auto wborder = ww->getRealBorderSize();
             auto pborder = pw->getRealBorderSize();
-            ww->m_vPosition = Vector2D(geom.x + wborder + gap_x.x, pw->m_vPosition.y - gap - pborder - w->data()->get_geom_h() + wborder + wgap0);
+            ww->m_position = Vector2D(geom.x + wborder + gap_x.x, pw->m_position.y - gap - pborder - w->data()->get_geom_h() + wborder + wgap0);
         }
         // 3. adjust positions of windows below
         for (auto w = win->next(), p = win; w != nullptr; p = w, w = w->next()) {
@@ -682,7 +805,7 @@ private:
             auto pgap0 = p == windows.first() ? 0.0 : gap;
             auto wborder = ww->getRealBorderSize();
             auto pborder = pw->getRealBorderSize();
-            ww->m_vPosition = Vector2D(geom.x + wborder + gap_x.x, pw->m_vPosition.y - pborder - pgap0 + p->data()->get_geom_h() + wborder + gap);
+            ww->m_position = Vector2D(geom.x + wborder + gap_x.x, pw->m_position.y - pborder - pgap0 + p->data()->get_geom_h() + wborder + gap);
         }
         for (auto w = windows.first(); w != nullptr; w = w->next()) {
             PHLWINDOW win = w->data()->ptr().lock();
@@ -691,9 +814,11 @@ private:
             auto border = win->getRealBorderSize();
             auto wh = w->data()->get_geom_h();
             //win->m_vSize = Vector2D(geom.w - 2.0 * border - gap_x.x - gap_x.y, wh - 2.0 * border - gap0 - gap1);
-            win->m_vSize = Vector2D(std::max(geom.w - 2.0 * border - gap_x.x - gap_x.y, 1.0), std::max(wh - 2.0 * border - gap0 - gap1, 1.0));
-            win->m_vRealPosition = win->m_vPosition;
-            win->m_vRealSize = win->m_vSize;
+            win->m_size = Vector2D(std::max(geom.w - 2.0 * border - gap_x.x - gap_x.y, 1.0), std::max(wh - 2.0 * border - gap0 - gap1, 1.0));
+            if (win->m_realPosition) {
+                *win->m_realPosition = win->m_position;
+                *win->m_realSize = win->m_size;
+            }
         }
     }
 public:
@@ -754,11 +879,15 @@ private:
 };
 
 class Row {
+    // A row contains all columns for one workspace and owns horizontal navigation.
 public:
     Row(PHLWINDOW window)
         : workspace(window->workspaceID()), mode(Mode::Row), reorder(Reorder::Auto),
         overview(false), active(nullptr) {
-        update_sizes(g_pCompositor->getMonitorFromID(window->m_iMonitorID));
+        const auto monitor = g_pCompositor->getMonitorFromID(window->monitorID());
+        if (!monitor)
+            return;
+        update_sizes(monitor);
     }
     ~Row() {
         for (auto col = columns.first(); col != nullptr; col = col->next()) {
@@ -824,6 +953,22 @@ public:
         }
         return true;
     }
+    bool swapWindows(PHLWINDOW a, PHLWINDOW b) {
+        ListNode<Column *> *ca = nullptr;
+        ListNode<Column *> *cb = nullptr;
+
+        for (auto c = columns.first(); c != nullptr; c = c->next()) {
+            if (!ca && c->data()->has_window(a))
+                ca = c;
+            if (!cb && c->data()->has_window(b))
+                cb = c;
+        }
+
+        if (!ca || !cb || ca != cb)
+            return false;
+
+        return ca->data()->swap_windows(a, b);
+    }
     void focus_window(PHLWINDOW window) {
         for (auto c = columns.first(); c != nullptr; c = c->next()) {
             if (c->data()->has_window(window)) {
@@ -869,14 +1014,14 @@ public:
 private:
     bool move_focus_left(bool focus_wrap) {
         if (active == columns.first()) {
-            CMonitor *monitor = g_pCompositor->getMonitorInDirection('l');
+            PHLMONITOR monitor = g_pCompositor->getMonitorInDirection(Math::fromChar('l'));
             if (monitor == nullptr) {
                 if (focus_wrap)
                     active = columns.last();
                 return true;
             }
 
-            g_pKeybindManager->m_mDispatchers["movefocus"]("l");
+            g_pKeybindManager->m_dispatchers["movefocus"]("l");
             return false;
         }
         active = active->prev();
@@ -884,14 +1029,14 @@ private:
     }
     bool move_focus_right(bool focus_wrap) {
         if (active == columns.last()) {
-            CMonitor *monitor = g_pCompositor->getMonitorInDirection('r');
+            PHLMONITOR monitor = g_pCompositor->getMonitorInDirection(Math::fromChar('r'));
             if (monitor == nullptr) {
                 if (focus_wrap)
                     active = columns.first();
                 return true;
             }
 
-            g_pKeybindManager->m_mDispatchers["movefocus"]("r");
+            g_pKeybindManager->m_dispatchers["movefocus"]("r");
             return false;
         }
         active = active->next();
@@ -1095,26 +1240,27 @@ public:
     Vector2D predict_window_size() const {
         return Vector2D(0.5 * max.w, max.h);
     }
-    void update_sizes(CMonitor *monitor) {
+    void update_sizes(PHLMONITOR monitor) {
         // for gaps outer
         static auto PGAPSINDATA = CConfigValue<Hyprlang::CUSTOMTYPE>("general:gaps_in");
         static auto PGAPSOUTDATA = CConfigValue<Hyprlang::CUSTOMTYPE>("general:gaps_out");
         auto *const PGAPSIN = (CCssGapData *)(PGAPSINDATA.ptr())->getData();
         auto *const PGAPSOUT = (CCssGapData *)(PGAPSOUTDATA.ptr())->getData();
         // For now, support only constant CCssGapData
-        auto gaps_in = PGAPSIN->top;
-        auto gaps_out = PGAPSOUT->top;
+        auto gaps_in = PGAPSIN->m_top;
+        auto gaps_out = PGAPSOUT->m_top;
 
-        const auto SIZE = monitor->vecSize;
-        const auto POS = monitor->vecPosition;
-        const auto TOPLEFT = monitor->vecReservedTopLeft;
-        const auto BOTTOMRIGHT = monitor->vecReservedBottomRight;
+        const auto reserved = monitor->m_reservedArea;
+        const auto gapOutTopLeft  = Vector2D(reserved.left(), reserved.top());
+        const auto gapOutBottomRight = Vector2D(reserved.right(), reserved.bottom());
+        const auto size = Vector2D(monitor->m_size.x, monitor->m_size.y);
+        const auto pos = Vector2D(monitor->m_position.x, monitor->m_position.y);
 
-        full = Box(POS, SIZE);
-        max = Box(POS.x + TOPLEFT.x + gaps_out,
-                POS.y + TOPLEFT.y + gaps_out,
-                SIZE.x - TOPLEFT.x - BOTTOMRIGHT.x - 2 * gaps_out,
-                SIZE.y - TOPLEFT.y - BOTTOMRIGHT.y - 2 * gaps_out);
+        full = Box(pos, size);
+        max = Box(pos.x + gapOutTopLeft.x + gaps_out,
+                pos.y + gapOutTopLeft.y + gaps_out,
+                size.x - gapOutTopLeft.x - gapOutBottomRight.x - 2 * gaps_out,
+                size.y - gapOutTopLeft.y - gapOutBottomRight.y - 2 * gaps_out);
         gap = gaps_in;
     }
     void set_fullscreen_active_window() {
@@ -1128,10 +1274,10 @@ public:
             column->get_active_window()->workspaceID());
 
         auto fullscreen = active->data()->toggle_fullscreen(full);
-        PWORKSPACE->m_bHasFullscreenWindow = fullscreen;
+        PWORKSPACE->m_hasFullscreenWindow = fullscreen;
 
         if (fullscreen) {
-            PWORKSPACE->m_efFullscreenMode = eFullscreenMode::FULLSCREEN_FULL;
+            PWORKSPACE->m_fullscreenMode = FSMODE_FULLSCREEN;
             column->recalculate_col_geometry(calculate_gap_x(active), gap);
         } else {
             recalculate_row_geometry();
@@ -1408,6 +1554,7 @@ private:
 
 
 Row *ScrollerLayout::getRowForWorkspace(int workspace) {
+    // Linear lookup because row count is typically small (per workspace list).
     for (auto row = rows.first(); row != nullptr; row = row->next()) {
         if (row->data()->get_workspace() == workspace)
             return row->data();
@@ -1416,6 +1563,7 @@ Row *ScrollerLayout::getRowForWorkspace(int workspace) {
 }
 
 Row *ScrollerLayout::getRowForWindow(PHLWINDOW window) {
+    // Walk rows and let columns report membership by pointer equality.
     for (auto row = rows.first(); row != nullptr; row = row->next()) {
         if (row->data()->has_window(window))
             return row->data();
@@ -1423,12 +1571,167 @@ Row *ScrollerLayout::getRowForWindow(PHLWINDOW window) {
     return nullptr;
 }
 
+void ScrollerLayout::newTarget(SP<Layout::ITarget> target) {
+    // Called by CLayout::addTarget; add every new tiled target using default placement.
+    if (!target)
+        return;
+
+    auto window = target->window();
+    if (!window)
+        return;
+
+    onWindowCreatedTiling(window, Math::DIRECTION_DEFAULT);
+}
+
+void ScrollerLayout::movedTarget(SP<Layout::ITarget> target, std::optional<Vector2D>)
+{
+    // Re-use create path to keep placement logic centralized.
+    if (!target)
+        return;
+
+    auto window = target->window();
+    if (!window)
+        return;
+
+    onWindowCreatedTiling(window, Math::DIRECTION_DEFAULT);
+}
+
+void ScrollerLayout::removeTarget(SP<Layout::ITarget> target)
+{
+    // Remove target from in-memory row/column model on unmap/close.
+    if (!target)
+        return;
+
+    onWindowRemovedTiling(target->window());
+}
+
+void ScrollerLayout::resizeTarget(const Vector2D &delta, SP<Layout::ITarget> target, Layout::eRectCorner)
+{
+    // If the window is not managed by a row, resize the real animated size directly.
+    auto window = windowFromTarget(target);
+    if (!window)
+        return;
+
+    auto s = getRowForWindow(window);
+    if (s == nullptr) {
+        if (window->m_realSize)
+            *window->m_realSize = Vector2D(std::max((window->m_realSize->goal() + delta).x, 20.0), std::max((window->m_realSize->goal() + delta).y, 20.0));
+        window->updateWindowDecos();
+        return;
+    }
+
+    s->focus_window(window);
+    s->resize_active_window(delta);
+}
+
+void ScrollerLayout::recalculate()
+{
+    // Full layout pass: refresh every row against its current monitor and fullscreen state.
+    for (auto row = rows.first(); row != nullptr; row = row->next()) {
+        const auto workspace = g_pCompositor->getWorkspaceByID(row->data()->get_workspace());
+        if (!workspace)
+            continue;
+        const auto monitor = g_pCompositor->getMonitorFromID(workspace->monitorID());
+        if (!monitor)
+            continue;
+
+        row->data()->update_sizes(monitor);
+        if (workspace->m_hasFullscreenWindow && workspace->m_fullscreenMode == FSMODE_FULLSCREEN)
+            row->data()->set_fullscreen_active_window();
+        else
+            row->data()->recalculate_row_geometry();
+    }
+}
+
+std::expected<void, std::string> ScrollerLayout::layoutMsg(const std::string_view&)
+{
+    // No custom layout message channel is implemented yet.
+    return {};
+}
+
+std::optional<Vector2D> ScrollerLayout::predictSizeForNewTarget()
+{
+    // Predicts geometry for new tiled window creation on active monitor workspace.
+    auto monitor = monitorFromPointingOrCursor();
+    if (!monitor)
+        return {};
+
+    auto row = getRowForWorkspace(monitor->activeWorkspaceID());
+    if (!row)
+        return Vector2D(monitor->m_size.x * 0.5, monitor->m_size.y);
+
+    return row->predict_window_size();
+}
+
+SP<Layout::ITarget> ScrollerLayout::getNextCandidate(SP<Layout::ITarget> old)
+{
+    // Keeps cycling behavior stable by returning the current active target when possible.
+    int workspace_id = WORKSPACE_INVALID;
+    if (auto oldWindow = windowFromTarget(old))
+        workspace_id = oldWindow->workspaceID();
+    if (workspace_id == WORKSPACE_INVALID) {
+        auto monitor = monitorFromPointingOrCursor();
+        if (monitor)
+            workspace_id = monitor->activeWorkspaceID();
+    }
+
+    auto s = getRowForWorkspace(workspace_id);
+    if (!s)
+        return {};
+
+    const auto active = s->get_active_window();
+    if (!active)
+        return {};
+
+    return active->layoutTarget();
+}
+
+void ScrollerLayout::swapTargets(SP<Layout::ITarget> a, SP<Layout::ITarget> b)
+{
+    // Only swap within one row; no cross-row move is supported for this layout.
+    auto wa = windowFromTarget(a);
+    auto wb = windowFromTarget(b);
+    auto sa = getRowForWindow(wa);
+    auto sb = getRowForWindow(wb);
+    if (!wa || !wb || !sa || !sb || sa != sb)
+        return;
+
+    sa->swapWindows(wa, wb);
+}
+
+void ScrollerLayout::moveTargetInDirection(SP<Layout::ITarget> t, Math::eDirection direction, bool)
+{
+    // Map compositor direction into dispatcher-level focus+move behavior.
+    auto window = windowFromTarget(t);
+    auto s = getRowForWindow(window);
+    if (!s || !window)
+        return;
+
+    s->focus_window(window);
+    switch (direction) {
+        case Math::DIRECTION_LEFT:
+            s->move_active_column(Direction::Left);
+            break;
+        case Math::DIRECTION_RIGHT:
+            s->move_active_column(Direction::Right);
+            break;
+        case Math::DIRECTION_UP:
+            s->move_active_column(Direction::Up);
+            break;
+    case Math::DIRECTION_DOWN:
+        s->move_active_column(Direction::Down);
+        break;
+    default:
+        return;
+    }
+}
+
 /*
     Called when a window is created (mapped)
     The layout HAS TO set the goal pos and size (anim mgr will use it)
     If !animationinprogress, then the anim mgr will not apply an anim.
 */
-void ScrollerLayout::onWindowCreatedTiling(PHLWINDOW window, eDirection)
+void ScrollerLayout::onWindowCreatedTiling(PHLWINDOW window, Math::eDirection)
 {
     auto s = getRowForWorkspace(window->workspaceID());
     if (s == nullptr) {
@@ -1497,16 +1800,16 @@ void ScrollerLayout::recalculateMonitor(const int &monitor_id)
 
     g_pHyprRenderer->damageMonitor(PMONITOR);
 
-    auto PWORKSPACE = PMONITOR->activeWorkspace;
+    auto PWORKSPACE = PMONITOR->m_activeWorkspace;
     if (!PWORKSPACE)
         return;
 
-    auto s = getRowForWorkspace(PWORKSPACE->m_iID);
+    auto s = getRowForWorkspace(PWORKSPACE->m_id);
     if (s == nullptr)
         return;
 
     s->update_sizes(PMONITOR);
-    if (PWORKSPACE->m_bHasFullscreenWindow && PWORKSPACE->m_efFullscreenMode == FULLSCREEN_FULL) {
+    if (PWORKSPACE->m_hasFullscreenWindow && PWORKSPACE->m_fullscreenMode == FSMODE_FULLSCREEN) {
         s->set_fullscreen_active_window();
     } else {
         s->recalculate_row_geometry();
@@ -1539,14 +1842,18 @@ void ScrollerLayout::recalculateWindow(PHLWINDOW window)
     Vector2D holds pixel values
     Optional pWindow for a specific window
 */
-void ScrollerLayout::resizeActiveWindow(const Vector2D &delta,
-                                        eRectCorner corner, PHLWINDOW window)
+void ScrollerLayout::resizeActiveWindow(PHLWINDOW window, const Vector2D &delta,
+                                        Layout::eRectCorner, PHLWINDOW pWindow)
 {
-    const auto PWINDOW = window ? window : g_pCompositor->m_pLastWindow.lock();
+    const auto PWINDOW = pWindow ? pWindow : window;
+    if (!PWINDOW)
+        return;
+
     auto s = getRowForWindow(PWINDOW);
     if (s == nullptr) {
         // Window is not tiled
-        PWINDOW->m_vRealSize = Vector2D(std::max((PWINDOW->m_vRealSize.goal() + delta).x, 20.0), std::max((PWINDOW->m_vRealSize.goal() + delta).y, 20.0));
+        if (PWINDOW->m_realSize)
+            *PWINDOW->m_realSize = Vector2D(std::max((PWINDOW->m_realSize->goal() + delta).x, 20.0), std::max((PWINDOW->m_realSize->goal() + delta).y, 20.0));
         PWINDOW->updateWindowDecos();
         return;
     }
@@ -1554,131 +1861,7 @@ void ScrollerLayout::resizeActiveWindow(const Vector2D &delta,
     s->resize_active_window(delta);
 }
 
-/*
-   Called when a window / the user requests to toggle the fullscreen state of a
-   window. The layout sets all the fullscreen flags. It can either accept or
-   ignore.
-*/
-void ScrollerLayout::fullscreenRequestForWindow(PHLWINDOW window,
-                                                eFullscreenMode fullscreenmode,
-                                                bool on)
-{
-    auto s = getRowForWindow(window);
-
-    if (s == nullptr) {
-        // window is not tiled
-        if (!validMapped(window))
-            return;
-
-        if (on == window->m_bIsFullscreen)
-            return; // ignore
-
-        const auto PMONITOR = g_pCompositor->getMonitorFromID(window->m_iMonitorID);
-        const auto PWORKSPACE = window->m_pWorkspace;
-
-        if (PWORKSPACE->m_bHasFullscreenWindow && on) {
-            // if the window wants to be fullscreen but there already is one,
-            // ignore the request.
-            return;
-        }
-
-        // save position and size if floating
-        if (window->m_bIsFloating && on) {
-            window->m_vLastFloatingSize = window->m_vRealSize.goal();
-            window->m_vLastFloatingPosition = window->m_vRealPosition.goal();
-            window->m_vPosition = window->m_vRealPosition.goal();
-            window->m_vSize = window->m_vRealSize.goal();
-        }
-
-        // otherwise, accept it.
-        window->m_bIsFullscreen = on;
-        PWORKSPACE->m_bHasFullscreenWindow = !PWORKSPACE->m_bHasFullscreenWindow;
-
-        window->updateDynamicRules();
-        window->updateWindowDecos();
-
-        g_pEventManager->postEvent(SHyprIPCEvent{"fullscreen", std::to_string((int)on)});
-        EMIT_HOOK_EVENT("fullscreen", window);
-
-        if (!window->m_bIsFullscreen) {
-            // get back its' dimensions from position and size
-            window->m_vRealPosition = window->m_vLastFloatingPosition;
-            window->m_vRealSize = window->m_vLastFloatingSize;
-
-            window->updateSpecialRenderData();
-        } else {
-            // if it now got fullscreen, make it fullscreen
-
-            PWORKSPACE->m_efFullscreenMode = fullscreenmode;
-
-            // apply new pos and size being monitor's box
-            if (fullscreenmode == FULLSCREEN_FULL) {
-                window->m_vRealPosition = PMONITOR->vecPosition;
-                window->m_vRealSize = PMONITOR->vecSize;
-            }
-        }
-
-        g_pCompositor->updateWindowAnimatedDecorationValues(window);
-        g_pXWaylandManager->setWindowSize(window, window->m_vRealSize.goal());
-        g_pCompositor->changeWindowZOrder(window, true);
-        recalculateMonitor(PMONITOR->ID);
-
-        return;
-    }
-
-    // assuming window is active for now
-    const auto PWORKSPACE = g_pCompositor->getWorkspaceByID(window->workspaceID());
-    switch (fullscreenmode) {
-        case eFullscreenMode::FULLSCREEN_FULL:
-            if (on == window->m_bIsFullscreen)
-                return;
-
-            // if the window wants to be fullscreen but there already is one, ignore the request.
-            if (PWORKSPACE->m_bHasFullscreenWindow && on)
-                return;
-
-            s->toggle_fullscreen_active_window();
-            break;
-        case eFullscreenMode::FULLSCREEN_MAXIMIZED:
-            s->toggle_maximize_active_column();
-            break;
-        default:
-            return;
-    }
-}
-
-/*
-    Called when a dispatcher requests a custom message
-    The layout is free to ignore.
-    std::any is the reply. Can be empty.
-*/
-std::any ScrollerLayout::layoutMessage(SLayoutMessageHeader header, std::string content)
-{
-    return "";
-}
-
-/*
-    Required to be handled, but may return just SWindowRenderLayoutHints()
-    Called when the renderer requests any special draw flags for
-    a specific window, e.g. border color for groups.
-*/
-SWindowRenderLayoutHints ScrollerLayout::requestRenderHints(PHLWINDOW)
-{
-    return {};
-}
-
-/*
-    Called when the user requests two windows to be swapped places.
-    The layout is free to ignore.
-*/
-void ScrollerLayout::switchWindows(PHLWINDOW, PHLWINDOW)
-{
-}
-
-/*
-    Called when the user requests a window move in a direction.
-    The layout is free to ignore.
-*/
+// Called when a move command targets a specific tiled window via legacy API.
 void ScrollerLayout::moveWindowTo(PHLWINDOW window, const std::string &direction, bool silent)
 {
     auto s = getRowForWindow(window);
@@ -1701,56 +1884,24 @@ void ScrollerLayout::moveWindowTo(PHLWINDOW window, const std::string &direction
     // before it moved. I ignore it for now.
 }
 
-/*
-    Called when the user requests to change the splitratio by or to X
-    on a window
-*/
+// Compatibility hook for split ratio changes; no-op for this layout.
 void ScrollerLayout::alterSplitRatio(PHLWINDOW, float, bool)
 {
 }
 
-/*
-    Called when something wants the current layout's name
-*/
-std::string ScrollerLayout::getLayoutName()
-{
-    return "scroller";
-}
-
-/*
-    Called for getting the next candidate for a focus
-*/
-PHLWINDOW ScrollerLayout::getNextWindowCandidate(PHLWINDOW old_window)
-{
-    // This is called when a windows in unmapped. This means the window
-    // has also been removed from the layout. In that case, returning the
-    // new active window is the correct thing.
-    int workspace_id = g_pCompositor->m_pLastMonitor->activeWorkspaceID();
-    auto s = getRowForWorkspace(workspace_id);
-    if (s == nullptr)
-        return nullptr;
-    else
-        return s->get_active_window();
-}
-
-/*
-    Called for replacing any data a layout has for a new window
-*/
-void ScrollerLayout::replaceWindowDataWith(PHLWINDOW from, PHLWINDOW to)
-{
-}
-
+// Rebuild in-memory state from existing mapped tiled windows.
 void ScrollerLayout::onEnable() {
     marks.reset();
-    for (auto& window : g_pCompositor->m_vWindows) {
-        if (window->m_bIsFloating || !window->m_bIsMapped || window->isHidden())
+    for (auto& window : g_pCompositor->m_windows) {
+        if (window->m_isFloating || !window->m_isMapped || window->isHidden())
             continue;
 
         onWindowCreatedTiling(window);
-        recalculateMonitor(window->m_iMonitorID);
+        recalculateMonitor(window->monitorID());
     }
 }
 
+// Drop all cached rows and marks when plugin is disabled.
 void ScrollerLayout::onDisable() {
     for (auto row = rows.first(); row != nullptr; row = row->next()) {
         delete row->data();
@@ -1764,13 +1915,14 @@ void ScrollerLayout::onDisable() {
     Return 0,0 if unpredictable
 */
 Vector2D ScrollerLayout::predictSizeForNewWindowTiled() {
-    if (!g_pCompositor->m_pLastMonitor)
+    auto monitor = monitorFromPointingOrCursor();
+    if (!monitor)
         return {};
 
-    int workspace_id = g_pCompositor->m_pLastMonitor->activeWorkspaceID();
+    int workspace_id = monitor->activeWorkspaceID();
     auto s = getRowForWorkspace(workspace_id);
     if (s == nullptr) {
-        Vector2D size =g_pCompositor->m_pLastMonitor->vecSize;
+        Vector2D size = monitor->m_size;
         size.x *= 0.5;
         return size;
     }
@@ -1778,6 +1930,7 @@ Vector2D ScrollerLayout::predictSizeForNewWindowTiled() {
     return s->predict_window_size();
 }
 
+// Dispatcher wrapper: grow/shrink active row or column sizing.
 void ScrollerLayout::cycle_window_size(int workspace, int step)
 {
     auto s = getRowForWorkspace(workspace);
@@ -1788,18 +1941,19 @@ void ScrollerLayout::cycle_window_size(int workspace, int step)
     s->resize_active_column(step);
 }
 
+// Focus a window and force mouse/focus state sync so pointer-driven workflows work.
 static void switch_to_window(PHLWINDOW window)
 {
-    if (window == g_pCompositor->m_pLastWindow.lock())
+    if (!window || g_pCompositor->isWindowActive(window))
         return;
 
     g_pInputManager->unconstrainMouse();
-    g_pCompositor->focusWindow(window);
+    window->activate();
     g_pCompositor->warpCursorTo(window->middle());
 
-    g_pInputManager->m_pForcedFocus = window;
+    g_pInputManager->m_forcedFocus = window;
     g_pInputManager->simulateMouseMovement();
-    g_pInputManager->m_pForcedFocus.reset();
+    g_pInputManager->m_forcedFocus.reset();
 }
 
 void ScrollerLayout::move_focus(int workspace, Direction direction)
@@ -1811,16 +1965,16 @@ void ScrollerLayout::move_focus(int workspace, Direction direction)
         // is "move to another monitor" (pass the direction)
         switch (direction) {
             case Direction::Left:
-                g_pKeybindManager->m_mDispatchers["movefocus"]("l");
+                g_pKeybindManager->m_dispatchers["movefocus"]("l");
                 break;
             case Direction::Right:
-                g_pKeybindManager->m_mDispatchers["movefocus"]("r");
+                g_pKeybindManager->m_dispatchers["movefocus"]("r");
                 break;
             case Direction::Up:
-                g_pKeybindManager->m_mDispatchers["movefocus"]("u");
+                g_pKeybindManager->m_dispatchers["movefocus"]("u");
                 break;
             case Direction::Down:
-                g_pKeybindManager->m_mDispatchers["movefocus"]("d");
+                g_pKeybindManager->m_dispatchers["movefocus"]("d");
                 break;
             default:
                 break;
@@ -1830,13 +1984,26 @@ void ScrollerLayout::move_focus(int workspace, Direction direction)
 
     if (!s->move_focus(direction, **focus_wrap == 0 ? false : true)) {
         // changed monitor
-        s = getRowForWorkspace(g_pCompositor->m_pLastMonitor->activeWorkspaceID());
+        auto monitor = monitorFromPointingOrCursor();
+        const auto workspaceId = monitor ? monitor->activeWorkspaceID() : WORKSPACE_INVALID;
+        s = getRowForWorkspace(workspaceId);
         if (s == nullptr) {
             // monitor is empty
             return;
         }
     }
+
     switch_to_window(s->get_active_window());
+}
+
+// Compatibility hook kept for API symmetry; no metadata replacement is needed.
+void ScrollerLayout::replaceWindowDataWith(PHLWINDOW, PHLWINDOW)
+{
+}
+
+// Reserved API for scripted reset-height behavior; intentionally not implemented.
+void ScrollerLayout::reset_height(int)
+{
 }
 
 void ScrollerLayout::move_window(int workspace, Direction direction) {
@@ -1900,10 +2067,14 @@ void ScrollerLayout::toggle_overview(int workspace) {
 
 static int get_workspace_id() {
     int workspace_id;
-    if (g_pCompositor->m_pLastMonitor->activeSpecialWorkspaceID()) {
-        workspace_id = g_pCompositor->m_pLastMonitor->activeSpecialWorkspaceID();
+    auto monitor = monitorFromPointingOrCursor();
+    if (!monitor)
+        return -1;
+
+    if (monitor->activeSpecialWorkspaceID()) {
+        workspace_id = monitor->activeSpecialWorkspaceID();
     } else {
-        workspace_id = g_pCompositor->m_pLastMonitor->activeWorkspaceID();
+        workspace_id = monitor->activeWorkspaceID();
     }
     if (workspace_id == WORKSPACE_INVALID)
         return -1;
@@ -1914,7 +2085,14 @@ static int get_workspace_id() {
 }
 
 void ScrollerLayout::marks_add(const std::string &name) {
-    PHLWINDOW w = getRowForWorkspace(get_workspace_id())->get_active_window();
+    auto workspace = getRowForWorkspace(get_workspace_id());
+    if (!workspace)
+        return;
+
+    PHLWINDOW w = workspace->get_active_window();
+    if (!w)
+        return;
+
     marks.add(w, name);
 }
 
