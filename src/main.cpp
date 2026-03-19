@@ -1,6 +1,10 @@
 #include <hyprland/src/config/ConfigManager.hpp>
 #include <hyprland/src/plugins/PluginAPI.hpp>
+#include <cstdlib>
+#include <filesystem>
+#include <memory>
 #include <spdlog/spdlog.h>
+#include <spdlog/sinks/basic_file_sink.h>
 #include <typeinfo>
 
 #include "dispatchers.h"
@@ -9,19 +13,39 @@
 
 HANDLE PHANDLE = nullptr;
 
+namespace {
+std::string log_file_path() {
+    const char* home = std::getenv("HOME");
+    const auto base = home ? std::filesystem::path(home) : std::filesystem::path("/tmp");
+    return (base / ".hyprland/plugins/hyprscroller/hyprscroller.log").string();
+}
+
+void init_logging() {
+    const auto path = log_file_path();
+    std::filesystem::create_directories(std::filesystem::path(path).parent_path());
+
+    spdlog::drop("hyprscroller");
+    auto sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(path, true);
+    auto logger = std::make_shared<spdlog::logger>("hyprscroller", std::move(sink));
+    spdlog::set_default_logger(std::move(logger));
+    spdlog::set_pattern("[%Y-%m-%d %H:%M:%S.%e] [hyprscroller] [%^%l%$] %v");
+#ifndef NDEBUG
+    spdlog::set_level(spdlog::level::debug);
+#else
+    spdlog::set_level(spdlog::level::info);
+#endif
+    spdlog::flush_on(spdlog::level::debug);
+    spdlog::info("logging initialized path={}", path);
+}
+} // namespace
+
 APICALL EXPORT std::string PLUGIN_API_VERSION() {
     return HYPRLAND_API_VERSION;
 }
 
 APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     PHANDLE = handle;
-
-    spdlog::set_pattern("[hyprscroller] [%^%l%$] %v");
-#ifndef NDEBUG
-    spdlog::set_level(spdlog::level::debug);
-#else
-    spdlog::set_level(spdlog::level::info);
-#endif
+    init_logging();
     spdlog::info("pluginInit handle={}", static_cast<const void*>(handle));
 
 #ifdef COLORS_IPC
