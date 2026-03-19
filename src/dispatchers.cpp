@@ -49,23 +49,21 @@ namespace {
 
         const auto special_workspace_id = monitor->activeSpecialWorkspaceID();
         const auto active_workspace_id = monitor->activeWorkspaceID();
-        int workspace_id = special_workspace_id;
-        if (workspace_id == WORKSPACE_INVALID) {
-            workspace_id = active_workspace_id;
-        }
+        const auto special_workspace = g_pCompositor->getWorkspaceByID(special_workspace_id);
+        int workspace_id = special_workspace ? special_workspace_id : active_workspace_id;
 
         const auto PWORKSPACE = g_pCompositor->getWorkspaceByID(workspace_id);
         if (workspace_id == WORKSPACE_INVALID || !PWORKSPACE || PWORKSPACE->m_hasFullscreenWindow) {
-            spdlog::debug("layout_for_action: rejected chosen_ws={} special_ws={} active_ws={} exists={} fullscreen={}",
-                          workspace_id, special_workspace_id, active_workspace_id, PWORKSPACE != nullptr,
+            spdlog::debug("layout_for_action: rejected chosen_ws={} special_ws={} active_ws={} special_exists={} exists={} fullscreen={}",
+                          workspace_id, special_workspace_id, active_workspace_id, special_workspace != nullptr, PWORKSPACE != nullptr,
                           PWORKSPACE ? PWORKSPACE->m_hasFullscreenWindow : false);
             if (workspace)
                 *workspace = -1;
             return nullptr;
         }
 
-        spdlog::debug("layout_for_action: selected chosen_ws={} special_ws={} active_ws={}",
-                      workspace_id, special_workspace_id, active_workspace_id);
+        spdlog::debug("layout_for_action: selected chosen_ws={} special_ws={} active_ws={} special_exists={}",
+                      workspace_id, special_workspace_id, active_workspace_id, special_workspace != nullptr);
         if (workspace)
             *workspace = workspace_id;
 

@@ -40,6 +40,17 @@ static const char* direction_name(Direction direction) {
     }
 }
 
+static WORKSPACEID preferred_workspace_id(PHLMONITOR monitor) {
+    if (!monitor)
+        return WORKSPACE_INVALID;
+
+    const auto special_workspace_id = monitor->activeSpecialWorkspaceID();
+    if (g_pCompositor->getWorkspaceByID(special_workspace_id))
+        return special_workspace_id;
+
+    return monitor->activeWorkspaceID();
+}
+
 Row *ScrollerLayout::getRowForWorkspace(int workspace) {
     // Linear lookup because row count is typically small (per workspace list).
     for (auto row = rows.first(); row != nullptr; row = row->next()) {
@@ -286,10 +297,12 @@ void ScrollerLayout::recalculateMonitor(const int &monitor_id)
     } else {
         s->recalculate_row_geometry();
     }
-    spdlog::debug("recalculateMonitor: monitor={} active_ws={} special_ws={}",
-                  monitor_id, PWORKSPACE->m_id, PMONITOR->activeSpecialWorkspaceID());
-    if (PMONITOR->activeSpecialWorkspaceID() != WORKSPACE_INVALID) {
-        auto sw = getRowForWorkspace(PMONITOR->activeSpecialWorkspaceID());
+    const auto special_workspace_id = PMONITOR->activeSpecialWorkspaceID();
+    const auto special_workspace = g_pCompositor->getWorkspaceByID(special_workspace_id);
+    spdlog::debug("recalculateMonitor: monitor={} active_ws={} special_ws={} special_exists={}",
+                  monitor_id, PWORKSPACE->m_id, special_workspace_id, special_workspace != nullptr);
+    if (special_workspace) {
+        auto sw = getRowForWorkspace(special_workspace_id);
         if (sw == nullptr) {
             return;
         }
@@ -535,11 +548,7 @@ static int get_workspace_id() {
     if (!monitor)
         return -1;
 
-    if (monitor->activeSpecialWorkspaceID() != WORKSPACE_INVALID) {
-        workspace_id = monitor->activeSpecialWorkspaceID();
-    } else {
-        workspace_id = monitor->activeWorkspaceID();
-    }
+    workspace_id = preferred_workspace_id(monitor);
     if (workspace_id == WORKSPACE_INVALID)
         return -1;
     if (g_pCompositor->getWorkspaceByID(workspace_id) == nullptr)
