@@ -129,9 +129,11 @@ public:
     // Apply relative scale to all windows in this column.
     void scale(const Vector2D &bmin, const Vector2D &start, double scale, double gap);
     // Toggle fullscreen state request and report the target fullscreen flag.
-    bool toggle_fullscreen(const ScrollerCore::Box &fullbbox);
+    bool toggle_fullscreen(const ScrollerCore::Box &fullbbox, Mode mode);
     // Set fullscreen target bbox for internal bookkeeping.
     void set_fullscreen(const ScrollerCore::Box &fullbbox);
+    // Return true when scroller-specific expansion is active.
+    bool expanded() const;
     // Snapshot/restore geometry for minimize-disruptive transforms.
     void push_geom();
     void pop_geom();
@@ -190,6 +192,7 @@ private:
     bool initialized;
     ScrollerCore::Box geom;
     bool fullscreened = false;
+    ListNode<Window *> *fullscreen_window = nullptr;
     bool maxdim;
     Memory mem;
     ScrollerCore::Box full;

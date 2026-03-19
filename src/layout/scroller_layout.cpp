@@ -558,6 +558,14 @@ void ScrollerLayout::toggle_overview(int workspace) {
     s->toggle_overview();
 }
 
+void ScrollerLayout::toggle_fullscreen(int workspace) {
+    auto s = getRowForWorkspace(workspace);
+    if (s == nullptr) {
+        return;
+    }
+    s->toggle_fullscreen_active_window();
+}
+
 static int get_workspace_id() {
     int workspace_id;
     auto monitor = monitorFromPointingOrCursor();

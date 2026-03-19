@@ -75,6 +75,7 @@ public:
     void set_mode(int workspace, Mode);
     void fit_size(int workspace, FitSize);
     void toggle_overview(int workspace);
+    void toggle_fullscreen(int workspace);
 
     // Mark helpers: lightweight named bookmarks for focused windows.
     void marks_add(const std::string &name);

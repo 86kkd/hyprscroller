@@ -279,7 +279,8 @@ void Row::resize_active_column(int step) {
 void Row::resize_active_window(const Vector2D &delta) {
     // If the active window in the active column is fullscreen, ignore.
     if (active->data()->maximized() ||
-        active->data()->fullscreen())
+        active->data()->fullscreen() ||
+        active->data()->expanded())
         return;
 
     active->data()->resize_active_window(max.w, calculate_gap_x(active), gap, delta);
@@ -292,7 +293,8 @@ void Row::set_mode(Mode m) {
 
 void Row::align_column(Direction dir) {
     if (active->data()->maximized() ||
-        active->data()->fullscreen())
+        active->data()->fullscreen() ||
+        active->data()->expanded())
         return;
 
     switch (dir) {
@@ -387,7 +389,8 @@ void Row::move_active_column(Direction dir) {
 
 void Row::admit_window_left() {
     if (active->data()->maximized() ||
-        active->data()->fullscreen())
+        active->data()->fullscreen() ||
+        active->data()->expanded())
         return;
     if (active == columns.first())
         return;
@@ -406,7 +409,8 @@ void Row::admit_window_left() {
 
 void Row::expel_window_right() {
     if (active->data()->maximized() ||
-        active->data()->fullscreen())
+        active->data()->fullscreen() ||
+        active->data()->expanded())
         return;
     if (active->data()->size() == 1)
         // nothing to expel
@@ -471,12 +475,8 @@ void Row::set_fullscreen_active_window() {
 
 void Row::toggle_fullscreen_active_window() {
     Column *column = active->data();
-    auto fullscreen = active->data()->toggle_fullscreen(full);
-    if (fullscreen) {
-        column->recalculate_col_geometry(calculate_gap_x(active), gap);
-    } else {
-        recalculate_row_geometry();
-    }
+    (void)column->toggle_fullscreen(full, mode);
+    recalculate_row_geometry();
 }
 
 void Row::toggle_maximize_active_column() {
@@ -611,7 +611,7 @@ void Row::recalculate_row_geometry() {
     if (active == nullptr)
         return;
 
-    if (active->data()->fullscreen()) {
+    if (const auto activeWindow = active->data()->get_active_window(); activeWindow && activeWindow->isFullscreen()) {
         active->data()->recalculate_col_geometry(calculate_gap_x(active), gap);
         return;
     }

@@ -264,6 +264,8 @@ void Column::remove_window(PHLWINDOW window) {
                 // and callers will remove the parent column.
                 active = active != windows.last() ? active->next() : active->prev();
             }
+            if (fullscreen_window == win)
+                fullscreen_window = nullptr;
             windows.erase(win);
             if (windows.size() == 1 && active) {
                 active->data()->update_height(WindowHeight::One, geom.h);
@@ -321,12 +323,34 @@ void Column::scale(const Vector2D &bmin, const Vector2D &start, double scale, do
     }
 }
 
-bool Column::toggle_fullscreen(const ScrollerCore::Box &fullbbox) {
-    // Plugin fullscreen is internal: it only expands the active window geometry.
-    fullscreened = !fullscreened;
-    if (fullscreened)
-        full = fullbbox;
-    return fullscreened;
+bool Column::toggle_fullscreen(const ScrollerCore::Box &fullbbox, Mode mode) {
+    // Plugin fullscreen only expands along the layout axis.
+    full = fullbbox;
+
+    if (mode == Mode::Row) {
+        fullscreened = !fullscreened;
+        if (fullscreened) {
+            mem.geom = geom;
+            geom.w = fullbbox.w;
+        } else {
+            geom = mem.geom;
+        }
+        return fullscreened;
+    }
+
+    if (fullscreen_window == active) {
+        active->data()->pop_geom();
+        fullscreen_window = nullptr;
+        return false;
+    }
+
+    if (fullscreen_window != nullptr)
+        fullscreen_window->data()->pop_geom();
+
+    active->data()->push_geom();
+    active->data()->set_geom_h(fullbbox.h);
+    fullscreen_window = active;
+    return true;
 }
 
 void Column::set_fullscreen(const ScrollerCore::Box &fullbbox) {
@@ -368,7 +392,11 @@ bool Column::fullscreen() const {
         return false;
 
     auto window = active->data()->ptr().lock();
-    return fullscreened || (window ? window->isFullscreen() : false);
+    return window ? window->isFullscreen() : false;
+}
+
+bool Column::expanded() const {
+    return fullscreened || fullscreen_window != nullptr;
 }
 
 bool Column::maximized() const {

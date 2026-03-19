@@ -243,6 +243,16 @@ namespace {
         layout->toggle_overview(workspace);
     }
 
+    // togglefullscreen: expand the active scroller window to the monitor bounds.
+    void dispatch_togglefullscreen(std::string arg) {
+        int workspace;
+        auto layout = layout_for_action(&workspace);
+        if (!layout || workspace == -1)
+            return;
+        (void)arg;
+        layout->toggle_fullscreen(workspace);
+    }
+
     // marksadd <name>: save focused window under a named mark.
     void dispatch_marksadd(std::string arg) {
         int workspace;
@@ -296,6 +306,7 @@ void dispatchers::addDispatchers() {
     HyprlandAPI::addDispatcherV2(PHANDLE, "scroller:setmode", wrap(dispatch_setmode));
     HyprlandAPI::addDispatcherV2(PHANDLE, "scroller:fitsize", wrap(dispatch_fitsize));
     HyprlandAPI::addDispatcherV2(PHANDLE, "scroller:toggleoverview", wrap(dispatch_toggleoverview));
+    HyprlandAPI::addDispatcherV2(PHANDLE, "scroller:togglefullscreen", wrap(dispatch_togglefullscreen));
     HyprlandAPI::addDispatcherV2(PHANDLE, "scroller:marksadd", wrap(dispatch_marksadd));
     HyprlandAPI::addDispatcherV2(PHANDLE, "scroller:marksdelete", wrap(dispatch_marksdelete));
     HyprlandAPI::addDispatcherV2(PHANDLE, "scroller:marksvisit", wrap(dispatch_marksvisit));
