@@ -35,13 +35,8 @@ static ListNode<Row*>* find_row_node(List<Row*>& rows, Row* target) {
     return nullptr;
 }
 
-static void recalculate_workspace_row(ScrollerLayout* layout, PHLMONITOR monitor, PHLWORKSPACE workspace,
-                                      bool honor_fullscreen) {
-    if (!layout || !monitor || !workspace)
-        return;
-
-    auto row = layout->getRowForWorkspace(workspace->m_id);
-    if (!row)
+static void recalculate_workspace_row(Row* row, PHLMONITOR monitor, PHLWORKSPACE workspace, bool honor_fullscreen) {
+    if (!row || !monitor || !workspace)
         return;
 
     row->update_sizes(monitor);
@@ -324,14 +319,14 @@ void ScrollerLayout::recalculateMonitor(const int &monitor_id)
     if (!PWORKSPACE)
         return;
 
-    recalculate_workspace_row(this, PMONITOR, PWORKSPACE, true);
+    recalculate_workspace_row(getRowForWorkspace(PWORKSPACE->m_id), PMONITOR, PWORKSPACE, true);
 
     const auto special_workspace_id = PMONITOR->activeSpecialWorkspaceID();
     const auto special_workspace = g_pCompositor->getWorkspaceByID(special_workspace_id);
     spdlog::debug("recalculateMonitor: monitor={} active_ws={} special_ws={} special_exists={}",
                   monitor_id, PWORKSPACE->m_id, special_workspace_id, special_workspace != nullptr);
 
-    recalculate_workspace_row(this, PMONITOR, special_workspace, false);
+    recalculate_workspace_row(getRowForWorkspace(special_workspace_id), PMONITOR, special_workspace, false);
 }
 
 void ScrollerLayout::recalculateWindow(PHLWINDOW window)
