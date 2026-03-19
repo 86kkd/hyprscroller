@@ -13,6 +13,8 @@
 
 namespace ScrollerModel {
 namespace {
+// Return true when a neighbor window is fully inside the current geometry after
+// border and gap offsets are applied.
 static bool is_window_fully_visible(Window *window, double gap, const ScrollerCore::Box &geom) {
     if (!window)
         return false;
@@ -23,6 +25,8 @@ static bool is_window_fully_visible(Window *window, double gap, const ScrollerCo
     return y0 >= geom.y && y1 <= geom.y + geom.h;
 }
 
+// Return true when a window intersects the geometry by any overlap.
+// Shared logic extracted from the previous inline visibility checks.
 static bool is_window_intersect_viewport(Window *window, double gap, const ScrollerCore::Box &geom) {
     if (!window)
         return false;
@@ -39,6 +43,9 @@ static double window_active_x(const ScrollerCore::Box &geom, double border_x, do
     return geom.x + border_x + gap_x;
 }
 
+// Choose anchor y for non-default layouts:
+// - if both neighbors exist, prefer stacking against bottom/next when possible;
+// - fall back to placing against top when no safe anchored slot exists.
 static double choose_anchor_y(bool has_next, bool has_prev, double active_h, double next_h, double prev_h,
                              const ScrollerCore::Box &geom, double border, double gap0) {
     const auto base_y = geom.y + border + gap0;
@@ -77,11 +84,13 @@ void Window::set_geom_h(double geom_h) {
 }
 
 void Window::push_geom() {
+    // Snapshot logical height and native compositor y-position before temporary edits.
     mem.box_h = box_h;
     mem.pos_y = window.lock()->m_position.y;
 }
 
 void Window::pop_geom() {
+    // Roll back to the previously snapshotted values.
     box_h = mem.box_h;
     window.lock()->m_position.y = mem.pos_y;
 }
@@ -117,6 +126,7 @@ void Window::set_height_free() {
 // A column is a vertical list of one or more windows sharing horizontal bounds.
 Column::Column(PHLWINDOW cwindow, double maxw, double maxh)
     : height(WindowHeight::One), reorder(Reorder::Auto), initialized(false), maxdim(false) {
+    // Resolve width defaults from config, with floating-window width fallback.
     static auto const *column_default_width = (Hyprlang::STRING const *)HyprlandAPI::getConfigValue(PHANDLE, "plugin:scroller:column_default_width")->getDataStaticPtr();
     std::string column_width = *column_default_width;
     if (column_width == "onehalf") {
@@ -148,6 +158,7 @@ Column::Column(PHLWINDOW cwindow, double maxw, double maxh)
 
 Column::Column(Window *window, ColumnWidth width, double maxw, double maxh)
     : width(width), height(WindowHeight::One), reorder(Reorder::Auto), initialized(true), maxdim(false) {
+    // Reused constructor: caller controls width and geometry baselines.
     window->set_geom_h(maxh);
     update_width(width, maxw, maxh);
     geom.h = maxh;
@@ -156,6 +167,7 @@ Column::Column(Window *window, ColumnWidth width, double maxw, double maxh)
 }
 
 Column::~Column() {
+    // Column owns Window instances; delete them on destruction.
     for (auto win = windows.first(); win != nullptr; win = win->next()) {
         delete win->data();
     }
@@ -186,6 +198,7 @@ bool Column::swap_windows(PHLWINDOW a, PHLWINDOW b) {
     if (a == b)
         return false;
 
+    // Resolve both matching nodes first, then swap only active indices and list order.
     ListNode<Window *> *na = nullptr;
     ListNode<Window *> *nb = nullptr;
     for (auto win = windows.first(); win != nullptr; win = win->next()) {
@@ -210,11 +223,13 @@ bool Column::swap_windows(PHLWINDOW a, PHLWINDOW b) {
 
 void Column::add_active_window(PHLWINDOW window, double maxh) {
     reorder = Reorder::Auto;
+    // Insert right after active node so focus remains near last interaction.
     active = windows.emplace_after(active, new Window(window, maxh));
 }
 
 void Column::remove_window(PHLWINDOW window) {
     reorder = Reorder::Auto;
+    // Keep active pointer deterministic after erase by preferring next, then prev.
     for (auto win = windows.first(); win != nullptr; win = win->next()) {
         if (win->data()->ptr().lock() == window) {
             if (window == active->data()->ptr().lock()) {
@@ -231,6 +246,7 @@ void Column::remove_window(PHLWINDOW window) {
 }
 
 void Column::focus_window(PHLWINDOW window) {
+    // Move active pointer to the list node owned by this native window.
     for (auto win = windows.first(); win != nullptr; win = win->next()) {
         if (win->data()->ptr().lock() == window) {
             active = win;
@@ -261,6 +277,7 @@ Vector2D Column::get_height() const {
 }
 
 void Column::scale(const Vector2D &bmin, const Vector2D &start, double scale, double gap) {
+    // Rescale logical model heights then propagate to native compositor geometry.
     for (auto win = windows.first(); win != nullptr; win = win->next()) {
         win->data()->set_geom_h(win->data()->get_geom_h() * scale);
         PHLWINDOW window = win->data()->ptr().lock();
@@ -280,6 +297,7 @@ void Column::scale(const Vector2D &bmin, const Vector2D &start, double scale, do
 }
 
 bool Column::toggle_fullscreen(const ScrollerCore::Box &fullbbox) {
+    // Toggle fullscreen mode in both scroller state and compositor target layout.
     PHLWINDOW wactive = active->data()->ptr().lock();
     const bool will_fullscreen = !wactive->isFullscreen();
     if (const auto target = wactive->layoutTarget(); target) {
@@ -298,6 +316,7 @@ void Column::set_fullscreen(const ScrollerCore::Box &fullbbox) {
 }
 
 void Column::push_geom() {
+    // Save current column and child geometry before non-linear transform operations.
     mem.geom = geom;
     for (auto w = windows.first(); w != nullptr; w = w->next()) {
         w->data()->push_geom();
@@ -305,6 +324,7 @@ void Column::push_geom() {
 }
 
 void Column::pop_geom() {
+    // Restore column and child geometry from previous push.
     geom = mem.geom;
     for (auto w = windows.first(); w != nullptr; w = w->next()) {
         w->data()->pop_geom();
@@ -312,6 +332,7 @@ void Column::pop_geom() {
 }
 
 void Column::toggle_maximized(double maxw, double maxh) {
+    // Enter/exit maxdim; keep previous state in memory for exact rollback.
     maxdim = !maxdim;
     if (maxdim) {
         mem.geom = geom;
@@ -341,6 +362,7 @@ void Column::set_geom_pos(double x, double y) {
 }
 
 void Column::recalculate_col_geometry(const Vector2D &gap_x, double gap) {
+    // Keep fullscreen path authoritative, then recompute non-fullscreen bounds.
     if (fullscreen()) {
         PHLWINDOW wactive = active->data()->ptr().lock();
         wactive->m_position = Vector2D(full.x, full.y);
@@ -377,6 +399,7 @@ void Column::recalculate_col_geometry(const Vector2D &gap_x, double gap) {
         return;
     }
     if (reorder != Reorder::Auto) {
+        // In lazy mode we keep y position and only normalize x.
         win->m_position.x = base_x;
         adjust_windows(active, gap_x, gap);
         return;
@@ -425,6 +448,7 @@ void Column::move_active_down() {
 }
 
 bool Column::move_focus_up(bool focus_wrap) {
+    // If inside list, move active upward locally.
     if (active != windows.first()) {
         reorder = Reorder::Auto;
         active = active->prev();
@@ -443,6 +467,7 @@ bool Column::move_focus_up(bool focus_wrap) {
 }
 
 bool Column::move_focus_down(bool focus_wrap) {
+    // If inside list, move active downward locally.
     if (active != windows.last()) {
         reorder = Reorder::Auto;
         active = active->next();
@@ -460,11 +485,13 @@ bool Column::move_focus_down(bool focus_wrap) {
 }
 
 void Column::admit_window(Window *window) {
+    // Insert a foreign window node after current active.
     reorder = Reorder::Auto;
     active = windows.emplace_after(active, window);
 }
 
 Window *Column::expel_active(double gap) {
+    // Remove active node and return it to caller; keep cursor valid around neighbors.
     reorder = Reorder::Auto;
     Window *window = active->data();
     auto act = active == windows.first() ? active->next() : active->prev();
@@ -474,6 +501,7 @@ Window *Column::expel_active(double gap) {
 }
 
 void Column::align_window(Direction direction, double gap) {
+    // Align active window to top/center/bottom inside current column geometry.
     PHLWINDOW window = active->data()->ptr().lock();
     auto border = window->getRealBorderSize();
     auto gap0 = active == windows.first() ? 0.0 : gap;
@@ -533,6 +561,7 @@ std::string Column::get_height_name() const {
 #endif
 
 void Column::update_width(ColumnWidth cwidth, double maxw, double maxh) {
+    // Apply preset width mapping; width is ignored when already maximized.
     if (maximized()) {
         geom.w = maxw;
     } else {
@@ -559,6 +588,7 @@ void Column::update_width(ColumnWidth cwidth, double maxw, double maxh) {
 }
 
 void Column::fit_size(FitSize fitsize, const Vector2D &gap_x, double gap) {
+    // Recompute a contiguous range and redistribute height so selected windows fill workspace.
     reorder = Reorder::Auto;
     ListNode<Window *> *from, *to;
     switch (fitsize) {
@@ -633,6 +663,7 @@ void Column::cycle_size_active_window(int step, const Vector2D &gap_x, double ga
 }
 
 void Column::adjust_windows(ListNode<Window *> *win, const Vector2D &gap_x, double gap) {
+    // Walk outward from anchor node and rebuild sibling positions and sizes.
     for (auto w = win->prev(), p = win; w != nullptr; p = w, w = w->prev()) {
         PHLWINDOW ww = w->data()->ptr().lock();
         PHLWINDOW pw = p->data()->ptr().lock();
@@ -665,7 +696,7 @@ void Column::adjust_windows(ListNode<Window *> *win, const Vector2D &gap_x, doub
 }
 
 void Column::resize_active_window(double maxw, const Vector2D &gap_x, double gap, const Vector2D &delta) {
-    // First, check if resize is possible or it would leave any window with invalid size.
+    // Validate resize first; abort if any resulting geometry would be invalid.
     auto border = active->data()->ptr().lock()->getRealBorderSize();
     auto rwidth = geom.w + delta.x - 2.0 * border - gap_x.x - gap_x.y;
     auto mwidth = geom.w + delta.x - 2.0 * (border + std::max(std::max(gap_x.x, gap_x.y), gap));
