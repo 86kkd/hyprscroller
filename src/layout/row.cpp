@@ -86,7 +86,16 @@ void Row::add_active_window(PHLWINDOW window) {
         active->data()->recalculate_col_geometry(calculate_gap_x(active), gap);
         return;
     }
+
+    const bool singleWindowWorkspace = columns.size() == 1 && columns.first()->data()->size() == 1;
+    if (singleWindowWorkspace) {
+        columns.first()->data()->update_width(ColumnWidth::OneHalf, max.w, max.h);
+    }
+
     active = columns.emplace_after(active, new Column(window, max.w, max.h));
+    if (singleWindowWorkspace) {
+        active->data()->update_width(ColumnWidth::OneHalf, max.w, max.h);
+    }
     reorder = Reorder::Auto;
     recalculate_row_geometry();
 }
@@ -605,6 +614,13 @@ void Row::recalculate_row_geometry() {
     }
     g_pEventManager->postEvent(SHyprIPCEvent{"scroller", active->data()->get_width_name() + "," + active->data()->get_height_name()});
 #endif
+    if (columns.size() == 1 && active->data()->size() == 1) {
+        active->data()->set_geom_pos(max.x, max.y);
+        active->data()->set_geom_w(max.w);
+        active->data()->recalculate_col_geometry(calculate_gap_x(active), gap);
+        return;
+    }
+
     auto a_w = active->data()->get_geom_w();
     double a_x;
     if (active->data()->get_init()) {

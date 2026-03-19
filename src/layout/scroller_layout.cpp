@@ -158,7 +158,7 @@ std::optional<Vector2D> ScrollerLayout::predictSizeForNewTarget()
 
     auto row = getRowForWorkspace(monitor->activeWorkspaceID());
     if (!row)
-        return Vector2D(monitor->m_size.x * 0.5, monitor->m_size.y);
+        return Vector2D(monitor->m_size.x, monitor->m_size.y);
 
     return row->predict_window_size();
 }
@@ -396,9 +396,7 @@ Vector2D ScrollerLayout::predictSizeForNewWindowTiled() {
     int workspace_id = monitor->activeWorkspaceID();
     auto s = getRowForWorkspace(workspace_id);
     if (s == nullptr) {
-        Vector2D size = monitor->m_size;
-        size.x *= 0.5;
-        return size;
+        return monitor->m_size;
     }
 
     return s->predict_window_size();
