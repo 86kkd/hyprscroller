@@ -11,6 +11,7 @@ endif()
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(DEPS REQUIRED hyprland pixman-1 libdrm)
+find_package(spdlog REQUIRED)
 
 # Compile flags
 set(CMAKE_CXX_STANDARD 23)
@@ -34,4 +35,5 @@ target_include_directories(hyprscroller PRIVATE ${DEPS_INCLUDE_DIRS}
             /usr/include/hyprland/wlroots-hyprland/hyprland 
             /usr/include/hyprland/src
 )
+target_link_libraries(hyprscroller PRIVATE spdlog::spdlog_header_only)
 set_target_properties(hyprscroller PROPERTIES PREFIX "")

@@ -6,6 +6,7 @@
 #include <hyprland/src/layout/algorithm/Algorithm.hpp>
 #include <hyprland/src/layout/space/Space.hpp>
 #include <hyprland/src/helpers/Monitor.hpp>
+#include <spdlog/spdlog.h>
 #include <optional>
 
 #include "dispatchers.h"
@@ -40,23 +41,31 @@ namespace {
     ScrollerLayout *layout_for_action(int *workspace) {
         PHLMONITOR monitor = g_pCompositor->getMonitorFromCursor();
         if (!monitor) {
+            spdlog::warn("layout_for_action: no monitor under cursor");
             if (workspace)
                 *workspace = -1;
             return nullptr;
         }
 
-        int workspace_id = monitor->activeSpecialWorkspaceID();
+        const auto special_workspace_id = monitor->activeSpecialWorkspaceID();
+        const auto active_workspace_id = monitor->activeWorkspaceID();
+        int workspace_id = special_workspace_id;
         if (workspace_id == WORKSPACE_INVALID) {
-            workspace_id = monitor->activeWorkspaceID();
+            workspace_id = active_workspace_id;
         }
 
         const auto PWORKSPACE = g_pCompositor->getWorkspaceByID(workspace_id);
         if (workspace_id == WORKSPACE_INVALID || !PWORKSPACE || PWORKSPACE->m_hasFullscreenWindow) {
+            spdlog::debug("layout_for_action: rejected chosen_ws={} special_ws={} active_ws={} exists={} fullscreen={}",
+                          workspace_id, special_workspace_id, active_workspace_id, PWORKSPACE != nullptr,
+                          PWORKSPACE ? PWORKSPACE->m_hasFullscreenWindow : false);
             if (workspace)
                 *workspace = -1;
             return nullptr;
         }
 
+        spdlog::debug("layout_for_action: selected chosen_ws={} special_ws={} active_ws={}",
+                      workspace_id, special_workspace_id, active_workspace_id);
         if (workspace)
             *workspace = workspace_id;
 
@@ -120,12 +129,17 @@ namespace {
     void dispatch_movefocus(std::string arg) {
         int workspace;
         auto layout = layout_for_action(&workspace);
-        if (!layout || workspace == -1)
+        if (!layout || workspace == -1) {
+            spdlog::warn("dispatch_movefocus: no layout for arg='{}'", arg);
             return;
+        }
 
         auto args = CVarList(arg);
         if (auto direction = parse_move_arg(args[0])) {
+            spdlog::info("dispatch_movefocus: arg='{}' workspace={}", arg, workspace);
             layout->move_focus(workspace, *direction);
+        } else {
+            spdlog::warn("dispatch_movefocus: unsupported arg='{}'", arg);
         }
     }
 

@@ -12,6 +12,7 @@
 #include <hyprland/src/managers/input/InputManager.hpp>
 #include <hyprland/src/plugins/PluginAPI.hpp>
 #include <hyprland/src/desktop/Workspace.hpp>
+#include <spdlog/spdlog.h>
 
 #include "../core/core.h"
 #include "row.h"
@@ -25,6 +26,19 @@ extern HANDLE PHANDLE;
 static Marks marks;
 
 static void switch_to_window(PHLWINDOW window);
+
+static const char* direction_name(Direction direction) {
+    switch (direction) {
+        case Direction::Left: return "left";
+        case Direction::Right: return "right";
+        case Direction::Up: return "up";
+        case Direction::Down: return "down";
+        case Direction::Begin: return "begin";
+        case Direction::End: return "end";
+        case Direction::Center: return "center";
+        default: return "unknown";
+    }
+}
 
 Row *ScrollerLayout::getRowForWorkspace(int workspace) {
     // Linear lookup because row count is typically small (per workspace list).
@@ -53,6 +67,7 @@ void ScrollerLayout::newTarget(SP<Layout::ITarget> target) {
     if (!window)
         return;
 
+    spdlog::info("newTarget: window={} workspace={}", static_cast<const void*>(window.get()), window->workspaceID());
     onWindowCreatedTiling(window, Math::DIRECTION_DEFAULT);
     switch_to_window(window);
 }
@@ -271,7 +286,9 @@ void ScrollerLayout::recalculateMonitor(const int &monitor_id)
     } else {
         s->recalculate_row_geometry();
     }
-    if (PMONITOR->activeSpecialWorkspaceID()) {
+    spdlog::debug("recalculateMonitor: monitor={} active_ws={} special_ws={}",
+                  monitor_id, PWORKSPACE->m_id, PMONITOR->activeSpecialWorkspaceID());
+    if (PMONITOR->activeSpecialWorkspaceID() != WORKSPACE_INVALID) {
         auto sw = getRowForWorkspace(PMONITOR->activeSpecialWorkspaceID());
         if (sw == nullptr) {
             return;
@@ -335,10 +352,16 @@ void ScrollerLayout::alterSplitRatio(PHLWINDOW, float, bool)
 
 void ScrollerLayout::onEnable() {
     marks.reset();
+    spdlog::info("onEnable: rebuilding scroller rows from mapped windows");
     for (auto& window : g_pCompositor->m_windows) {
-        if (window->m_isFloating || !window->m_isMapped || window->isHidden())
+        spdlog::debug("onEnable: candidate window={} workspace={} mapped={} hidden={} floating={}",
+                      static_cast<const void*>(window.get()), window->workspaceID(), window->m_isMapped,
+                      window->isHidden(), window->m_isFloating);
+        if (window->m_isFloating || !window->m_isMapped)
             continue;
 
+        spdlog::info("onEnable: registering window={} workspace={} hidden={}",
+                     static_cast<const void*>(window.get()), window->workspaceID(), window->isHidden());
         onWindowCreatedTiling(window);
         recalculateMonitor(window->monitorID());
     }
@@ -384,6 +407,8 @@ static void switch_to_window(PHLWINDOW window)
     if (!window || g_pCompositor->isWindowActive(window))
         return;
 
+    spdlog::debug("switch_to_window: focusing window={} workspace={}",
+                  static_cast<const void*>(window.get()), window->workspaceID());
     char selector[64];
     std::snprintf(selector, sizeof(selector), "address:0x%lx",
                   reinterpret_cast<unsigned long>(window.get()));
@@ -394,6 +419,9 @@ void ScrollerLayout::move_focus(int workspace, Direction direction)
 {
     static auto* const *focus_wrap = (Hyprlang::INT* const *)HyprlandAPI::getConfigValue(PHANDLE, "plugin:scroller:focus_wrap")->getDataStaticPtr();
     auto s = getRowForWorkspace(workspace);
+    const auto before = s ? s->get_active_window() : nullptr;
+    spdlog::info("move_focus: workspace={} direction={} row_found={} before={}",
+                 workspace, direction_name(direction), s != nullptr, static_cast<const void*>(before ? before.get() : nullptr));
     if (s == nullptr) {
         // if workspace is empty, use the deault movefocus, which now
         // is "move to another monitor" (pass the direction)
@@ -416,17 +444,24 @@ void ScrollerLayout::move_focus(int workspace, Direction direction)
         return;
     }
 
-    if (!s->move_focus(direction, **focus_wrap == 0 ? false : true)) {
+    const bool moved_in_workspace = s->move_focus(direction, **focus_wrap == 0 ? false : true);
+    if (!moved_in_workspace) {
         // changed monitor
         auto monitor = monitorFromPointingOrCursor();
         const auto workspaceId = monitor ? monitor->activeWorkspaceID() : WORKSPACE_INVALID;
+        spdlog::debug("move_focus: crossed monitor new_workspace={}", workspaceId);
         s = getRowForWorkspace(workspaceId);
         if (s == nullptr) {
             // monitor is empty
+            spdlog::warn("move_focus: no row for crossed monitor workspace={}", workspaceId);
             return;
         }
     }
 
+    const auto after = s->get_active_window();
+    spdlog::info("move_focus: workspace={} direction={} after={} moved_in_workspace={}",
+                 workspace, direction_name(direction), static_cast<const void*>(after ? after.get() : nullptr),
+                 moved_in_workspace);
     switch_to_window(s->get_active_window());
 }
 
@@ -500,7 +535,7 @@ static int get_workspace_id() {
     if (!monitor)
         return -1;
 
-    if (monitor->activeSpecialWorkspaceID()) {
+    if (monitor->activeSpecialWorkspaceID() != WORKSPACE_INVALID) {
         workspace_id = monitor->activeSpecialWorkspaceID();
     } else {
         workspace_id = monitor->activeWorkspaceID();

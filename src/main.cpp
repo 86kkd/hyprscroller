@@ -1,5 +1,6 @@
 #include <hyprland/src/config/ConfigManager.hpp>
 #include <hyprland/src/plugins/PluginAPI.hpp>
+#include <spdlog/spdlog.h>
 #include <typeinfo>
 
 #include "dispatchers.h"
@@ -14,6 +15,14 @@ APICALL EXPORT std::string PLUGIN_API_VERSION() {
 
 APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     PHANDLE = handle;
+
+    spdlog::set_pattern("[hyprscroller] [%^%l%$] %v");
+#ifndef NDEBUG
+    spdlog::set_level(spdlog::level::debug);
+#else
+    spdlog::set_level(spdlog::level::info);
+#endif
+    spdlog::info("pluginInit handle={}", static_cast<const void*>(handle));
 
 #ifdef COLORS_IPC
     // Enable optional IPC color configuration for free-column highlight.
@@ -39,4 +48,6 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     return {"hyprscroller", "scrolling window layout", "dawser", "1.0"};
 }
 
-APICALL EXPORT void PLUGIN_EXIT() {}
+APICALL EXPORT void PLUGIN_EXIT() {
+    spdlog::info("pluginExit");
+}
