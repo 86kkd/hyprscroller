@@ -1,5 +1,7 @@
 //#define COLORS_IPC
 
+#include <cstdio>
+
 #include <hyprland/src/config/ConfigManager.hpp>
 #include <hyprland/src/config/ConfigValue.hpp>
 #include <hyprland/src/Compositor.hpp>
@@ -379,13 +381,10 @@ static void switch_to_window(PHLWINDOW window)
     if (!window || g_pCompositor->isWindowActive(window))
         return;
 
-    g_pInputManager->unconstrainMouse();
-    window->activate();
-    g_pCompositor->warpCursorTo(window->middle());
-
-    g_pInputManager->m_forcedFocus = window;
-    g_pInputManager->simulateMouseMovement();
-    g_pInputManager->m_forcedFocus.reset();
+    char selector[64];
+    std::snprintf(selector, sizeof(selector), "address:0x%lx",
+                  reinterpret_cast<unsigned long>(window.get()));
+    g_pKeybindManager->m_dispatchers["focuswindow"](selector);
 }
 
 void ScrollerLayout::move_focus(int workspace, Direction direction)
