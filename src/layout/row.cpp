@@ -50,6 +50,8 @@ Row::Row(PHLWINDOW window)
     const auto monitor = g_pCompositor->getMonitorFromID(window->monitorID());
     if (!monitor)
         return;
+
+    mode = monitor->m_size.x >= monitor->m_size.y ? Mode::Row : Mode::Column;
     update_sizes(monitor);
 }
 
@@ -81,9 +83,14 @@ bool Row::is_active(PHLWINDOW window) const {
 }
 
 void Row::add_active_window(PHLWINDOW window) {
-    if (mode == Mode::Column) {
+    if (mode == Mode::Column && active != nullptr) {
+        const bool singleWindowColumn = active->data()->size() == 1;
         active->data()->add_active_window(window, max.h);
-        active->data()->recalculate_col_geometry(calculate_gap_x(active), gap);
+        if (singleWindowColumn) {
+            active->data()->fit_size(FitSize::All, calculate_gap_x(active), gap);
+        } else {
+            active->data()->recalculate_col_geometry(calculate_gap_x(active), gap);
+        }
         return;
     }
 
@@ -418,6 +425,9 @@ void Row::expel_window_right() {
 }
 
 Vector2D Row::predict_window_size() const {
+    if (mode == Mode::Column)
+        return Vector2D(max.w, 0.5 * max.h);
+
     return Vector2D(0.5 * max.w, max.h);
 }
 
