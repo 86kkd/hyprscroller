@@ -1,6 +1,6 @@
 # Hyprscroller
 
-[Hyprscroller](https://github.com/dawsers/hyprscroller) is a
+[Hyprscroller](https://github.com/86kkd/hyprscroller) is a
 [Hyprland](https://hyprland.org) layout plugin that creates a window layout
 similar to [PaperWM](https://github.com/paperwm/PaperWM). I initialy
 learned how to write a *Hyprland* plugin from [hyprslidr](https://gitlab.com/magus/hyprslidr),
@@ -45,7 +45,7 @@ make install
 A more automated mode is to use `hyprpm`.
 
 ``` sh
-hyprpm add https://github.com/dawsers/hyprscroller
+hyprpm add https://github.com/86kkd/hyprscroller
 # verify it installed correctly
 hyprpm list
 ```
@@ -409,4 +409,3 @@ submap = reset
 
 bind = $mainMod CTRL, M, scroller:marksreset
 ```
-
