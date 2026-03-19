@@ -84,8 +84,13 @@ bool Row::is_active(PHLWINDOW window) const {
 
 void Row::add_active_window(PHLWINDOW window) {
     if (mode == Mode::Column && active != nullptr) {
+        const auto windowCountBefore = active->data()->size();
         active->data()->add_active_window(window, 0.5 * max.h);
-        active->data()->fit_size(FitSize::All, calculate_gap_x(active), gap);
+        if (windowCountBefore == 1) {
+            active->data()->fit_size(FitSize::All, calculate_gap_x(active), gap);
+        } else {
+            active->data()->recalculate_col_geometry(calculate_gap_x(active), gap);
+        }
         return;
     }
 
@@ -126,7 +131,11 @@ bool Row::remove_window(PHLWINDOW window) {
                 }
             } else {
                 if (mode == Mode::Column) {
-                    c->data()->fit_size(FitSize::All, calculate_gap_x(c), gap);
+                    if (c->data()->size() <= 2) {
+                        c->data()->fit_size(FitSize::All, calculate_gap_x(c), gap);
+                    } else {
+                        c->data()->recalculate_col_geometry(calculate_gap_x(c), gap);
+                    }
                 } else {
                     c->data()->recalculate_col_geometry(calculate_gap_x(c), gap);
                 }
@@ -462,14 +471,8 @@ void Row::set_fullscreen_active_window() {
 
 void Row::toggle_fullscreen_active_window() {
     Column *column = active->data();
-    const auto PWORKSPACE = g_pCompositor->getWorkspaceByID(
-        column->get_active_window()->workspaceID());
-
     auto fullscreen = active->data()->toggle_fullscreen(full);
-    PWORKSPACE->m_hasFullscreenWindow = fullscreen;
-
     if (fullscreen) {
-        PWORKSPACE->m_fullscreenMode = FSMODE_FULLSCREEN;
         column->recalculate_col_geometry(calculate_gap_x(active), gap);
     } else {
         recalculate_row_geometry();

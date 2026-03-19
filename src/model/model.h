@@ -189,6 +189,7 @@ private:
     Reorder reorder;
     bool initialized;
     ScrollerCore::Box geom;
+    bool fullscreened = false;
     bool maxdim;
     Memory mem;
     ScrollerCore::Box full;

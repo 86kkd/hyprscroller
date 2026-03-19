@@ -322,21 +322,14 @@ void Column::scale(const Vector2D &bmin, const Vector2D &start, double scale, do
 }
 
 bool Column::toggle_fullscreen(const ScrollerCore::Box &fullbbox) {
-    // Toggle fullscreen mode in both scroller state and compositor target layout.
-    PHLWINDOW wactive = active->data()->ptr().lock();
-    const bool will_fullscreen = !wactive->isFullscreen();
-    if (const auto target = wactive->layoutTarget(); target) {
-        target->setFullscreenMode(will_fullscreen ? FSMODE_FULLSCREEN : FSMODE_NONE);
-    }
-    if (will_fullscreen) {
+    // Plugin fullscreen is internal: it only expands the active window geometry.
+    fullscreened = !fullscreened;
+    if (fullscreened)
         full = fullbbox;
-    }
-    return will_fullscreen;
+    return fullscreened;
 }
 
 void Column::set_fullscreen(const ScrollerCore::Box &fullbbox) {
-    // Leave it like this (without enabling full screen in the window).
-    // If this is called, it won't work unless the window is also set to full screen.
     full = fullbbox;
 }
 
@@ -375,7 +368,7 @@ bool Column::fullscreen() const {
         return false;
 
     auto window = active->data()->ptr().lock();
-    return window ? window->isFullscreen() : false;
+    return fullscreened || (window ? window->isFullscreen() : false);
 }
 
 bool Column::maximized() const {
