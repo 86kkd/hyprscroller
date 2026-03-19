@@ -27,6 +27,32 @@ static Marks marks;
 
 static void switch_to_window(PHLWINDOW window);
 
+static ListNode<Row*>* find_row_node(List<Row*>& rows, Row* target) {
+    for (auto row = rows.first(); row != nullptr; row = row->next()) {
+        if (row->data() == target)
+            return row;
+    }
+    return nullptr;
+}
+
+static void recalculate_workspace_row(ScrollerLayout* layout, PHLMONITOR monitor, PHLWORKSPACE workspace,
+                                      bool honor_fullscreen) {
+    if (!layout || !monitor || !workspace)
+        return;
+
+    auto row = layout->getRowForWorkspace(workspace->m_id);
+    if (!row)
+        return;
+
+    row->update_sizes(monitor);
+    if (honor_fullscreen && workspace->m_hasFullscreenWindow && workspace->m_fullscreenMode == FSMODE_FULLSCREEN) {
+        row->set_fullscreen_active_window();
+        return;
+    }
+
+    row->recalculate_row_geometry();
+}
+
 static const char* direction_name(Direction direction) {
     switch (direction) {
         case Direction::Left: return "left";
@@ -238,22 +264,33 @@ void ScrollerLayout::onWindowCreatedTiling(PHLWINDOW window, Math::eDirection)
 
 void ScrollerLayout::onWindowRemovedTiling(PHLWINDOW window)
 {
+    const auto windowPtr = static_cast<const void*>(window.get());
+    const auto workspace = window ? window->workspaceID() : WORKSPACE_INVALID;
+    spdlog::info("onWindowRemovedTiling: window={} workspace={}", windowPtr, workspace);
+
     marks.remove(window);
 
     auto s = getRowForWindow(window);
     if (s == nullptr) {
+        spdlog::debug("onWindowRemovedTiling: no row found for window={} workspace={}", windowPtr, workspace);
         return;
     }
-    if (!s->remove_window(window)) {
-        // It was the last one, remove the row.
-        for (auto row = rows.first(); row != nullptr; row = row->next()) {
-            if (row->data() == s) {
-                rows.erase(row);
-                delete row->data();
-                return;
-            }
-        }
+
+    if (s->remove_window(window))
+        return;
+
+    auto row = find_row_node(rows, s);
+    if (!row) {
+        spdlog::warn("onWindowRemovedTiling: empty row missing from list row={} workspace={}",
+                     static_cast<const void*>(s), workspace);
+        return;
     }
+
+    auto doomed = row->data();
+    spdlog::info("onWindowRemovedTiling: deleting empty row={} workspace={}",
+                 static_cast<const void*>(doomed), doomed->get_workspace());
+    rows.erase(row);
+    delete doomed;
 }
 
 void ScrollerLayout::onWindowFocusChange(PHLWINDOW window)
@@ -287,28 +324,14 @@ void ScrollerLayout::recalculateMonitor(const int &monitor_id)
     if (!PWORKSPACE)
         return;
 
-    auto s = getRowForWorkspace(PWORKSPACE->m_id);
-    if (s == nullptr)
-        return;
+    recalculate_workspace_row(this, PMONITOR, PWORKSPACE, true);
 
-    s->update_sizes(PMONITOR);
-    if (PWORKSPACE->m_hasFullscreenWindow && PWORKSPACE->m_fullscreenMode == FSMODE_FULLSCREEN) {
-        s->set_fullscreen_active_window();
-    } else {
-        s->recalculate_row_geometry();
-    }
     const auto special_workspace_id = PMONITOR->activeSpecialWorkspaceID();
     const auto special_workspace = g_pCompositor->getWorkspaceByID(special_workspace_id);
     spdlog::debug("recalculateMonitor: monitor={} active_ws={} special_ws={} special_exists={}",
                   monitor_id, PWORKSPACE->m_id, special_workspace_id, special_workspace != nullptr);
-    if (special_workspace) {
-        auto sw = getRowForWorkspace(special_workspace_id);
-        if (sw == nullptr) {
-            return;
-        }
-        sw->update_sizes(PMONITOR);
-        sw->recalculate_row_geometry();
-    }
+
+    recalculate_workspace_row(this, PMONITOR, special_workspace, false);
 }
 
 void ScrollerLayout::recalculateWindow(PHLWINDOW window)

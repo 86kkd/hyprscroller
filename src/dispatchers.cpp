@@ -36,6 +36,21 @@ namespace {
         return dynamic_cast<ScrollerLayout *>(tiled.get());
     }
 
+    PHLWORKSPACE getWorkspaceForAction(PHLMONITOR monitor) {
+        if (!monitor)
+            return nullptr;
+
+        const auto special_workspace_id = monitor->activeSpecialWorkspaceID();
+        if (const auto special_workspace = g_pCompositor->getWorkspaceByID(special_workspace_id))
+            return special_workspace;
+
+        const auto active_workspace_id = monitor->activeWorkspaceID();
+        if (active_workspace_id == WORKSPACE_INVALID)
+            return nullptr;
+
+        return g_pCompositor->getWorkspaceByID(active_workspace_id);
+    }
+
     // Resolve layout by cursor position and current active workspace, while
     // excluding fullscreen contexts that should not react to plugin actions.
     ScrollerLayout *layout_for_action(int *workspace) {
@@ -50,13 +65,13 @@ namespace {
         const auto special_workspace_id = monitor->activeSpecialWorkspaceID();
         const auto active_workspace_id = monitor->activeWorkspaceID();
         const auto special_workspace = g_pCompositor->getWorkspaceByID(special_workspace_id);
-        int workspace_id = special_workspace ? special_workspace_id : active_workspace_id;
+        const auto selected_workspace = getWorkspaceForAction(monitor);
+        const auto workspace_id = selected_workspace ? selected_workspace->m_id : WORKSPACE_INVALID;
 
-        const auto PWORKSPACE = g_pCompositor->getWorkspaceByID(workspace_id);
-        if (workspace_id == WORKSPACE_INVALID || !PWORKSPACE || PWORKSPACE->m_hasFullscreenWindow) {
+        if (!selected_workspace || selected_workspace->m_hasFullscreenWindow) {
             spdlog::debug("layout_for_action: rejected chosen_ws={} special_ws={} active_ws={} special_exists={} exists={} fullscreen={}",
-                          workspace_id, special_workspace_id, active_workspace_id, special_workspace != nullptr, PWORKSPACE != nullptr,
-                          PWORKSPACE ? PWORKSPACE->m_hasFullscreenWindow : false);
+                          workspace_id, special_workspace_id, active_workspace_id, special_workspace != nullptr, selected_workspace != nullptr,
+                          selected_workspace ? selected_workspace->m_hasFullscreenWindow : false);
             if (workspace)
                 *workspace = -1;
             return nullptr;
