@@ -23,6 +23,18 @@ static bool is_window_fully_visible(Window *window, double gap, const ScrollerCo
     return y0 >= geom.y && y1 <= geom.y + geom.h;
 }
 
+static bool is_window_intersect_viewport(Window *window, double gap, const ScrollerCore::Box &geom) {
+    if (!window)
+        return false;
+    const auto phWindow = window->ptr().lock();
+    const auto border = phWindow->getRealBorderSize();
+    const auto y0 = phWindow->m_position.y - border;
+    const auto y1 = phWindow->m_position.y - border - gap + window->get_geom_h();
+    return y0 < geom.y + geom.h && y0 >= geom.y ||
+           y1 > geom.y && y1 <= geom.y + geom.h ||
+           y0 < geom.y && y1 >= geom.y + geom.h;
+}
+
 static double window_active_x(const ScrollerCore::Box &geom, double border_x, double gap_x) {
     return geom.x + border_x + gap_x;
 }
@@ -30,20 +42,18 @@ static double window_active_x(const ScrollerCore::Box &geom, double border_x, do
 static double choose_anchor_y(bool has_next, bool has_prev, double active_h, double next_h, double prev_h,
                              const ScrollerCore::Box &geom, double border, double gap0) {
     const auto base_y = geom.y + border + gap0;
-    if (has_next) {
-        if (active_h + next_h <= geom.h)
-            return geom.y + geom.h - active_h - next_h + border + gap0;
-        if (has_prev) {
-            if (prev_h + active_h <= geom.h)
-                return geom.y + prev_h + border + gap0;
-            return base_y;
-        }
-        return base_y;
+    const auto stack_to_bottom = geom.y + geom.h - active_h + border + gap0;
+    if (has_next && active_h + next_h <= geom.h) {
+        return geom.y + geom.h - active_h - next_h + border + gap0;
     }
-    if (has_prev) {
-        if (prev_h + active_h <= geom.h)
-            return geom.y + prev_h + border + gap0;
-        return geom.y + geom.h - active_h + border + gap0;
+    if (has_next && has_prev && prev_h + active_h <= geom.h) {
+        return geom.y + prev_h + border + gap0;
+    }
+    if (!has_next && has_prev && prev_h + active_h <= geom.h) {
+        return geom.y + prev_h + border + gap0;
+    }
+    if (!has_next && has_prev) {
+        return stack_to_bottom;
     }
     return base_y;
 }
@@ -415,34 +425,37 @@ void Column::move_active_down() {
 }
 
 bool Column::move_focus_up(bool focus_wrap) {
-    if (active == windows.first()) {
-        PHLMONITOR monitor = g_pCompositor->getMonitorInDirection(Math::fromChar('u'));
-        if (monitor == nullptr) {
-            if (focus_wrap)
-                active = windows.last();
-            return true;
-        }
+    if (active != windows.first()) {
+        reorder = Reorder::Auto;
+        active = active->prev();
+        return true;
+    }
+
+    const auto monitor = g_pCompositor->getMonitorInDirection(Math::fromChar('u'));
+    if (monitor != nullptr) {
         g_pKeybindManager->m_dispatchers["movefocus"]("u");
         return false;
     }
-    reorder = Reorder::Auto;
-    active = active->prev();
+    if (focus_wrap) {
+        active = windows.last();
+    }
     return true;
 }
 
 bool Column::move_focus_down(bool focus_wrap) {
-    if (active == windows.last()) {
-        PHLMONITOR monitor = g_pCompositor->getMonitorInDirection(Math::fromChar('d'));
-        if (monitor == nullptr) {
-            if (focus_wrap)
-                active = windows.first();
-            return true;
-        }
+    if (active != windows.last()) {
+        reorder = Reorder::Auto;
+        active = active->next();
+        return true;
+    }
+    const auto monitor = g_pCompositor->getMonitorInDirection(Math::fromChar('d'));
+    if (monitor != nullptr) {
         g_pKeybindManager->m_dispatchers["movefocus"]("d");
         return false;
     }
-    reorder = Reorder::Auto;
-    active = active->next();
+    if (focus_wrap) {
+        active = windows.first();
+    }
     return true;
 }
 
@@ -555,30 +568,16 @@ void Column::fit_size(FitSize fitsize, const Vector2D &gap_x, double gap) {
     case FitSize::Visible:
         for (auto w = windows.first(); w != nullptr; w = w->next()) {
             auto gap0 = w == windows.first() ? 0.0 : gap;
-            auto gap1 = w == windows.last() ? 0.0 : gap;
             Window *win = w->data();
-            PHLWINDOW window = win->ptr().lock();
-            auto border = window->getRealBorderSize();
-            auto c0 = window->m_position.y - border;
-            auto c1 = window->m_position.y - border - gap0 + win->get_geom_h();
-            if (c0 < geom.y + geom.h && c0 >= geom.y ||
-                c1 > geom.y && c1 <= geom.y + geom.h ||
-                c0 < geom.y && c1 >= geom.y + geom.h) {
+            if (is_window_intersect_viewport(win, gap0, geom)) {
                 from = w;
                 break;
             }
         }
         for (auto w = windows.last(); w != nullptr; w = w->prev()) {
             auto gap0 = w == windows.first() ? 0.0 : gap;
-            auto gap1 = w == windows.last() ? 0.0 : gap;
             Window *win = w->data();
-            PHLWINDOW window = win->ptr().lock();
-            auto border = window->getRealBorderSize();
-            auto c0 = window->m_position.y - border;
-            auto c1 = window->m_position.y - border - gap0 + win->get_geom_h();
-            if (c0 < geom.y + geom.h && c0 >= geom.y ||
-                c1 > geom.y && c1 <= geom.y + geom.h ||
-                c0 < geom.y && c1 >= geom.y + geom.h) {
+            if (is_window_intersect_viewport(win, gap0, geom)) {
                 to = w;
                 break;
             }
