@@ -236,8 +236,20 @@ bool Column::swap_windows(PHLWINDOW a, PHLWINDOW b) {
 void Column::add_active_window(PHLWINDOW window, double maxh) {
     reorder = Reorder::Auto;
     // Insert right after active node so focus remains near last interaction.
-    const auto new_height = active ? active->data()->get_geom_h() : maxh;
+    const auto previous = active;
+    const auto new_height = previous ? previous->data()->get_geom_h() : maxh;
     active = windows.emplace_after(active, new Window(window, new_height));
+
+    if (!previous)
+        return;
+
+    auto new_window = active->data()->ptr().lock();
+    auto previous_window = previous->data()->ptr().lock();
+    if (!new_window || !previous_window)
+        return;
+
+    new_window->m_position = Vector2D(previous_window->m_position.x,
+                                      previous_window->m_position.y + previous->data()->get_geom_h());
 }
 
 void Column::remove_window(PHLWINDOW window) {
