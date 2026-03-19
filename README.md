@@ -6,18 +6,19 @@ similar to [PaperWM](https://github.com/paperwm/PaperWM). I initialy
 learned how to write a *Hyprland* plugin from [hyprslidr](https://gitlab.com/magus/hyprslidr),
 which is a similar idea.
 
+This repository is an actively maintained fork of the original
+[`dawsers/hyprscroller`](https://github.com/dawsers/hyprscroller), which is now
+archived.
+
 ![Intro](./videos/hyprscroller.gif)
 
 The plugin is quite feature complete and supports gaps, borders, special
-workspace, full screen modes, overview, marks and installation through `hyprpm`.
+workspace, scroller-managed fullscreen expansion, overview, marks and
+installation through `hyprpm`.
 
-I use *hyprscroller* on my main machine and will support it for as long as I
-keep on using *Hyprland*. However, I will only add new features that I find
-interesting, and support two *Hyprland* versions: the one my distribution uses,
-and the latest tagged one. I have found problematic compiling trunk versions
-of *Hyprland* on a system that already has a system-wide version of it
-installed, so I will not make an extra effort there until things improve in
-that front.
+This fork is maintained against the Hyprland versions I actually run and test.
+The focus is practical compatibility with packaged Hyprland releases first,
+instead of chasing trunk continuously.
 
 
 ## Requirements
@@ -97,11 +98,24 @@ The plugin adds the following dispatchers:
 | `scroller:admitwindow`    | Push the current window below the active one of the column to its left.                                                     |
 | `scroller:expelwindow`    | Pop the current window out of its column and place it on a new column to the right.                                         |
 | `scroller:fitsize`        | Resize columns (*row* mode) or windows (*col* mode) so they fit on the screen: `active`, `visible`, `all`, `toend`, `tobeg` |
+| `scroller:togglefullscreen` | Toggle scroller fullscreen for the active window. In *row* mode it expands horizontally to the monitor width; in *column* mode it expands vertically to the monitor height. |
 | `scroller:toggleoverview` | Toggle an overview of the workspace where all the windows are temporarily scaled to fit the monitor                         |
 | `scroller:marksadd`       | Add a named mark. Argument is the name of the mark                                                                          |
 | `scroller:marksdelete`    | Delete a named mark. Argument is the name of the mark                                                                       |
 | `scroller:marksvisit`     | Visit a named mark. Argument is the name of the mark                                                                        |
 | `scroller:marksreset`     | Delete all marks                                                                                                            |
+
+## Fullscreen behavior
+
+`scroller:togglefullscreen` is not the same as Hyprland's native
+`fullscreen/fullscreenstate` dispatchers.
+
+- In *row* mode, it expands the active column horizontally so the focused
+  window becomes as wide as a single-window workspace.
+- In *column* mode, it expands the active window vertically so it becomes as
+  tall as a single-window workspace.
+- It stays inside scroller's layout model, so focus movement and scrolling
+  behavior continue to work normally.
 
 
 ## Modes
