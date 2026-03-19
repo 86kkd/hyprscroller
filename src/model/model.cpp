@@ -107,6 +107,23 @@ void Window::pop_geom() {
     window.lock()->m_position.y = mem.pos_y;
 }
 
+bool Window::toggle_expand(double maxh) {
+    if (is_expanded) {
+        pop_geom();
+        is_expanded = false;
+        return false;
+    }
+
+    push_geom();
+    box_h = maxh;
+    is_expanded = true;
+    return true;
+}
+
+bool Window::expanded() const {
+    return is_expanded;
+}
+
 WindowHeight Window::get_height() const {
     return height;
 }
@@ -264,8 +281,6 @@ void Column::remove_window(PHLWINDOW window) {
                 // and callers will remove the parent column.
                 active = active != windows.last() ? active->next() : active->prev();
             }
-            if (fullscreen_window == win)
-                fullscreen_window = nullptr;
             windows.erase(win);
             if (windows.size() == 1 && active) {
                 active->data()->update_height(WindowHeight::One, geom.h);
@@ -338,19 +353,7 @@ bool Column::toggle_fullscreen(const ScrollerCore::Box &fullbbox, Mode mode) {
         return fullscreened;
     }
 
-    if (fullscreen_window == active) {
-        active->data()->pop_geom();
-        fullscreen_window = nullptr;
-        return false;
-    }
-
-    if (fullscreen_window != nullptr)
-        fullscreen_window->data()->pop_geom();
-
-    active->data()->push_geom();
-    active->data()->set_geom_h(fullbbox.h);
-    fullscreen_window = active;
-    return true;
+    return active->data()->toggle_expand(fullbbox.h);
 }
 
 void Column::set_fullscreen(const ScrollerCore::Box &fullbbox) {
@@ -396,7 +399,7 @@ bool Column::fullscreen() const {
 }
 
 bool Column::expanded() const {
-    return fullscreened || fullscreen_window != nullptr;
+    return fullscreened || (active && active->data()->expanded());
 }
 
 bool Column::maximized() const {

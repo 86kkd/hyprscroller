@@ -73,6 +73,10 @@ public:
     void push_geom();
     // Restore geometry values from the undo buffer.
     void pop_geom();
+    // Toggle window-specific expanded state used by portrait scroller fullscreen.
+    bool toggle_expand(double maxh);
+    // Return whether this window is currently expanded by scroller.
+    bool expanded() const;
     // Current height mode used for cycle logic.
     WindowHeight get_height() const;
     // Change height mode and sync the logical height for this mode.
@@ -89,6 +93,7 @@ private:
     PHLWINDOWREF window;
     WindowHeight height;
     double box_h;
+    bool is_expanded = false;
     Memory mem;
 };
 
@@ -192,7 +197,6 @@ private:
     bool initialized;
     ScrollerCore::Box geom;
     bool fullscreened = false;
-    ListNode<Window *> *fullscreen_window = nullptr;
     bool maxdim;
     Memory mem;
     ScrollerCore::Box full;
