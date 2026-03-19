@@ -84,13 +84,8 @@ bool Row::is_active(PHLWINDOW window) const {
 
 void Row::add_active_window(PHLWINDOW window) {
     if (mode == Mode::Column && active != nullptr) {
-        const bool singleWindowColumn = active->data()->size() == 1;
         active->data()->add_active_window(window, 0.5 * max.h);
-        if (singleWindowColumn) {
-            active->data()->fit_size(FitSize::All, calculate_gap_x(active), gap);
-        } else {
-            active->data()->recalculate_col_geometry(calculate_gap_x(active), gap);
-        }
+        active->data()->fit_size(FitSize::All, calculate_gap_x(active), gap);
         return;
     }
 
@@ -130,7 +125,11 @@ bool Row::remove_window(PHLWINDOW window) {
                     return true;
                 }
             } else {
-                c->data()->recalculate_col_geometry(calculate_gap_x(c), gap);
+                if (mode == Mode::Column) {
+                    c->data()->fit_size(FitSize::All, calculate_gap_x(c), gap);
+                } else {
+                    c->data()->recalculate_col_geometry(calculate_gap_x(c), gap);
+                }
                 return true;
             }
         }
