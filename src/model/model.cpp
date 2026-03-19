@@ -252,6 +252,9 @@ void Column::remove_window(PHLWINDOW window) {
                 active = active != windows.last() ? active->next() : active->prev();
             }
             windows.erase(win);
+            if (windows.size() == 1 && active) {
+                active->data()->update_height(WindowHeight::One, geom.h);
+            }
             return;
         }
     }
