@@ -10,6 +10,9 @@
 #include <hyprland/src/managers/KeybindManager.hpp>
 #include <hyprland/src/plugins/PluginAPI.hpp>
 #include <hyprland/src/layout/space/Space.hpp>
+#include <hyprland/src/layout/target/Target.hpp>
+
+extern HANDLE PHANDLE;
 
 namespace ScrollerModel {
 namespace {
@@ -64,9 +67,18 @@ static double choose_anchor_y(bool has_next, bool has_prev, double active_h, dou
     }
     return base_y;
 }
-} // namespace
 
-extern HANDLE PHANDLE;
+static void sync_window_target_geometry(PHLWINDOW window) {
+    if (!window)
+        return;
+
+    const auto target = window->layoutTarget();
+    if (!target)
+        return;
+
+    target->setPositionGlobal(Hyprutils::Math::CBox(window->m_position, window->m_size));
+}
+} // namespace
 
 // Internal window metadata wrapper used by a column.
 Window::Window(PHLWINDOW window, double box_h) : window(window), height(WindowHeight::One), box_h(box_h) {}
@@ -289,10 +301,7 @@ void Column::scale(const Vector2D &bmin, const Vector2D &start, double scale, do
         window->m_size.x *= scale;
         window->m_size.y = (window->m_size.y + 2.0 * border + gap0 + gap1) * scale - gap0 - gap1 - 2.0 * border;
         window->m_size = Vector2D(std::max(window->m_size.x, 1.0), std::max(window->m_size.y, 1.0));
-        if (window->m_realSize) {
-            *window->m_realSize = window->m_size;
-            *window->m_realPosition = window->m_position;
-        }
+        sync_window_target_geometry(window);
     }
 }
 
@@ -367,10 +376,7 @@ void Column::recalculate_col_geometry(const Vector2D &gap_x, double gap) {
         PHLWINDOW wactive = active->data()->ptr().lock();
         wactive->m_position = Vector2D(full.x, full.y);
         wactive->m_size = Vector2D(full.w, full.h);
-        if (wactive->m_realPosition) {
-            *wactive->m_realPosition = wactive->m_position;
-            *wactive->m_realSize = wactive->m_size;
-        }
+        sync_window_target_geometry(wactive);
         return;
     }
 
@@ -688,10 +694,7 @@ void Column::adjust_windows(ListNode<Window *> *win, const Vector2D &gap_x, doub
         auto wh = w->data()->get_geom_h();
         win->m_size = Vector2D(std::max(geom.w - 2.0 * border - gap_x.x - gap_x.y, 1.0),
                                std::max(wh - 2.0 * border - gap0 - gap1, 1.0));
-        if (win->m_realPosition) {
-            *win->m_realPosition = win->m_position;
-            *win->m_realSize = win->m_size;
-        }
+        sync_window_target_geometry(win);
     }
 }
 

@@ -24,6 +24,8 @@ extern HANDLE PHANDLE;
 // Global mark storage lives in this layout module.
 static Marks marks;
 
+static void switch_to_window(PHLWINDOW window);
+
 Row *ScrollerLayout::getRowForWorkspace(int workspace) {
     // Linear lookup because row count is typically small (per workspace list).
     for (auto row = rows.first(); row != nullptr; row = row->next()) {
@@ -52,6 +54,7 @@ void ScrollerLayout::newTarget(SP<Layout::ITarget> target) {
         return;
 
     onWindowCreatedTiling(window, Math::DIRECTION_DEFAULT);
+    switch_to_window(window);
 }
 
 void ScrollerLayout::movedTarget(SP<Layout::ITarget> target, std::optional<Vector2D>)

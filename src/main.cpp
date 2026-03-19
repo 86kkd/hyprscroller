@@ -36,9 +36,6 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // 0, 1
     HyprlandAPI::addConfigValue(PHANDLE, "plugin:scroller:focus_wrap", Hyprlang::INT{1});
 
-    // Reload config so all plugin values are visible immediately.
-    HyprlandAPI::reloadConfig();
-
     return {"hyprscroller", "scrolling window layout", "dawser", "1.0"};
 }
 
