@@ -12,6 +12,38 @@
 #include <hyprland/src/managers/EventManager.hpp>
 #endif
 
+namespace {
+static bool is_left_or_right_inside(const Column *col, const ScrollerCore::Box &box) {
+    if (!col)
+        return false;
+    const auto x0 = col->get_geom_x();
+    const auto x1 = x0 + col->get_geom_w();
+    return x0 < box.x + box.w && x0 >= box.x ||
+           x1 > box.x && x1 <= box.x + box.w ||
+           x0 < box.x && x1 >= box.x + box.w;
+}
+
+static double choose_anchor_x(const ListNode<Column *> *active, const double active_w,
+                            const double fallback_x, const ScrollerCore::Box &max_box) {
+    const auto next = active->next();
+    const auto prev = active->prev();
+    if (next) {
+        const auto next_w = next->data()->get_geom_w();
+        if (active_w + next_w <= max_box.w)
+            return max_box.x + max_box.w - active_w - next_w;
+        if (prev && prev->data()->get_geom_w() + active_w <= max_box.w)
+            return max_box.x + prev->data()->get_geom_w();
+        return fallback_x;
+    }
+    if (prev) {
+        if (prev->data()->get_geom_w() + active_w <= max_box.w)
+            return max_box.x + prev->data()->get_geom_w();
+        return max_box.x + max_box.w - active_w;
+    }
+    return fallback_x;
+}
+} // namespace
+
 Row::Row(PHLWINDOW window)
     : workspace(window->workspaceID()), mode(Mode::Row), reorder(Reorder::Auto),
       overview(false), active(nullptr) {
@@ -592,75 +624,29 @@ void Row::recalculate_row_geometry() {
         active->data()->set_init();
     }
     if (a_x < max.x) {
-        // active starts outside on the left
-        // set it on the left edge
+        a_x = max.x;
         active->data()->set_geom_pos(max.x, max.y);
-    } else if (std::round(a_x + a_w) > max.x + max.w) {
-        // active overflows to the right, move to end of viewport
-        active->data()->set_geom_pos(max.x + max.w - a_w, max.y);
-    } else {
-        // active is inside the viewport
-        if (reorder == Reorder::Auto) {
-            // The active column should always be completely in the viewport.
-            // If any of the windows next to it on its right or left are
-            // in the viewport, keep the current position.
-            bool keep_current = false;
-            if (active->prev() != nullptr) {
-                Column *prev = active->prev()->data();
-                if (prev->get_geom_x() >= max.x && prev->get_geom_x() + prev->get_geom_w() <= max.x + max.w) {
-                    keep_current = true;
-                }
-            }
-            if (!keep_current && active->next() != nullptr) {
-                Column *next = active->next()->data();
-                if (next->get_geom_x() >= max.x && next->get_geom_x() + next->get_geom_w() <= max.x + max.w) {
-                    keep_current = true;
-                }
-            }
-            if (!keep_current) {
-                // If not:
-                // We try to fit the column next to it on the right if it fits
-                // completely, otherwise the one on the left. If none of them fit,
-                // we leave it as it is.
-                if (active->next() != nullptr) {
-                    if (a_w + active->next()->data()->get_geom_w() <= max.w) {
-                        // set next at the right edge of the viewport
-                        active->data()->set_geom_pos(max.x + max.w - a_w - active->next()->data()->get_geom_w(), max.y);
-                    } else if (active->prev() != nullptr) {
-                        if (active->prev()->data()->get_geom_w() + a_w <= max.w) {
-                            // set previous at the left edge
-                            active->data()->set_geom_pos(max.x + active->prev()->data()->get_geom_w(), max.y);
-                        } else {
-                            // none of them fit, leave active as it is
-                            active->data()->set_geom_pos(a_x, max.y);
-                        }
-                    } else {
-                        // nothing on the left, move active to left edge of viewport
-                        active->data()->set_geom_pos(max.x, max.y);
-                    }
-                } else if (active->prev() != nullptr) {
-                    if (active->prev()->data()->get_geom_w() + a_w <= max.w) {
-                        // set previous at the left edge
-                        active->data()->set_geom_pos(max.x + active->prev()->data()->get_geom_w(), max.y);
-                    } else {
-                        // it doesn't fit and nothing on the right, move active to right edge
-                        active->data()->set_geom_pos(max.x + max.w - a_w, max.y);
-                    }
-                } else {
-                    // nothing on the right or left, the window is in a correct position
-                    active->data()->set_geom_pos(a_x, max.y);
-                }
-            } else {
-                // the window is in a correct position
-                active->data()->set_geom_pos(a_x, max.y);
-            }
-        } else {  // lazy
-            // Try to avoid moving the active column unless it is out of the screen.
-            // the window is in a correct position
-            active->data()->set_geom_pos(a_x, max.y);
-        }
+        adjust_columns(active);
+        return;
+    }
+    if (std::round(a_x + a_w) > max.x + max.w) {
+        a_x = max.x + max.w - a_w;
+        active->data()->set_geom_pos(a_x, max.y);
+        adjust_columns(active);
+        return;
+    }
+    if (reorder != Reorder::Auto) {
+        // lazy: avoid moving the active column unless it is out of screen.
+        active->data()->set_geom_pos(a_x, max.y);
+        adjust_columns(active);
+        return;
     }
 
+    const Box active_window(max.x, max.y, max.w, max.h);
+    const bool keep_current = is_left_or_right_inside(active->prev() ? active->prev()->data() : nullptr, active_window) ||
+                              is_left_or_right_inside(active->next() ? active->next()->data() : nullptr, active_window);
+    const double new_x = keep_current ? a_x : choose_anchor_x(active, a_w, a_x, max);
+    active->data()->set_geom_pos(new_x, max.y);
     adjust_columns(active);
 }
 

@@ -12,6 +12,42 @@
 #include <hyprland/src/layout/space/Space.hpp>
 
 namespace ScrollerModel {
+namespace {
+static bool is_window_fully_visible(Window *window, double gap, const ScrollerCore::Box &geom) {
+    if (!window)
+        return false;
+    auto phWindow = window->ptr().lock();
+    const auto border = phWindow->getRealBorderSize();
+    const auto y0 = std::round(phWindow->m_position.y - border - gap);
+    const auto y1 = std::round(phWindow->m_position.y - border - gap + window->get_geom_h());
+    return y0 >= geom.y && y1 <= geom.y + geom.h;
+}
+
+static double window_active_x(const ScrollerCore::Box &geom, double border_x, double gap_x) {
+    return geom.x + border_x + gap_x;
+}
+
+static double choose_anchor_y(bool has_next, bool has_prev, double active_h, double next_h, double prev_h,
+                             const ScrollerCore::Box &geom, double border, double gap0) {
+    const auto base_y = geom.y + border + gap0;
+    if (has_next) {
+        if (active_h + next_h <= geom.h)
+            return geom.y + geom.h - active_h - next_h + border + gap0;
+        if (has_prev) {
+            if (prev_h + active_h <= geom.h)
+                return geom.y + prev_h + border + gap0;
+            return base_y;
+        }
+        return base_y;
+    }
+    if (has_prev) {
+        if (prev_h + active_h <= geom.h)
+            return geom.y + prev_h + border + gap0;
+        return geom.y + geom.h - active_h + border + gap0;
+    }
+    return base_y;
+}
+} // namespace
 
 extern HANDLE PHANDLE;
 
@@ -303,84 +339,57 @@ void Column::recalculate_col_geometry(const Vector2D &gap_x, double gap) {
             *wactive->m_realPosition = wactive->m_position;
             *wactive->m_realSize = wactive->m_size;
         }
-    } else {
-        // In theory, every window in the column should have the same size.
-        // Windows near monitor edges can differ due to inner/outer gap rules.
-        Window *wactive = active->data();
-        PHLWINDOW win = wactive->ptr().lock();
-        auto gap0 = active == windows.first() ? 0.0 : gap;
-        auto gap1 = active == windows.last() ? 0.0 : gap;
-        auto border = win->getRealBorderSize();
-        auto a_y0 = std::round(win->m_position.y - border - gap0);
-        auto a_y1 = std::round(win->m_position.y - border - gap0 + wactive->get_geom_h());
-        if (a_y0 < geom.y) {
-            // active starts above: clamp to top edge
-            win->m_position = Vector2D(geom.x + border + gap_x.x, geom.y + border + gap0);
-        } else if (a_y1 > geom.y + geom.h) {
-            // active overflows bottom: clamp to bottom edge
-            win->m_position = Vector2D(geom.x + border + gap_x.x, geom.y + geom.h - wactive->get_geom_h() + border + gap0);
-        } else {
-            if (reorder == Reorder::Auto) {
-                bool keep_current = false;
-                if (active->prev() != nullptr) {
-                    Window *prev = active->prev()->data();
-                    PHLWINDOW prev_window = prev->ptr().lock();
-                    auto gap0 = active->prev() == windows.first() ? 0.0 : gap;
-                    auto border = prev_window->getRealBorderSize();
-                    auto p_y0 = std::round(prev_window->m_position.y - border - gap0);
-                    auto p_y1 = std::round(prev_window->m_position.y - border - gap0 + prev->get_geom_h());
-                    if (p_y0 >= geom.y && p_y1 <= geom.y + geom.h) {
-                        keep_current = true;
-                    }
-                }
-                if (!keep_current && active->next() != nullptr) {
-                    Window *next = active->next()->data();
-                    PHLWINDOW next_window = next->ptr().lock();
-                    auto gap0 = active->next() == windows.first() ? 0.0 : gap;
-                    auto border = next_window->getRealBorderSize();
-                    auto p_y0 = std::round(next_window->m_position.y - border - gap0);
-                    auto p_y1 = std::round(next_window->m_position.y - border - gap0 + next->get_geom_h());
-                    if (p_y0 >= geom.y && p_y1 <= geom.y + geom.h) {
-                        keep_current = true;
-                    }
-                }
-                if (!keep_current) {
-                    // If there is room next to the active window, place it nearby.
-                    // Otherwise keep x and avoid violent repositioning.
-                    if (active->next() != nullptr) {
-                        if (wactive->get_geom_h() + active->next()->data()->get_geom_h() <= geom.h) {
-                            win->m_position = Vector2D(geom.x + border + gap_x.x,
-                                                       geom.y + geom.h - wactive->get_geom_h() - active->next()->data()->get_geom_h() + border + gap0);
-                        } else if (active->prev() != nullptr) {
-                            if (active->prev()->data()->get_geom_h() + wactive->get_geom_h() <= geom.h) {
-                                win->m_position = Vector2D(geom.x + border + gap_x.x, geom.y + active->prev()->data()->get_geom_h() + border + gap0);
-                            } else {
-                                // none of them fit: keep x only
-                                win->m_position.x = geom.x + border + gap_x.x;
-                            }
-                        } else {
-                            win->m_position = Vector2D(geom.x + border + gap_x.x, geom.y + border + gap0);
-                        }
-                    } else if (active->prev() != nullptr) {
-                        if (active->prev()->data()->get_geom_h() + wactive->get_geom_h() <= geom.h) {
-                            win->m_position = Vector2D(geom.x + border + gap_x.x, geom.y + active->prev()->data()->get_geom_h() + border + gap0);
-                        } else {
-                            win->m_position = Vector2D(geom.x + border + gap_x.x,
-                                                      geom.y + geom.h - wactive->get_geom_h() + border + gap0);
-                        }
-                    } else {
-                        // no neighbor can anchor: keep x only
-                        win->m_position.x = geom.x + border + gap_x.x;
-                    }
-                } else {
-                    win->m_position.x = geom.x + border + gap_x.x;
-                }
-            } else {
-                win->m_position.x = geom.x + border + gap_x.x;
-            }
-        }
-        adjust_windows(active, gap_x, gap);
+        return;
     }
+
+    // In theory, every window in the column should have the same size.
+    // Windows near monitor edges can differ due to inner/outer gap rules.
+    Window *wactive = active->data();
+    PHLWINDOW win = wactive->ptr().lock();
+    auto gap0 = active == windows.first() ? 0.0 : gap;
+    auto border = win->getRealBorderSize();
+    const auto base_x = window_active_x(geom, border, gap_x.x);
+    auto a_y0 = std::round(win->m_position.y - border - gap0);
+    auto a_y1 = std::round(win->m_position.y - border - gap0 + wactive->get_geom_h());
+    const auto top = geom.y + border + gap0;
+    const auto bottom = geom.y + geom.h - wactive->get_geom_h() + border + gap0;
+
+    if (a_y0 < geom.y) {
+        // active starts above: clamp to top edge
+        win->m_position = Vector2D(base_x, top);
+        adjust_windows(active, gap_x, gap);
+        return;
+    }
+    if (a_y1 > geom.y + geom.h) {
+        // active overflows bottom: clamp to bottom edge
+        win->m_position = Vector2D(base_x, bottom);
+        adjust_windows(active, gap_x, gap);
+        return;
+    }
+    if (reorder != Reorder::Auto) {
+        win->m_position.x = base_x;
+        adjust_windows(active, gap_x, gap);
+        return;
+    }
+
+    Window *prev = active->prev() ? active->prev()->data() : nullptr;
+    Window *next = active->next() ? active->next()->data() : nullptr;
+    const auto prev_gap = active->prev() == windows.first() ? 0.0 : gap;
+    const auto next_gap = active->next() == windows.first() ? 0.0 : gap;
+    const bool keep_current = is_window_fully_visible(prev, prev_gap, geom) ||
+                             is_window_fully_visible(next, next_gap, geom);
+    if (keep_current) {
+        win->m_position.x = base_x;
+        adjust_windows(active, gap_x, gap);
+        return;
+    }
+
+    const auto next_h = next ? next->get_geom_h() : 0.0;
+    const auto prev_h = prev ? prev->get_geom_h() : 0.0;
+    const auto active_h = wactive->get_geom_h();
+    const double new_y = choose_anchor_y(next != nullptr, prev != nullptr, active_h, next_h, prev_h, geom, border, gap0);
+    win->m_position = Vector2D(base_x, new_y);
+    adjust_windows(active, gap_x, gap);
 }
 
 PHLWINDOW Column::get_active_window() {
