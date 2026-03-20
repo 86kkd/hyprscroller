@@ -9,6 +9,7 @@
 #include <hyprland/src/config/ConfigValue.hpp>
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/render/Renderer.hpp>
+#include <hyprland/src/layout/algorithm/Algorithm.hpp>
 #include <hyprland/src/layout/space/Space.hpp>
 #include <hyprland/src/helpers/Monitor.hpp>
 #include <hyprland/src/managers/KeybindManager.hpp>
@@ -73,6 +74,22 @@ static WORKSPACEID preferred_workspace_id(PHLMONITOR monitor) {
         return special_workspace_id;
 
     return monitor->activeWorkspaceID();
+}
+
+static ScrollerLayout* get_scroller_for_workspace(const WORKSPACEID workspace_id) {
+    const auto workspace = g_pCompositor->getWorkspaceByID(workspace_id);
+    if (!workspace || !workspace->m_space)
+        return nullptr;
+
+    const auto algorithm = workspace->m_space->algorithm();
+    if (!algorithm)
+        return nullptr;
+
+    const auto& tiled = algorithm->tiledAlgo();
+    if (!tiled)
+        return nullptr;
+
+    return dynamic_cast<ScrollerLayout*>(tiled.get());
 }
 
 static std::optional<Math::eDirection> direction_to_math(Direction direction) {
@@ -604,31 +621,34 @@ void ScrollerLayout::move_focus(int workspace, Direction direction)
             return;
         }
 
-        s = getRowForWindow(crossMonitorTarget);
-        if (s != nullptr) {
-            s->focus_window(crossMonitorTarget);
-        } else {
-            spdlog::warn("move_focus: no row for crossed monitor target window={} workspace={}",
-                         static_cast<const void*>(crossMonitorTarget.get()), workspaceId);
-            spdlog::info("move_focus: workspace={} direction={} after={} result={}",
-                         workspace,
-                         direction_name(direction),
-                         static_cast<const void*>(crossMonitorTarget.get()),
-                         focus_move_result_name(moveResult));
-            switch_to_window(crossMonitorTarget);
-            return;
-        }
-
+        auto targetLayout = get_scroller_for_workspace(workspaceId);
+        auto targetRow = targetLayout ? targetLayout->getRowForWindow(crossMonitorTarget) : nullptr;
         spdlog::info(
             "move_focus_cross_monitor_target: selected_ws={} target_window={} target_workspace={} "
-            "target_pos=({}, {}) target_size=({}, {})",
+            "target_layout_found={} target_row_found={} target_pos=({}, {}) target_size=({}, {})",
             workspaceId,
             static_cast<const void*>(crossMonitorTarget ? crossMonitorTarget.get() : nullptr),
             crossMonitorTarget ? crossMonitorTarget->workspaceID() : WORKSPACE_INVALID,
+            targetLayout != nullptr,
+            targetRow != nullptr,
             crossMonitorTarget ? crossMonitorTarget->m_position.x : 0.0,
             crossMonitorTarget ? crossMonitorTarget->m_position.y : 0.0,
             crossMonitorTarget ? crossMonitorTarget->m_size.x : 0.0,
             crossMonitorTarget ? crossMonitorTarget->m_size.y : 0.0);
+
+        if (targetRow != nullptr)
+            targetRow->focus_window(crossMonitorTarget);
+        else
+            spdlog::warn("move_focus: no row for crossed monitor target window={} workspace={}",
+                         static_cast<const void*>(crossMonitorTarget.get()), workspaceId);
+
+        spdlog::info("move_focus: workspace={} direction={} after={} result={}",
+                     workspace,
+                     direction_name(direction),
+                     static_cast<const void*>(crossMonitorTarget.get()),
+                     focus_move_result_name(moveResult));
+        switch_to_window(crossMonitorTarget);
+        return;
     }
 
     const auto after = s->get_active_window();
