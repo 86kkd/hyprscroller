@@ -53,21 +53,21 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     HyprlandAPI::addConfigValue(PHANDLE, "plugin:scroller:col.freecolumn_border", Hyprlang::CConfigValue(Hyprlang::INT(0xff9e1515)));
 #endif
 
-    // Register scroller as a custom tiled algorithm. Hyprland will instantiate
-    // ScrollerLayout for matching layout names.
+    // one value out of: { onethird, onehalf (default), twothirds, floating, maximized }
+    HyprlandAPI::addConfigValue(PHANDLE, "plugin:scroller:column_default_width", Hyprlang::STRING{"onehalf"});
+    // 0, 1
+    HyprlandAPI::addConfigValue(PHANDLE, "plugin:scroller:focus_wrap", Hyprlang::INT{0});
+
+    // Register custom dispatchers used by keybinds and user scripts.
+    dispatchers::addDispatchers();
+
+    // Register scroller as a custom tiled algorithm only after all config values
+    // it may read during initial workspace population have been registered.
     HyprlandAPI::addTiledAlgo(
         PHANDLE,
         "scroller",
         &typeid(ScrollerLayout),
         []() -> UP<Layout::ITiledAlgorithm> { return makeUnique<ScrollerLayout>(); });
-
-    // Register custom dispatchers used by keybinds and user scripts.
-    dispatchers::addDispatchers();
-
-    // one value out of: { onethird, onehalf (default), twothirds, floating, maximized }
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:scroller:column_default_width", Hyprlang::STRING{"onehalf"});
-    // 0, 1
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:scroller:focus_wrap", Hyprlang::INT{1});
 
     return {"hyprscroller", "scrolling window layout", "dawser", "1.0"};
 }
