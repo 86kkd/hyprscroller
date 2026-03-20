@@ -2,12 +2,14 @@
 
 #include <algorithm>
 #include <cmath>
+#include <sstream>
 
 #include <hyprland/src/config/ConfigManager.hpp>
 #include <hyprland/src/config/ConfigValue.hpp>
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/helpers/Monitor.hpp>
 #include <hyprland/src/managers/KeybindManager.hpp>
+#include <spdlog/spdlog.h>
 #ifdef COLORS_IPC
 #include <hyprland/src/managers/EventManager.hpp>
 #endif
@@ -43,6 +45,21 @@ static double choose_anchor_x(const ListNode<Column *> *active, const double act
         return max_box.x + max_box.w - active_w;
     }
     return fallback_x;
+}
+
+static std::string summarize_columns(List<Column *>& columns) {
+    std::ostringstream out;
+    for (auto col = columns.first(); col != nullptr; col = col->next()) {
+        if (col != columns.first())
+            out << " | ";
+
+        auto* data = col->data();
+        const auto window = data ? data->get_active_window() : nullptr;
+        out << static_cast<const void*>(window ? window.get() : nullptr)
+            << "@x=" << (data ? data->get_geom_x() : 0.0)
+            << ",w=" << (data ? data->get_geom_w() : 0.0);
+    }
+    return out.str();
 }
 } // namespace
 
@@ -636,6 +653,10 @@ void Row::recalculate_row_geometry() {
         active->data()->set_geom_pos(max.x, max.y);
         active->data()->set_geom_w(max.w);
         active->data()->recalculate_col_geometry(calculate_gap_x(active), gap);
+        spdlog::debug("row_recalc_single: workspace={} active_window={} cols={}",
+                      workspace,
+                      static_cast<const void*>(active->data()->get_active_window() ? active->data()->get_active_window().get() : nullptr),
+                      summarize_columns(columns));
         return;
     }
 
@@ -657,42 +678,80 @@ void Row::recalculate_row_geometry() {
         // mark column as initialized
         active->data()->set_init();
     }
+    spdlog::debug("row_recalc_input: workspace={} active_window={} active_x={} active_w={} max=({}, {}, {}, {}) cols_before={}",
+                  workspace,
+                  static_cast<const void*>(active->data()->get_active_window() ? active->data()->get_active_window().get() : nullptr),
+                  a_x,
+                  a_w,
+                  max.x,
+                  max.y,
+                  max.w,
+                  max.h,
+                  summarize_columns(columns));
     if (a_x < max.x) {
         a_x = max.x;
         active->data()->set_geom_pos(max.x, max.y);
         adjust_columns(active);
+        spdlog::debug("row_recalc_clamp_left: workspace={} active_window={} active_x={} cols_after={}",
+                      workspace,
+                      static_cast<const void*>(active->data()->get_active_window() ? active->data()->get_active_window().get() : nullptr),
+                      active->data()->get_geom_x(),
+                      summarize_columns(columns));
         return;
     }
     if (std::round(a_x + a_w) > max.x + max.w) {
         a_x = max.x + max.w - a_w;
         active->data()->set_geom_pos(a_x, max.y);
         adjust_columns(active);
+        spdlog::debug("row_recalc_clamp_right: workspace={} active_window={} active_x={} cols_after={}",
+                      workspace,
+                      static_cast<const void*>(active->data()->get_active_window() ? active->data()->get_active_window().get() : nullptr),
+                      active->data()->get_geom_x(),
+                      summarize_columns(columns));
         return;
     }
     if (reorder != Reorder::Auto) {
         // lazy: avoid moving the active column unless it is out of screen.
         active->data()->set_geom_pos(a_x, max.y);
         adjust_columns(active);
+        spdlog::debug("row_recalc_lazy: workspace={} active_window={} active_x={} cols_after={}",
+                      workspace,
+                      static_cast<const void*>(active->data()->get_active_window() ? active->data()->get_active_window().get() : nullptr),
+                      active->data()->get_geom_x(),
+                      summarize_columns(columns));
         return;
     }
 
     const Box active_window(max.x, max.y, max.w, max.h);
-    const bool keep_current = is_left_or_right_inside(active->prev() ? active->prev()->data() : nullptr, active_window) ||
-                              is_left_or_right_inside(active->next() ? active->next()->data() : nullptr, active_window);
+    const bool prev_inside = is_left_or_right_inside(active->prev() ? active->prev()->data() : nullptr, active_window);
+    const bool next_inside = is_left_or_right_inside(active->next() ? active->next()->data() : nullptr, active_window);
+    const bool keep_current = prev_inside || next_inside;
     const double new_x = keep_current ? a_x : choose_anchor_x(active, a_w, a_x, max);
     active->data()->set_geom_pos(new_x, max.y);
     adjust_columns(active);
+    spdlog::debug("row_recalc_auto: workspace={} active_window={} keep_current={} prev_inside={} next_inside={} new_x={} cols_after={}",
+                  workspace,
+                  static_cast<const void*>(active->data()->get_active_window() ? active->data()->get_active_window().get() : nullptr),
+                  keep_current,
+                  prev_inside,
+                  next_inside,
+                  new_x,
+                  summarize_columns(columns));
 }
 
 void Row::adjust_columns(ListNode<Column *> *column) {
     // Adjust the positions of the columns to the left.
     for (auto col = column->prev(), prev = column; col != nullptr; prev = col, col = col->prev()) {
         col->data()->set_geom_pos(prev->data()->get_geom_x() - col->data()->get_geom_w(), max.y);
+        col->data()->set_init();
     }
     // Adjust the positions of the columns to the right.
     for (auto col = column->next(), prev = column; col != nullptr; prev = col, col = col->next()) {
         col->data()->set_geom_pos(prev->data()->get_geom_x() + prev->data()->get_geom_w(), max.y);
+        col->data()->set_init();
     }
+
+    column->data()->set_init();
 
     // Apply column geometry.
     for (auto col = columns.first(); col != nullptr; col = col->next()) {
