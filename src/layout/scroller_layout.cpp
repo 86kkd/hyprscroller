@@ -593,18 +593,23 @@ void ScrollerLayout::move_focus(int workspace, Direction direction)
             return;
         }
 
-        s = getRowForWorkspace(workspaceId);
-        if (s == nullptr) {
-            // monitor is empty
-            spdlog::warn("move_focus: no row for crossed monitor workspace={}", workspaceId);
+        auto crossMonitorTarget = pick_cross_monitor_target_window(monitor, workspaceId, direction, before);
+        if (!crossMonitorTarget) {
+            s = getRowForWorkspace(workspaceId);
+            if (s != nullptr)
+                crossMonitorTarget = s->get_active_window();
+        }
+        if (!crossMonitorTarget) {
+            spdlog::warn("move_focus: no target window for crossed monitor workspace={}", workspaceId);
             return;
         }
 
-        auto crossMonitorTarget = pick_cross_monitor_target_window(monitor, workspaceId, direction, before);
-        if (!crossMonitorTarget)
-            crossMonitorTarget = s->get_active_window();
-        if (crossMonitorTarget)
+        s = getRowForWindow(crossMonitorTarget);
+        if (s != nullptr)
             s->focus_window(crossMonitorTarget);
+        else
+            spdlog::warn("move_focus: no row for crossed monitor target window={} workspace={}",
+                         static_cast<const void*>(crossMonitorTarget.get()), workspaceId);
 
         spdlog::info(
             "move_focus_cross_monitor_target: selected_ws={} target_window={} target_workspace={} "
