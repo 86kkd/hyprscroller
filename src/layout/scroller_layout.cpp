@@ -605,11 +605,19 @@ void ScrollerLayout::move_focus(int workspace, Direction direction)
         }
 
         s = getRowForWindow(crossMonitorTarget);
-        if (s != nullptr)
+        if (s != nullptr) {
             s->focus_window(crossMonitorTarget);
-        else
+        } else {
             spdlog::warn("move_focus: no row for crossed monitor target window={} workspace={}",
                          static_cast<const void*>(crossMonitorTarget.get()), workspaceId);
+            spdlog::info("move_focus: workspace={} direction={} after={} result={}",
+                         workspace,
+                         direction_name(direction),
+                         static_cast<const void*>(crossMonitorTarget.get()),
+                         focus_move_result_name(moveResult));
+            switch_to_window(crossMonitorTarget);
+            return;
+        }
 
         spdlog::info(
             "move_focus_cross_monitor_target: selected_ws={} target_window={} target_workspace={} "
