@@ -493,43 +493,41 @@ void Column::move_active_down() {
     windows.swap(active, next);
 }
 
-bool Column::move_focus_up(bool focus_wrap) {
+FocusMoveResult Column::move_focus_up(bool focus_wrap) {
     // If inside list, move active upward locally.
     if (active != windows.first()) {
         reorder = Reorder::Auto;
         active = active->prev();
-        return true;
+        return FocusMoveResult::Moved;
     }
 
     const auto monitor = g_pCompositor->getMonitorInDirection(Math::fromChar('u'));
     if (monitor != nullptr) {
-        g_pKeybindManager->m_dispatchers["movefocus"]("u");
-        return false;
+        return FocusMoveResult::CrossMonitor;
     }
     auto previous = active;
     if (focus_wrap) {
         active = windows.last();
     }
-    return active != previous;
+    return active != previous ? FocusMoveResult::Moved : FocusMoveResult::NoOp;
 }
 
-bool Column::move_focus_down(bool focus_wrap) {
+FocusMoveResult Column::move_focus_down(bool focus_wrap) {
     // If inside list, move active downward locally.
     if (active != windows.last()) {
         reorder = Reorder::Auto;
         active = active->next();
-        return true;
+        return FocusMoveResult::Moved;
     }
     const auto monitor = g_pCompositor->getMonitorInDirection(Math::fromChar('d'));
     if (monitor != nullptr) {
-        g_pKeybindManager->m_dispatchers["movefocus"]("d");
-        return false;
+        return FocusMoveResult::CrossMonitor;
     }
     auto previous = active;
     if (focus_wrap) {
         active = windows.first();
     }
-    return active != previous;
+    return active != previous ? FocusMoveResult::Moved : FocusMoveResult::NoOp;
 }
 
 void Column::admit_window(Window *window) {

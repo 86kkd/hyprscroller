@@ -31,7 +31,7 @@ public:
     bool remove_window(PHLWINDOW window);
     bool swapWindows(PHLWINDOW a, PHLWINDOW b);
     void focus_window(PHLWINDOW window);
-    bool move_focus(Direction dir, bool focus_wrap);
+    FocusMoveResult move_focus(Direction dir, bool focus_wrap);
 
     void resize_active_column(int step);
     void resize_active_window(const Vector2D &delta);
@@ -53,8 +53,8 @@ private:
     // Calculate lateral gaps for a column.
     Vector2D calculate_gap_x(const ListNode<Column *> *column) const;
 
-    bool move_focus_left(bool focus_wrap);
-    bool move_focus_right(bool focus_wrap);
+    FocusMoveResult move_focus_left(bool focus_wrap);
+    FocusMoveResult move_focus_right(bool focus_wrap);
     void move_focus_begin();
     void move_focus_end();
 

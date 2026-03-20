@@ -1,6 +1,9 @@
 //#define COLORS_IPC
 
+#include <cmath>
 #include <cstdio>
+#include <limits>
+#include <optional>
 
 #include <hyprland/src/config/ConfigManager.hpp>
 #include <hyprland/src/config/ConfigValue.hpp>
@@ -70,6 +73,84 @@ static WORKSPACEID preferred_workspace_id(PHLMONITOR monitor) {
         return special_workspace_id;
 
     return monitor->activeWorkspaceID();
+}
+
+static std::optional<Math::eDirection> direction_to_math(Direction direction) {
+    switch (direction) {
+        case Direction::Left:
+            return Math::fromChar('l');
+        case Direction::Right:
+            return Math::fromChar('r');
+        case Direction::Up:
+            return Math::fromChar('u');
+        case Direction::Down:
+            return Math::fromChar('d');
+        default:
+            return std::nullopt;
+    }
+}
+
+static double primary_cross_monitor_score(PHLWINDOW window, PHLMONITOR monitor, Direction direction) {
+    const auto window_left = window->m_position.x;
+    const auto window_right = window->m_position.x + window->m_size.x;
+    const auto window_top = window->m_position.y;
+    const auto window_bottom = window->m_position.y + window->m_size.y;
+    const auto monitor_left = monitor->m_position.x;
+    const auto monitor_right = monitor->m_position.x + monitor->m_size.x;
+    const auto monitor_top = monitor->m_position.y;
+    const auto monitor_bottom = monitor->m_position.y + monitor->m_size.y;
+
+    switch (direction) {
+        case Direction::Left:
+            return std::abs(window_right - monitor_right);
+        case Direction::Right:
+            return std::abs(window_left - monitor_left);
+        case Direction::Up:
+            return std::abs(window_bottom - monitor_bottom);
+        case Direction::Down:
+            return std::abs(window_top - monitor_top);
+        default:
+            return std::numeric_limits<double>::infinity();
+    }
+}
+
+static double secondary_cross_monitor_score(PHLWINDOW window, PHLWINDOW source_window, Direction direction) {
+    if (!source_window)
+        return 0.0;
+
+    const auto window_middle = window->middle();
+    const auto source_middle = source_window->middle();
+    switch (direction) {
+        case Direction::Left:
+        case Direction::Right:
+            return std::abs(window_middle.y - source_middle.y);
+        case Direction::Up:
+        case Direction::Down:
+            return std::abs(window_middle.x - source_middle.x);
+        default:
+            return 0.0;
+    }
+}
+
+static PHLWINDOW pick_cross_monitor_target_window(PHLMONITOR monitor, WORKSPACEID workspace_id, Direction direction, PHLWINDOW source_window) {
+    PHLWINDOW best = nullptr;
+    auto best_primary = std::numeric_limits<double>::infinity();
+    auto best_secondary = std::numeric_limits<double>::infinity();
+
+    for (const auto& window : g_pCompositor->m_windows) {
+        if (!window || window->workspaceID() != workspace_id || window->m_isFloating || !window->m_isMapped || window->isHidden())
+            continue;
+
+        const auto primary = primary_cross_monitor_score(window, monitor, direction);
+        const auto secondary = secondary_cross_monitor_score(window, source_window, direction);
+        if (!best || primary < best_primary || (primary == best_primary && secondary < best_secondary)) {
+            best = window;
+            best_primary = primary;
+            best_secondary = secondary;
+        }
+    }
+
+    return best;
 }
 
 Row *ScrollerLayout::getRowForWorkspace(int workspace) {
@@ -446,9 +527,25 @@ static void switch_to_window(PHLWINDOW window)
 
 void ScrollerLayout::move_focus(int workspace, Direction direction)
 {
+    const auto focus_move_result_name = [](FocusMoveResult result) {
+        switch (result) {
+        case FocusMoveResult::Moved:
+            return "moved";
+        case FocusMoveResult::NoOp:
+            return "noop";
+        case FocusMoveResult::CrossMonitor:
+            return "cross_monitor";
+        }
+
+        return "unknown";
+    };
+
     static auto* const *focus_wrap = (Hyprlang::INT* const *)HyprlandAPI::getConfigValue(PHANDLE, "plugin:scroller:focus_wrap")->getDataStaticPtr();
     auto s = getRowForWorkspace(workspace);
     const auto before = s ? s->get_active_window() : nullptr;
+    const auto beforeMonitor = before ? g_pCompositor->getMonitorFromID(before->monitorID()) : monitorFromPointingOrCursor();
+    const auto beforeActiveWorkspaceId = beforeMonitor ? beforeMonitor->activeWorkspaceID() : WORKSPACE_INVALID;
+    const auto beforeSpecialWorkspaceId = beforeMonitor ? beforeMonitor->activeSpecialWorkspaceID() : WORKSPACE_INVALID;
     spdlog::info("move_focus: workspace={} direction={} row_found={} before={}",
                  workspace, direction_name(direction), s != nullptr, static_cast<const void*>(before ? before.get() : nullptr));
     if (s == nullptr) {
@@ -473,24 +570,60 @@ void ScrollerLayout::move_focus(int workspace, Direction direction)
         return;
     }
 
-    const bool moved_in_workspace = s->move_focus(direction, **focus_wrap == 0 ? false : true);
-    if (!moved_in_workspace) {
-        // changed monitor
-        auto monitor = monitorFromPointingOrCursor();
-        const auto workspaceId = monitor ? monitor->activeWorkspaceID() : WORKSPACE_INVALID;
-        spdlog::debug("move_focus: crossed monitor new_workspace={}", workspaceId);
+    const auto moveResult = s->move_focus(direction, **focus_wrap == 0 ? false : true);
+    if (moveResult == FocusMoveResult::CrossMonitor) {
+        const auto monitorDirection = direction_to_math(direction);
+        auto monitor = beforeMonitor && monitorDirection ? g_pCompositor->getMonitorInDirection(beforeMonitor, *monitorDirection) : nullptr;
+        const auto activeWorkspaceId = monitor ? monitor->activeWorkspaceID() : WORKSPACE_INVALID;
+        const auto workspaceId = preferred_workspace_id(monitor);
+        const auto specialWorkspaceId = monitor ? monitor->activeSpecialWorkspaceID() : WORKSPACE_INVALID;
+        spdlog::info(
+            "move_focus_cross_monitor: source_workspace={} direction={} source_window={} "
+            "source_active_ws={} source_special_ws={} dest_active_ws={} dest_special_ws={} selected_ws={}",
+            workspace,
+            direction_name(direction),
+            static_cast<const void*>(before ? before.get() : nullptr),
+            beforeActiveWorkspaceId,
+            beforeSpecialWorkspaceId,
+            activeWorkspaceId,
+            specialWorkspaceId,
+            workspaceId);
+        if (!monitor) {
+            spdlog::warn("move_focus: no monitor in direction={} from workspace={}", direction_name(direction), workspace);
+            return;
+        }
+
         s = getRowForWorkspace(workspaceId);
         if (s == nullptr) {
             // monitor is empty
             spdlog::warn("move_focus: no row for crossed monitor workspace={}", workspaceId);
             return;
         }
+
+        auto crossMonitorTarget = pick_cross_monitor_target_window(monitor, workspaceId, direction, before);
+        if (!crossMonitorTarget)
+            crossMonitorTarget = s->get_active_window();
+        if (crossMonitorTarget)
+            s->focus_window(crossMonitorTarget);
+
+        spdlog::info(
+            "move_focus_cross_monitor_target: selected_ws={} target_window={} target_workspace={} "
+            "target_pos=({}, {}) target_size=({}, {})",
+            workspaceId,
+            static_cast<const void*>(crossMonitorTarget ? crossMonitorTarget.get() : nullptr),
+            crossMonitorTarget ? crossMonitorTarget->workspaceID() : WORKSPACE_INVALID,
+            crossMonitorTarget ? crossMonitorTarget->m_position.x : 0.0,
+            crossMonitorTarget ? crossMonitorTarget->m_position.y : 0.0,
+            crossMonitorTarget ? crossMonitorTarget->m_size.x : 0.0,
+            crossMonitorTarget ? crossMonitorTarget->m_size.y : 0.0);
     }
 
     const auto after = s->get_active_window();
-    spdlog::info("move_focus: workspace={} direction={} after={} moved_in_workspace={}",
+    spdlog::info("move_focus: workspace={} direction={} after={} result={}",
                  workspace, direction_name(direction), static_cast<const void*>(after ? after.get() : nullptr),
-                 moved_in_workspace);
+                 focus_move_result_name(moveResult));
+    if (moveResult == FocusMoveResult::NoOp)
+        return;
     switch_to_window(s->get_active_window());
 }
 

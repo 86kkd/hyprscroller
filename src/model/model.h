@@ -58,6 +58,12 @@ enum class Reorder {
     Lazy
 };
 
+enum class FocusMoveResult {
+    Moved,
+    NoOp,
+    CrossMonitor
+};
+
 // Internal window wrapper used by Column to keep geometry, history and height mode.
 class Window {
 public:
@@ -158,8 +164,8 @@ public:
     void move_active_up();
     void move_active_down();
     // Focus movement with wrap behavior across monitor edges.
-    bool move_focus_up(bool focus_wrap);
-    bool move_focus_down(bool focus_wrap);
+    FocusMoveResult move_focus_up(bool focus_wrap);
+    FocusMoveResult move_focus_down(bool focus_wrap);
 
     // Insert/remove window while keeping active tracking consistent.
     void admit_window(Window *window);

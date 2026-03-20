@@ -174,36 +174,42 @@ void Row::focus_window(PHLWINDOW window) {
     }
 }
 
-bool Row::move_focus(Direction dir, bool focus_wrap) {
+FocusMoveResult Row::move_focus(Direction dir, bool focus_wrap) {
     reorder = Reorder::Auto;
+    FocusMoveResult result = FocusMoveResult::NoOp;
     switch (dir) {
     case Direction::Left:
-        if (!move_focus_left(focus_wrap))
-            return false;
+        result = move_focus_left(focus_wrap);
         break;
     case Direction::Right:
-        if (!move_focus_right(focus_wrap))
-            return false;
+        result = move_focus_right(focus_wrap);
         break;
     case Direction::Up:
-        if (!active->data()->move_focus_up(focus_wrap))
-            return false;
+        result = active->data()->move_focus_up(focus_wrap);
         break;
     case Direction::Down:
-        if (!active->data()->move_focus_down(focus_wrap))
-            return false;
+        result = active->data()->move_focus_down(focus_wrap);
         break;
     case Direction::Begin:
-        move_focus_begin();
+        if (active != columns.first()) {
+            move_focus_begin();
+            result = FocusMoveResult::Moved;
+        }
         break;
     case Direction::End:
-        move_focus_end();
+        if (active != columns.last()) {
+            move_focus_end();
+            result = FocusMoveResult::Moved;
+        }
         break;
     default:
-        return true;
+        return FocusMoveResult::NoOp;
     }
+    if (result != FocusMoveResult::Moved)
+        return result;
+
     recalculate_row_geometry();
-    return true;
+    return result;
 }
 
 Vector2D Row::calculate_gap_x(const ListNode<Column *> *column) const {
@@ -213,38 +219,34 @@ Vector2D Row::calculate_gap_x(const ListNode<Column *> *column) const {
     return Vector2D(gap0, gap1);
 }
 
-bool Row::move_focus_left(bool focus_wrap) {
+FocusMoveResult Row::move_focus_left(bool focus_wrap) {
     if (active == columns.first()) {
         PHLMONITOR monitor = g_pCompositor->getMonitorInDirection(Math::fromChar('l'));
         if (monitor == nullptr) {
             auto previous = active;
             if (focus_wrap)
                 active = columns.last();
-            return active != previous;
+            return active != previous ? FocusMoveResult::Moved : FocusMoveResult::NoOp;
         }
-
-        g_pKeybindManager->m_dispatchers["movefocus"]("l");
-        return false;
+        return FocusMoveResult::CrossMonitor;
     }
     active = active->prev();
-    return true;
+    return FocusMoveResult::Moved;
 }
 
-bool Row::move_focus_right(bool focus_wrap) {
+FocusMoveResult Row::move_focus_right(bool focus_wrap) {
     if (active == columns.last()) {
         PHLMONITOR monitor = g_pCompositor->getMonitorInDirection(Math::fromChar('r'));
         if (monitor == nullptr) {
             auto previous = active;
             if (focus_wrap)
                 active = columns.first();
-            return active != previous;
+            return active != previous ? FocusMoveResult::Moved : FocusMoveResult::NoOp;
         }
-
-        g_pKeybindManager->m_dispatchers["movefocus"]("r");
-        return false;
+        return FocusMoveResult::CrossMonitor;
     }
     active = active->next();
-    return true;
+    return FocusMoveResult::Moved;
 }
 
 void Row::move_focus_begin() {
