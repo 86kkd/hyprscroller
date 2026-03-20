@@ -671,6 +671,11 @@ void Row::recalculate_row_geometry() {
             // there is a previous one, locate it on its right
             Column *prev = active->prev()->data();
             a_x = prev->get_geom_x() + prev->get_geom_w();
+        } else if (active->next()) {
+            // A first column in a multi-column row has already been positioned
+            // by previous row adjustments. Reusing its current x avoids
+            // re-centering it as if it were the only column.
+            a_x = active->data()->get_geom_x();
         } else {
             // first window, locate it at the center
             a_x = max.x + 0.5 * (max.w - a_w);
