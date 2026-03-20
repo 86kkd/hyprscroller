@@ -610,27 +610,30 @@ void ScrollerLayout::move_focus(int workspace, Direction direction)
             return;
         }
 
-        auto crossMonitorTarget = pick_cross_monitor_target_window(monitor, workspaceId, direction, before);
-        if (!crossMonitorTarget) {
-            s = getRowForWorkspace(workspaceId);
-            if (s != nullptr)
-                crossMonitorTarget = s->get_active_window();
-        }
+        const char* targetSelection = "geometry";
+        auto targetLayout = get_scroller_for_workspace(workspaceId);
+        auto targetRow = targetLayout ? targetLayout->getRowForWorkspace(workspaceId) : nullptr;
+        auto crossMonitorTarget = targetRow ? targetRow->get_active_window() : nullptr;
+        if (crossMonitorTarget)
+            targetSelection = "active";
+        else
+            crossMonitorTarget = pick_cross_monitor_target_window(monitor, workspaceId, direction, before);
         if (!crossMonitorTarget) {
             spdlog::warn("move_focus: no target window for crossed monitor workspace={}", workspaceId);
             return;
         }
 
-        auto targetLayout = get_scroller_for_workspace(workspaceId);
-        auto targetRow = targetLayout ? targetLayout->getRowForWindow(crossMonitorTarget) : nullptr;
+        if (!targetRow || !targetRow->has_window(crossMonitorTarget))
+            targetRow = targetLayout ? targetLayout->getRowForWindow(crossMonitorTarget) : nullptr;
         spdlog::info(
             "move_focus_cross_monitor_target: selected_ws={} target_window={} target_workspace={} "
-            "target_layout_found={} target_row_found={} target_pos=({}, {}) target_size=({}, {})",
+            "target_layout_found={} target_row_found={} selection={} target_pos=({}, {}) target_size=({}, {})",
             workspaceId,
             static_cast<const void*>(crossMonitorTarget ? crossMonitorTarget.get() : nullptr),
             crossMonitorTarget ? crossMonitorTarget->workspaceID() : WORKSPACE_INVALID,
             targetLayout != nullptr,
             targetRow != nullptr,
+            targetSelection,
             crossMonitorTarget ? crossMonitorTarget->m_position.x : 0.0,
             crossMonitorTarget ? crossMonitorTarget->m_position.y : 0.0,
             crossMonitorTarget ? crossMonitorTarget->m_size.x : 0.0,
