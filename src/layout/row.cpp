@@ -33,6 +33,8 @@ static double choose_anchor_x(const ListNode<Column *> *active, const double act
             return max_box.x + max_box.w - active_w - next_w;
         if (prev && prev->data()->get_geom_w() + active_w <= max_box.w)
             return max_box.x + prev->data()->get_geom_w();
+        if (!prev)
+            return max_box.x;
         return fallback_x;
     }
     if (prev) {
