@@ -29,7 +29,7 @@ extern HANDLE PHANDLE;
 // Global mark storage lives in this layout module.
 static Marks marks;
 
-static void switch_to_window(PHLWINDOW window);
+static void switch_to_window(PHLWINDOW window, bool warp_cursor = false);
 
 static ListNode<Row*>* find_row_node(List<Row*>& rows, Row* target) {
     for (auto row = rows.first(); row != nullptr; row = row->next()) {
@@ -529,17 +529,22 @@ void ScrollerLayout::cycle_window_size(int workspace, int step)
 }
 
 // Focus a window and force mouse/focus state sync so pointer-driven workflows work.
-static void switch_to_window(PHLWINDOW window)
+static void switch_to_window(PHLWINDOW window, bool warp_cursor)
 {
-    if (!window || g_pCompositor->isWindowActive(window))
+    if (!window)
         return;
 
-    spdlog::debug("switch_to_window: focusing window={} workspace={}",
-                  static_cast<const void*>(window.get()), window->workspaceID());
-    char selector[64];
-    std::snprintf(selector, sizeof(selector), "address:0x%lx",
-                  reinterpret_cast<unsigned long>(window.get()));
-    g_pKeybindManager->m_dispatchers["focuswindow"](selector);
+    if (!g_pCompositor->isWindowActive(window)) {
+        spdlog::debug("switch_to_window: focusing window={} workspace={}",
+                      static_cast<const void*>(window.get()), window->workspaceID());
+        char selector[64];
+        std::snprintf(selector, sizeof(selector), "address:0x%lx",
+                      reinterpret_cast<unsigned long>(window.get()));
+        g_pKeybindManager->m_dispatchers["focuswindow"](selector);
+    }
+
+    if (warp_cursor)
+        window->warpCursor(true);
 }
 
 void ScrollerLayout::move_focus(int workspace, Direction direction)
@@ -650,7 +655,7 @@ void ScrollerLayout::move_focus(int workspace, Direction direction)
                      direction_name(direction),
                      static_cast<const void*>(crossMonitorTarget.get()),
                      focus_move_result_name(moveResult));
-        switch_to_window(crossMonitorTarget);
+        switch_to_window(crossMonitorTarget, true);
         return;
     }
 
@@ -660,7 +665,7 @@ void ScrollerLayout::move_focus(int workspace, Direction direction)
                  focus_move_result_name(moveResult));
     if (moveResult == FocusMoveResult::NoOp)
         return;
-    switch_to_window(s->get_active_window());
+    switch_to_window(s->get_active_window(), true);
 }
 
 void ScrollerLayout::replaceWindowDataWith(PHLWINDOW, PHLWINDOW)
