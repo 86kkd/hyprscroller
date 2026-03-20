@@ -506,10 +506,11 @@ bool Column::move_focus_up(bool focus_wrap) {
         g_pKeybindManager->m_dispatchers["movefocus"]("u");
         return false;
     }
+    auto previous = active;
     if (focus_wrap) {
         active = windows.last();
     }
-    return true;
+    return active != previous;
 }
 
 bool Column::move_focus_down(bool focus_wrap) {
@@ -524,10 +525,11 @@ bool Column::move_focus_down(bool focus_wrap) {
         g_pKeybindManager->m_dispatchers["movefocus"]("d");
         return false;
     }
+    auto previous = active;
     if (focus_wrap) {
         active = windows.first();
     }
-    return true;
+    return active != previous;
 }
 
 void Column::admit_window(Window *window) {

@@ -217,9 +217,10 @@ bool Row::move_focus_left(bool focus_wrap) {
     if (active == columns.first()) {
         PHLMONITOR monitor = g_pCompositor->getMonitorInDirection(Math::fromChar('l'));
         if (monitor == nullptr) {
+            auto previous = active;
             if (focus_wrap)
                 active = columns.last();
-            return true;
+            return active != previous;
         }
 
         g_pKeybindManager->m_dispatchers["movefocus"]("l");
@@ -233,9 +234,10 @@ bool Row::move_focus_right(bool focus_wrap) {
     if (active == columns.last()) {
         PHLMONITOR monitor = g_pCompositor->getMonitorInDirection(Math::fromChar('r'));
         if (monitor == nullptr) {
+            auto previous = active;
             if (focus_wrap)
                 active = columns.first();
-            return true;
+            return active != previous;
         }
 
         g_pKeybindManager->m_dispatchers["movefocus"]("r");
