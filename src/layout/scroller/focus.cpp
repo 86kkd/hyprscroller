@@ -7,7 +7,7 @@
 #include <hyprland/src/plugins/PluginAPI.hpp>
 #include <spdlog/spdlog.h>
 
-#include "scroller_layout_internal.h"
+#include "internal.h"
 
 extern HANDLE PHANDLE;
 

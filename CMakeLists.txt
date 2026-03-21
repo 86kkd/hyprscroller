@@ -25,16 +25,16 @@ add_library(hyprscroller SHARED
             src/dispatchers.cpp
             src/core/core.cpp
             src/list.h
-            src/model/model.cpp
-            src/model/model_column.cpp
-            src/layout/scroller_layout.cpp
-            src/layout/scroller_layout_workspace.cpp
-            src/layout/scroller_layout_focus.cpp
-            src/layout/scroller_layout_commands.cpp
-            src/layout/scroller_layout_internal.h
-            src/layout/row.cpp
-            src/layout/row_actions.cpp
-            src/layout/row_geometry.cpp)
+            src/model/window.cpp
+            src/model/column.cpp
+            src/layout/scroller/core.cpp
+            src/layout/scroller/workspace.cpp
+            src/layout/scroller/focus.cpp
+            src/layout/scroller/commands.cpp
+            src/layout/scroller/internal.h
+            src/layout/row/core.cpp
+            src/layout/row/actions.cpp
+            src/layout/row/geometry.cpp)
 
 add_compile_definitions(WLR_USE_UNSTABLE)
 

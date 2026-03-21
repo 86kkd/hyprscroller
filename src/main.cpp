@@ -9,7 +9,7 @@
 
 #include "dispatchers.h"
 #include "hyprlang.hpp"
-#include "layout/scroller_layout.h"
+#include "layout/scroller/layout.h"
 
 HANDLE PHANDLE = nullptr;
 

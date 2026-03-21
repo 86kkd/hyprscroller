@@ -6,10 +6,10 @@
 #include <hyprland/src/layout/space/Space.hpp>
 #include <spdlog/spdlog.h>
 
-#include "../core/core.h"
-#include "row.h"
-#include "scroller_layout.h"
-#include "scroller_layout_internal.h"
+#include "../../core/core.h"
+#include "../row/row.h"
+#include "layout.h"
+#include "internal.h"
 
 using namespace ScrollerCore;
 

@@ -1,6 +1,6 @@
-#include "row.h"
-#include "scroller_layout.h"
-#include "scroller_layout_internal.h"
+#include "../row/row.h"
+#include "layout.h"
+#include "internal.h"
 
 void ScrollerLayout::cycle_window_size(int workspace, int step)
 {

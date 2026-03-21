@@ -1,5 +1,5 @@
 /**
- * @file scroller_layout.h
+ * @file layout.h
  * @brief Layout controller for Hyprscroller's tiled workspace orchestration.
  *
  * Declares `ScrollerLayout`, the Hyprland tiled algorithm implementation that
@@ -16,7 +16,7 @@
 #include <hyprland/src/layout/algorithm/TiledAlgorithm.hpp>
 #include <hyprland/src/layout/target/Target.hpp>
 
-#include "../list.h"
+#include "../../list.h"
 
 enum class Direction { Left, Right, Up, Down, Begin, End, Center };
 enum class FitSize { Active, Visible, All, ToEnd, ToBeg };

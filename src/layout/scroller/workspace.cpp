@@ -10,7 +10,7 @@
 #include <hyprland/src/render/Renderer.hpp>
 #include <spdlog/spdlog.h>
 
-#include "scroller_layout_internal.h"
+#include "internal.h"
 
 namespace {
 PHLMONITOR effective_workspace_monitor(Row* row, PHLMONITOR monitor, PHLWORKSPACE workspace) {

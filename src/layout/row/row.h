@@ -8,9 +8,9 @@
  */
 #pragma once
 
-#include "../core/core.h"
-#include "../model/model.h"
-#include "scroller_layout.h"
+#include "../../core/core.h"
+#include "../../model/model.h"
+#include "../scroller/layout.h"
 
 using namespace ScrollerCore;
 using namespace ScrollerModel;

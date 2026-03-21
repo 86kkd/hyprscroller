@@ -2,8 +2,8 @@
 
 #include <optional>
 
-#include "row.h"
-#include "scroller_layout.h"
+#include "../row/row.h"
+#include "layout.h"
 
 namespace ScrollerLayoutInternal {
 const char*                     direction_name(Direction direction);
