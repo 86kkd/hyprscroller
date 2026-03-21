@@ -73,8 +73,12 @@ public:
     PHLWINDOWREF ptr();
     // Return logical geometry height used by scroller model.
     double get_geom_h() const;
+    // Return logical geometry top position used by scroller model.
+    double get_geom_y() const;
     // Store logical geometry height used by layout calculations.
     void set_geom_h(double geom_h);
+    // Store logical geometry top position used by layout calculations.
+    void set_geom_y(double geom_y);
     // Save current geometry values into a lightweight undo buffer.
     void push_geom();
     // Restore geometry values from the undo buffer.
@@ -92,12 +96,13 @@ public:
 
 private:
     struct Memory {
-        double pos_y;
+        double box_y;
         double box_h;
     };
 
     PHLWINDOWREF window;
     WindowHeight height;
+    double box_y;
     double box_h;
     bool is_expanded = false;
     Memory mem;

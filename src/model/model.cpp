@@ -4,6 +4,7 @@
 #include <cmath>
 
 #include <hyprlang.hpp>
+#include <spdlog/spdlog.h>
 #include <hyprland/src/config/ConfigManager.hpp>
 #include <hyprland/src/config/ConfigValue.hpp>
 #include <hyprland/src/Compositor.hpp>
@@ -21,10 +22,8 @@ namespace {
 static bool is_window_fully_visible(Window *window, double gap, const ScrollerCore::Box &geom) {
     if (!window)
         return false;
-    auto phWindow = window->ptr().lock();
-    const auto border = phWindow->getRealBorderSize();
-    const auto y0 = std::round(phWindow->m_position.y - border - gap);
-    const auto y1 = std::round(phWindow->m_position.y - border - gap + window->get_geom_h());
+    const auto y0 = std::round(window->get_geom_y());
+    const auto y1 = std::round(window->get_geom_y() + window->get_geom_h());
     return y0 >= geom.y && y1 <= geom.y + geom.h;
 }
 
@@ -33,10 +32,8 @@ static bool is_window_fully_visible(Window *window, double gap, const ScrollerCo
 static bool is_window_intersect_viewport(Window *window, double gap, const ScrollerCore::Box &geom) {
     if (!window)
         return false;
-    const auto phWindow = window->ptr().lock();
-    const auto border = phWindow->getRealBorderSize();
-    const auto y0 = phWindow->m_position.y - border;
-    const auto y1 = phWindow->m_position.y - border - gap + window->get_geom_h();
+    const auto y0 = window->get_geom_y();
+    const auto y1 = window->get_geom_y() + window->get_geom_h();
     return y0 < geom.y + geom.h && y0 >= geom.y ||
            y1 > geom.y && y1 <= geom.y + geom.h ||
            y0 < geom.y && y1 >= geom.y + geom.h;
@@ -50,17 +47,17 @@ static double window_active_x(const ScrollerCore::Box &geom, double border_x, do
 // - if both neighbors exist, prefer stacking against bottom/next when possible;
 // - fall back to placing against top when no safe anchored slot exists.
 static double choose_anchor_y(bool has_next, bool has_prev, double active_h, double next_h, double prev_h,
-                             const ScrollerCore::Box &geom, double border, double gap0) {
-    const auto base_y = geom.y + border + gap0;
-    const auto stack_to_bottom = geom.y + geom.h - active_h + border + gap0;
+                             const ScrollerCore::Box &geom) {
+    const auto base_y = geom.y;
+    const auto stack_to_bottom = geom.y + geom.h - active_h;
     if (has_next && active_h + next_h <= geom.h) {
-        return geom.y + geom.h - active_h - next_h + border + gap0;
+        return geom.y + geom.h - active_h - next_h;
     }
     if (has_next && has_prev && prev_h + active_h <= geom.h) {
-        return geom.y + prev_h + border + gap0;
+        return geom.y + prev_h;
     }
     if (!has_next && has_prev && prev_h + active_h <= geom.h) {
-        return geom.y + prev_h + border + gap0;
+        return geom.y + prev_h;
     }
     if (!has_next && has_prev) {
         return stack_to_bottom;
@@ -81,7 +78,11 @@ static void sync_window_target_geometry(PHLWINDOW window) {
 } // namespace
 
 // Internal window metadata wrapper used by a column.
-Window::Window(PHLWINDOW window, double box_h) : window(window), height(WindowHeight::One), box_h(box_h) {}
+Window::Window(PHLWINDOW window, double box_h)
+    : window(window),
+      height(WindowHeight::One),
+      box_y(window ? window->m_position.y - window->getRealBorderSize() : 0.0),
+      box_h(box_h) {}
 
 PHLWINDOWREF Window::ptr() {
     return window;
@@ -91,20 +92,28 @@ double Window::get_geom_h() const {
     return box_h;
 }
 
+double Window::get_geom_y() const {
+    return box_y;
+}
+
 void Window::set_geom_h(double geom_h) {
     box_h = geom_h;
+}
+
+void Window::set_geom_y(double geom_y) {
+    box_y = geom_y;
 }
 
 void Window::push_geom() {
     // Snapshot logical height and native compositor y-position before temporary edits.
     mem.box_h = box_h;
-    mem.pos_y = window.lock()->m_position.y;
+    mem.box_y = box_y;
 }
 
 void Window::pop_geom() {
     // Roll back to the previously snapshotted values.
     box_h = mem.box_h;
-    window.lock()->m_position.y = mem.pos_y;
+    box_y = mem.box_y;
 }
 
 bool Window::toggle_expand(double maxh) {
@@ -265,8 +274,7 @@ void Column::add_active_window(PHLWINDOW window, double maxh) {
     if (!new_window || !previous_window)
         return;
 
-    new_window->m_position = Vector2D(previous_window->m_position.x,
-                                      previous_window->m_position.y + previous->data()->get_geom_h());
+    active->data()->set_geom_y(previous->data()->get_geom_y() + previous->data()->get_geom_h());
 }
 
 void Column::remove_window(PHLWINDOW window) {
@@ -314,22 +322,25 @@ void Column::set_geom_w(double w) {
 
 Vector2D Column::get_height() const {
     Vector2D height;
-    PHLWINDOW first = windows.first()->data()->ptr().lock();
-    PHLWINDOW last = windows.last()->data()->ptr().lock();
-    height.x = first->m_position.y - first->getRealBorderSize();
-    height.y = last->m_position.y + last->m_size.y + last->getRealBorderSize();
+    auto *first = windows.first()->data();
+    auto *last = windows.last()->data();
+    height.x = first->get_geom_y();
+    height.y = last->get_geom_y() + last->get_geom_h();
     return height;
 }
 
 void Column::scale(const Vector2D &bmin, const Vector2D &start, double scale, double gap) {
     // Rescale logical model heights then propagate to native compositor geometry.
     for (auto win = windows.first(); win != nullptr; win = win->next()) {
+        const auto oldY = win->data()->get_geom_y();
+        const auto newY = start.y + (oldY - bmin.y) * scale;
+        win->data()->set_geom_y(newY);
         win->data()->set_geom_h(win->data()->get_geom_h() * scale);
         PHLWINDOW window = win->data()->ptr().lock();
         auto border = window->getRealBorderSize();
         auto gap0 = win == windows.first() ? 0.0 : gap;
-        window->m_position = start + Vector2D(border, border) + (window->m_position - Vector2D(border, border) - bmin) * scale;
-        window->m_position.y += gap0;
+        window->m_position = Vector2D(start.x + border + geom.x - bmin.x,
+                                      win->data()->get_geom_y() + border + gap0);
         auto gap1 = win == windows.last() ? 0.0 : gap;
         window->m_size.x *= scale;
         window->m_size.y = (window->m_size.y + 2.0 * border + gap0 + gap1) * scale - gap0 - gap1 - 2.0 * border;
@@ -414,6 +425,7 @@ void Column::recalculate_col_geometry(const Vector2D &gap_x, double gap) {
     // Keep fullscreen path authoritative, then recompute non-fullscreen bounds.
     if (fullscreen()) {
         PHLWINDOW wactive = active->data()->ptr().lock();
+        active->data()->set_geom_y(full.y);
         wactive->m_position = Vector2D(full.x, full.y);
         wactive->m_size = Vector2D(full.w, full.h);
         sync_window_target_geometry(wactive);
@@ -427,20 +439,29 @@ void Column::recalculate_col_geometry(const Vector2D &gap_x, double gap) {
     auto gap0 = active == windows.first() ? 0.0 : gap;
     auto border = win->getRealBorderSize();
     const auto base_x = window_active_x(geom, border, gap_x.x);
-    auto a_y0 = std::round(win->m_position.y - border - gap0);
-    auto a_y1 = std::round(win->m_position.y - border - gap0 + wactive->get_geom_h());
-    const auto top = geom.y + border + gap0;
-    const auto bottom = geom.y + geom.h - wactive->get_geom_h() + border + gap0;
+    auto a_y0 = std::round(wactive->get_geom_y());
+    auto a_y1 = std::round(wactive->get_geom_y() + wactive->get_geom_h());
+    const auto top = geom.y;
+    const auto bottom = geom.y + geom.h - wactive->get_geom_h();
+
+    spdlog::debug("col_recalc_input: active_window={} logical_y={} logical_h={} geom=({}, {}, {}, {})",
+                  static_cast<const void*>(win ? win.get() : nullptr),
+                  wactive->get_geom_y(),
+                  wactive->get_geom_h(),
+                  geom.x,
+                  geom.y,
+                  geom.w,
+                  geom.h);
 
     if (a_y0 < geom.y) {
         // active starts above: clamp to top edge
-        win->m_position = Vector2D(base_x, top);
+        wactive->set_geom_y(top);
         adjust_windows(active, gap_x, gap);
         return;
     }
     if (a_y1 > geom.y + geom.h) {
         // active overflows bottom: clamp to bottom edge
-        win->m_position = Vector2D(base_x, bottom);
+        wactive->set_geom_y(bottom);
         adjust_windows(active, gap_x, gap);
         return;
     }
@@ -466,9 +487,15 @@ void Column::recalculate_col_geometry(const Vector2D &gap_x, double gap) {
     const auto next_h = next ? next->get_geom_h() : 0.0;
     const auto prev_h = prev ? prev->get_geom_h() : 0.0;
     const auto active_h = wactive->get_geom_h();
-    const double new_y = choose_anchor_y(next != nullptr, prev != nullptr, active_h, next_h, prev_h, geom, border, gap0);
-    win->m_position = Vector2D(base_x, new_y);
+    const double new_y = choose_anchor_y(next != nullptr, prev != nullptr, active_h, next_h, prev_h, geom);
+    wactive->set_geom_y(new_y);
     adjust_windows(active, gap_x, gap);
+    spdlog::debug("col_recalc_auto: active_window={} keep_current={} prev_visible={} next_visible={} new_y={}",
+                  static_cast<const void*>(win ? win.get() : nullptr),
+                  keep_current,
+                  is_window_fully_visible(prev, prev_gap, geom),
+                  is_window_fully_visible(next, next_gap, geom),
+                  new_y);
 }
 
 PHLWINDOW Column::get_active_window() {
@@ -710,21 +737,32 @@ void Column::cycle_size_active_window(int step, const Vector2D &gap_x, double ga
 
 void Column::adjust_windows(ListNode<Window *> *win, const Vector2D &gap_x, double gap) {
     // Walk outward from anchor node and rebuild sibling positions and sizes.
+    if (win) {
+        auto anchorWindow = win->data()->ptr().lock();
+        if (anchorWindow) {
+            const auto anchorBorder = anchorWindow->getRealBorderSize();
+            const auto anchorGap0 = win == windows.first() ? 0.0 : gap;
+            anchorWindow->m_position = Vector2D(geom.x + anchorBorder + gap_x.x,
+                                                win->data()->get_geom_y() + anchorBorder + anchorGap0);
+        }
+    }
     for (auto w = win->prev(), p = win; w != nullptr; p = w, w = w->prev()) {
+        auto *wdata = w->data();
+        auto *pdata = p->data();
+        wdata->set_geom_y(pdata->get_geom_y() - wdata->get_geom_h());
         PHLWINDOW ww = w->data()->ptr().lock();
-        PHLWINDOW pw = p->data()->ptr().lock();
         auto wgap0 = w == windows.first() ? 0.0 : gap;
         auto wborder = ww->getRealBorderSize();
-        auto pborder = pw->getRealBorderSize();
-        ww->m_position = Vector2D(geom.x + wborder + gap_x.x, pw->m_position.y - gap - pborder - w->data()->get_geom_h() + wborder + wgap0);
+        ww->m_position = Vector2D(geom.x + wborder + gap_x.x, wdata->get_geom_y() + wborder + wgap0);
     }
     for (auto w = win->next(), p = win; w != nullptr; p = w, w = w->next()) {
+        auto *wdata = w->data();
+        auto *pdata = p->data();
+        wdata->set_geom_y(pdata->get_geom_y() + pdata->get_geom_h());
         PHLWINDOW ww = w->data()->ptr().lock();
-        PHLWINDOW pw = p->data()->ptr().lock();
-        auto pgap0 = p == windows.first() ? 0.0 : gap;
         auto wborder = ww->getRealBorderSize();
-        auto pborder = pw->getRealBorderSize();
-        ww->m_position = Vector2D(geom.x + wborder + gap_x.x, pw->m_position.y - pborder - pgap0 + p->data()->get_geom_h() + wborder + gap);
+        auto wgap0 = w == windows.first() ? 0.0 : gap;
+        ww->m_position = Vector2D(geom.x + wborder + gap_x.x, wdata->get_geom_y() + wborder + wgap0);
     }
     for (auto w = windows.first(); w != nullptr; w = w->next()) {
         PHLWINDOW win = w->data()->ptr().lock();
