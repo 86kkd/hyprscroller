@@ -26,6 +26,7 @@ add_library(hyprscroller SHARED
             src/core/core.cpp
             src/list.h
             src/model/model.cpp
+            src/model/model_column.cpp
             src/layout/scroller_layout.cpp
             src/layout/scroller_layout_workspace.cpp
             src/layout/scroller_layout_focus.cpp
