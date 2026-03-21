@@ -498,7 +498,7 @@ void Row::set_fullscreen_active_window() {
 
 void Row::toggle_fullscreen_active_window() {
     Column *column = active->data();
-    (void)column->toggle_fullscreen(full, mode);
+    (void)column->toggle_fullscreen(max, mode);
     recalculate_row_geometry();
 }
 
