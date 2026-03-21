@@ -39,25 +39,37 @@ static ListNode<Row*>* find_row_node(List<Row*>& rows, Row* target) {
     return nullptr;
 }
 
+static void clear_rows(List<Row*>& rows) {
+    for (auto row = rows.first(); row != nullptr; row = row->next())
+        delete row->data();
+    rows.clear();
+}
+
+static PHLMONITOR effective_workspace_monitor(Row* row, PHLMONITOR monitor, PHLWORKSPACE workspace) {
+    if (!row || !monitor || !workspace || !workspace->m_isSpecialWorkspace)
+        return monitor;
+
+    const auto active_window = row->get_active_window();
+    if (!active_window)
+        return monitor;
+
+    const auto active_monitor = g_pCompositor->getMonitorFromID(active_window->monitorID());
+    if (!active_monitor || active_monitor == monitor)
+        return monitor;
+
+    spdlog::debug("recalculate_workspace_row: overriding special workspace monitor workspace={} from_monitor={} to_monitor={} active_window={}",
+                  workspace->m_id,
+                  monitor->m_id,
+                  active_monitor->m_id,
+                  static_cast<const void*>(active_window.get()));
+    return active_monitor;
+}
+
 static void recalculate_workspace_row(Row* row, PHLMONITOR monitor, PHLWORKSPACE workspace, bool honor_fullscreen) {
     if (!row || !monitor || !workspace)
         return;
 
-    if (workspace->m_isSpecialWorkspace) {
-        const auto active_window = row->get_active_window();
-        if (active_window) {
-            const auto active_monitor = g_pCompositor->getMonitorFromID(active_window->monitorID());
-            if (active_monitor && active_monitor != monitor) {
-                spdlog::debug("recalculate_workspace_row: overriding special workspace monitor workspace={} from_monitor={} to_monitor={} active_window={}",
-                              workspace->m_id,
-                              monitor->m_id,
-                              active_monitor->m_id,
-                              static_cast<const void*>(active_window.get()));
-                monitor = active_monitor;
-            }
-        }
-    }
-
+    monitor = effective_workspace_monitor(row, monitor, workspace);
     row->update_sizes(monitor);
     if (honor_fullscreen && workspace->m_hasFullscreenWindow && workspace->m_fullscreenMode == FSMODE_FULLSCREEN) {
         row->set_fullscreen_active_window();
@@ -104,6 +116,25 @@ static PHLMONITOR visible_monitor_for_workspace(PHLWORKSPACE workspace) {
     }
 
     return nullptr;
+}
+
+static void dispatch_builtin_movefocus(Direction direction) {
+    switch (direction) {
+        case Direction::Left:
+            g_pKeybindManager->m_dispatchers["movefocus"]("l");
+            return;
+        case Direction::Right:
+            g_pKeybindManager->m_dispatchers["movefocus"]("r");
+            return;
+        case Direction::Up:
+            g_pKeybindManager->m_dispatchers["movefocus"]("u");
+            return;
+        case Direction::Down:
+            g_pKeybindManager->m_dispatchers["movefocus"]("d");
+            return;
+        default:
+            return;
+    }
 }
 
 static ScrollerLayout* get_scroller_for_workspace(const WORKSPACEID workspace_id) {
@@ -510,10 +541,7 @@ void ScrollerLayout::alterSplitRatio(PHLWINDOW, float, bool)
 }
 
 void ScrollerLayout::onEnable() {
-    for (auto row = rows.first(); row != nullptr; row = row->next()) {
-        delete row->data();
-    }
-    rows.clear();
+    clear_rows(rows);
     marks.reset();
 
     const auto algorithm = m_parent.lock();
@@ -552,10 +580,7 @@ void ScrollerLayout::onEnable() {
 }
 
 void ScrollerLayout::onDisable() {
-    for (auto row = rows.first(); row != nullptr; row = row->next()) {
-        delete row->data();
-    }
-    rows.clear();
+    clear_rows(rows);
     marks.reset();
 }
 
@@ -584,24 +609,32 @@ void ScrollerLayout::cycle_window_size(int workspace, int step)
 }
 
 // Focus a window and force mouse/focus state sync so pointer-driven workflows work.
-static void switch_to_window(PHLWINDOW window, bool warp_cursor)
-{
+static void focus_window_monitor(PHLWINDOW window) {
     if (!window)
         return;
 
     const auto targetMonitor = g_pCompositor->getMonitorFromID(window->monitorID());
     const auto currentMonitor = g_pCompositor->getMonitorFromCursor();
+    if (!targetMonitor || !currentMonitor || targetMonitor == currentMonitor || targetMonitor->m_name.empty())
+        return;
 
-    if (targetMonitor && currentMonitor && targetMonitor != currentMonitor) {
-        const auto focusMonitor = g_pKeybindManager->m_dispatchers.find("focusmonitor");
-        if (focusMonitor != g_pKeybindManager->m_dispatchers.end() && !targetMonitor->m_name.empty()) {
-            spdlog::debug("switch_to_window: focusing monitor={} before window={} workspace={}",
-                          targetMonitor->m_name,
-                          static_cast<const void*>(window.get()),
-                          window->workspaceID());
-            focusMonitor->second(targetMonitor->m_name);
-        }
-    }
+    const auto focusMonitor = g_pKeybindManager->m_dispatchers.find("focusmonitor");
+    if (focusMonitor == g_pKeybindManager->m_dispatchers.end())
+        return;
+
+    spdlog::debug("switch_to_window: focusing monitor={} before window={} workspace={}",
+                  targetMonitor->m_name,
+                  static_cast<const void*>(window.get()),
+                  window->workspaceID());
+    focusMonitor->second(targetMonitor->m_name);
+}
+
+static void switch_to_window(PHLWINDOW window, bool warp_cursor)
+{
+    if (!window)
+        return;
+
+    focus_window_monitor(window);
 
     if (!g_pCompositor->isWindowActive(window)) {
         spdlog::debug("switch_to_window: focusing window={} workspace={}",
@@ -642,22 +675,7 @@ void ScrollerLayout::move_focus(int workspace, Direction direction)
     if (s == nullptr) {
         // if workspace is empty, use the deault movefocus, which now
         // is "move to another monitor" (pass the direction)
-        switch (direction) {
-            case Direction::Left:
-                g_pKeybindManager->m_dispatchers["movefocus"]("l");
-                break;
-            case Direction::Right:
-                g_pKeybindManager->m_dispatchers["movefocus"]("r");
-                break;
-            case Direction::Up:
-                g_pKeybindManager->m_dispatchers["movefocus"]("u");
-                break;
-            case Direction::Down:
-                g_pKeybindManager->m_dispatchers["movefocus"]("d");
-                break;
-            default:
-                break;
-        }
+        dispatch_builtin_movefocus(direction);
         return;
     }
 
