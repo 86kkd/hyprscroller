@@ -325,15 +325,6 @@ Vector2D ScrollerLayout::predictSizeForNewWindowTiled() {
     return s->predict_window_size();
 }
 
-void ScrollerLayout::cycle_window_size(int workspace, int step)
-{
-    auto s = getRowForWorkspace(workspace);
-    if (s == nullptr)
-        return;
-
-    s->resize_active_column(step);
-}
-
 void ScrollerLayout::replaceWindowDataWith(PHLWINDOW, PHLWINDOW)
 {
 }
