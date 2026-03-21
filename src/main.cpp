@@ -9,7 +9,7 @@
 
 #include "dispatchers.h"
 #include "hyprlang.hpp"
-#include "layout/scroller/layout.h"
+#include "layout/canvas/layout.h"
 
 HANDLE PHANDLE = nullptr;
 
@@ -49,7 +49,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     spdlog::info("pluginInit handle={}", static_cast<const void*>(handle));
 
 #ifdef COLORS_IPC
-    // Enable optional IPC color configuration for free-column highlight.
+    // Enable optional IPC color configuration for free-stack highlight.
     HyprlandAPI::addConfigValue(PHANDLE, "plugin:scroller:col.freecolumn_border", Hyprlang::CConfigValue(Hyprlang::INT(0xff9e1515)));
 #endif
 
@@ -66,8 +66,8 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     HyprlandAPI::addTiledAlgo(
         PHANDLE,
         "scroller",
-        &typeid(ScrollerLayout),
-        []() -> UP<Layout::ITiledAlgorithm> { return makeUnique<ScrollerLayout>(); });
+        &typeid(CanvasLayout),
+        []() -> UP<Layout::ITiledAlgorithm> { return makeUnique<CanvasLayout>(); });
 
     return {"hyprscroller", "scrolling window layout", "dawser", "1.0"};
 }

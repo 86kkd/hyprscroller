@@ -26,15 +26,15 @@ add_library(hyprscroller SHARED
             src/core/core.cpp
             src/list.h
             src/model/window.cpp
-            src/model/column.cpp
-            src/layout/scroller/core.cpp
-            src/layout/scroller/workspace.cpp
-            src/layout/scroller/focus.cpp
-            src/layout/scroller/commands.cpp
-            src/layout/scroller/internal.h
-            src/layout/row/core.cpp
-            src/layout/row/actions.cpp
-            src/layout/row/geometry.cpp)
+            src/model/stack.cpp
+            src/layout/canvas/core.cpp
+            src/layout/canvas/workspace.cpp
+            src/layout/canvas/focus.cpp
+            src/layout/canvas/commands.cpp
+            src/layout/canvas/internal.h
+            src/layout/lane/core.cpp
+            src/layout/lane/actions.cpp
+            src/layout/lane/geometry.cpp)
 
 add_compile_definitions(WLR_USE_UNSTABLE)
 

@@ -3,7 +3,7 @@
  * @brief Intrusive doubly-linked list primitives.
  *
  * Provides a lightweight `List` container with `ListNode` handles used by
- * row/column/window model code to store ordered collections with manual splice
+ * lane/stack/window model code to store ordered collections with manual splice
  * and adjacency operations.
  */
 #pragma once

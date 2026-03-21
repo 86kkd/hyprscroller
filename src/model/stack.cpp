@@ -1,4 +1,4 @@
-#include "model.h"
+#include "stack.h"
 
 #include <algorithm>
 #include <cmath>
@@ -70,28 +70,28 @@ static void sync_window_target_geometry(PHLWINDOW window) {
 }
 } // namespace
 
-Column::Column(PHLWINDOW cwindow, double maxw, double maxh)
+Stack::Stack(PHLWINDOW cwindow, double maxw, double maxh)
     : height(WindowHeight::One), reorder(Reorder::Auto), initialized(false), maxdim(false) {
     static auto const *column_default_width = (Hyprlang::STRING const *)HyprlandAPI::getConfigValue(PHANDLE, "plugin:scroller:column_default_width")->getDataStaticPtr();
     std::string column_width = *column_default_width;
     if (column_width == "onehalf") {
-        width = ColumnWidth::OneHalf;
+        width = StackWidth::OneHalf;
     } else if (column_width == "onethird") {
-        width = ColumnWidth::OneThird;
+        width = StackWidth::OneThird;
     } else if (column_width == "twothirds") {
-        width = ColumnWidth::TwoThirds;
+        width = StackWidth::TwoThirds;
     } else if (column_width == "maximized") {
-        width = ColumnWidth::Free;
+        width = StackWidth::Free;
     } else if (column_width == "floating") {
         auto target = cwindow->layoutTarget();
         if (target && target->lastFloatingSize().y > 0) {
-            width = ColumnWidth::Free;
+            width = StackWidth::Free;
             maxw = target->lastFloatingSize().x;
         } else {
-            width = ColumnWidth::OneHalf;
+            width = StackWidth::OneHalf;
         }
     } else {
-        width = ColumnWidth::OneHalf;
+        width = StackWidth::OneHalf;
     }
 
     Window *window = new Window(cwindow, maxh);
@@ -101,7 +101,7 @@ Column::Column(PHLWINDOW cwindow, double maxw, double maxh)
     active = windows.first();
 }
 
-Column::Column(Window *window, ColumnWidth width, double maxw, double maxh)
+Stack::Stack(Window *window, StackWidth width, double maxw, double maxh)
     : width(width), height(WindowHeight::One), reorder(Reorder::Auto), initialized(true), maxdim(false) {
     window->set_geom_h(maxh);
     update_width(width, maxw, maxh);
@@ -110,26 +110,26 @@ Column::Column(Window *window, ColumnWidth width, double maxw, double maxh)
     active = windows.first();
 }
 
-Column::~Column() {
+Stack::~Stack() {
     for (auto win = windows.first(); win != nullptr; win = win->next()) {
         delete win->data();
     }
     windows.clear();
 }
 
-bool Column::get_init() const {
+bool Stack::get_init() const {
     return initialized;
 }
 
-void Column::set_init() {
+void Stack::set_init() {
     initialized = true;
 }
 
-size_t Column::size() {
+size_t Stack::size() {
     return windows.size();
 }
 
-bool Column::has_window(PHLWINDOW window) const {
+bool Stack::has_window(PHLWINDOW window) const {
     for (auto win = windows.first(); win != nullptr; win = win->next()) {
         if (win->data()->ptr().lock() == window)
             return true;
@@ -137,7 +137,7 @@ bool Column::has_window(PHLWINDOW window) const {
     return false;
 }
 
-bool Column::swap_windows(PHLWINDOW a, PHLWINDOW b) {
+bool Stack::swap_windows(PHLWINDOW a, PHLWINDOW b) {
     if (a == b)
         return false;
 
@@ -163,7 +163,7 @@ bool Column::swap_windows(PHLWINDOW a, PHLWINDOW b) {
     return true;
 }
 
-void Column::add_active_window(PHLWINDOW window, double maxh) {
+void Stack::add_active_window(PHLWINDOW window, double maxh) {
     reorder = Reorder::Auto;
     const auto previous = active;
     const auto new_height = previous ? previous->data()->get_geom_h() : maxh;
@@ -175,7 +175,7 @@ void Column::add_active_window(PHLWINDOW window, double maxh) {
     active->data()->set_geom_y(previous->data()->get_geom_y() + previous->data()->get_geom_h());
 }
 
-void Column::remove_window(PHLWINDOW window) {
+void Stack::remove_window(PHLWINDOW window) {
     reorder = Reorder::Auto;
     for (auto win = windows.first(); win != nullptr; win = win->next()) {
         if (win->data()->ptr().lock() == window) {
@@ -191,7 +191,7 @@ void Column::remove_window(PHLWINDOW window) {
     }
 }
 
-void Column::focus_window(PHLWINDOW window) {
+void Stack::focus_window(PHLWINDOW window) {
     for (auto win = windows.first(); win != nullptr; win = win->next()) {
         if (win->data()->ptr().lock() == window) {
             active = win;
@@ -200,19 +200,19 @@ void Column::focus_window(PHLWINDOW window) {
     }
 }
 
-double Column::get_geom_x() const {
+double Stack::get_geom_x() const {
     return geom.x;
 }
 
-double Column::get_geom_w() const {
+double Stack::get_geom_w() const {
     return geom.w;
 }
 
-void Column::set_geom_w(double w) {
+void Stack::set_geom_w(double w) {
     geom.w = w;
 }
 
-Vector2D Column::get_height() const {
+Vector2D Stack::get_height() const {
     Vector2D height;
     auto *first = windows.first()->data();
     auto *last = windows.last()->data();
@@ -221,7 +221,7 @@ Vector2D Column::get_height() const {
     return height;
 }
 
-void Column::scale(const Vector2D &bmin, const Vector2D &start, double scale, double gap) {
+void Stack::scale(const Vector2D &bmin, const Vector2D &start, double scale, double gap) {
     for (auto win = windows.first(); win != nullptr; win = win->next()) {
         const auto oldY = win->data()->get_geom_y();
         const auto newY = start.y + (oldY - bmin.y) * scale;
@@ -240,7 +240,7 @@ void Column::scale(const Vector2D &bmin, const Vector2D &start, double scale, do
     }
 }
 
-bool Column::toggle_fullscreen(const ScrollerCore::Box &fullbbox, Mode mode) {
+bool Stack::toggle_fullscreen(const ScrollerCore::Box &fullbbox, Mode mode) {
     full = fullbbox;
 
     if (mode == Mode::Row) {
@@ -257,25 +257,25 @@ bool Column::toggle_fullscreen(const ScrollerCore::Box &fullbbox, Mode mode) {
     return active->data()->toggle_expand(fullbbox.h);
 }
 
-void Column::set_fullscreen(const ScrollerCore::Box &fullbbox) {
+void Stack::set_fullscreen(const ScrollerCore::Box &fullbbox) {
     full = fullbbox;
 }
 
-void Column::push_geom() {
+void Stack::push_geom() {
     mem.geom = geom;
     for (auto w = windows.first(); w != nullptr; w = w->next()) {
         w->data()->push_geom();
     }
 }
 
-void Column::pop_geom() {
+void Stack::pop_geom() {
     geom = mem.geom;
     for (auto w = windows.first(); w != nullptr; w = w->next()) {
         w->data()->pop_geom();
     }
 }
 
-void Column::toggle_maximized(double maxw, double maxh) {
+void Stack::toggle_maximized(double maxw, double maxh) {
     maxdim = !maxdim;
     if (maxdim) {
         mem.geom = geom;
@@ -288,7 +288,7 @@ void Column::toggle_maximized(double maxw, double maxh) {
     }
 }
 
-bool Column::fullscreen() const {
+bool Stack::fullscreen() const {
     if (!active)
         return false;
 
@@ -296,19 +296,19 @@ bool Column::fullscreen() const {
     return window ? window->isFullscreen() : false;
 }
 
-bool Column::expanded() const {
+bool Stack::expanded() const {
     return fullscreened || (active && active->data()->expanded());
 }
 
-bool Column::maximized() const {
+bool Stack::maximized() const {
     return maxdim;
 }
 
-void Column::set_geom_pos(double x, double y) {
+void Stack::set_geom_pos(double x, double y) {
     geom.set_pos(x, y);
 }
 
-void Column::recalculate_col_geometry(const Vector2D &gap_x, double gap) {
+void Stack::recalculate_stack_geometry(const Vector2D &gap_x, double gap) {
     if (fullscreen()) {
         PHLWINDOW wactive = active->data()->ptr().lock();
         active->data()->set_geom_y(full.y);
@@ -328,7 +328,7 @@ void Column::recalculate_col_geometry(const Vector2D &gap_x, double gap) {
     const auto top = geom.y;
     const auto bottom = geom.y + geom.h - wactive->get_geom_h();
 
-    spdlog::debug("col_recalc_input: active_window={} logical_y={} logical_h={} geom=({}, {}, {}, {})",
+    spdlog::debug("stack_recalc_input: active_window={} logical_y={} logical_h={} geom=({}, {}, {}, {})",
                   static_cast<const void*>(win ? win.get() : nullptr),
                   wactive->get_geom_y(),
                   wactive->get_geom_h(),
@@ -371,7 +371,7 @@ void Column::recalculate_col_geometry(const Vector2D &gap_x, double gap) {
     const double new_y = choose_anchor_y(next != nullptr, prev != nullptr, active_h, next_h, prev_h, geom);
     wactive->set_geom_y(new_y);
     adjust_windows(active, gap_x, gap);
-    spdlog::debug("col_recalc_auto: active_window={} keep_current={} prev_visible={} next_visible={} new_y={}",
+    spdlog::debug("stack_recalc_auto: active_window={} keep_current={} prev_visible={} next_visible={} new_y={}",
                   static_cast<const void*>(win ? win.get() : nullptr),
                   keep_current,
                   is_window_fully_visible(prev, prev_gap, geom),
@@ -379,11 +379,11 @@ void Column::recalculate_col_geometry(const Vector2D &gap_x, double gap) {
                   new_y);
 }
 
-PHLWINDOW Column::get_active_window() {
+PHLWINDOW Stack::get_active_window() {
     return active->data()->ptr().lock();
 }
 
-void Column::move_active_up() {
+void Stack::move_active_up() {
     if (active == windows.first())
         return;
 
@@ -392,7 +392,7 @@ void Column::move_active_up() {
     windows.swap(active, prev);
 }
 
-void Column::move_active_down() {
+void Stack::move_active_down() {
     if (active == windows.last())
         return;
 
@@ -401,7 +401,7 @@ void Column::move_active_down() {
     windows.swap(active, next);
 }
 
-FocusMoveResult Column::move_focus_up(bool focus_wrap) {
+FocusMoveResult Stack::move_focus_up(bool focus_wrap) {
     if (active != windows.first()) {
         reorder = Reorder::Auto;
         active = active->prev();
@@ -419,7 +419,7 @@ FocusMoveResult Column::move_focus_up(bool focus_wrap) {
     return active != previous ? FocusMoveResult::Moved : FocusMoveResult::NoOp;
 }
 
-FocusMoveResult Column::move_focus_down(bool focus_wrap) {
+FocusMoveResult Stack::move_focus_down(bool focus_wrap) {
     if (active != windows.last()) {
         reorder = Reorder::Auto;
         active = active->next();
@@ -436,12 +436,12 @@ FocusMoveResult Column::move_focus_down(bool focus_wrap) {
     return active != previous ? FocusMoveResult::Moved : FocusMoveResult::NoOp;
 }
 
-void Column::admit_window(Window *window) {
+void Stack::admit_window(Window *window) {
     reorder = Reorder::Auto;
     active = windows.emplace_after(active, window);
 }
 
-Window *Column::expel_active(double gap) {
+Window *Stack::expel_active(double gap) {
     reorder = Reorder::Auto;
     Window *window = active->data();
     auto act = active == windows.first() ? active->next() : active->prev();
@@ -450,7 +450,7 @@ Window *Column::expel_active(double gap) {
     return window;
 }
 
-void Column::align_window(Direction direction, double gap) {
+void Stack::align_window(Direction direction, double gap) {
     PHLWINDOW window = active->data()->ptr().lock();
     auto border = window->getRealBorderSize();
     auto gap0 = active == windows.first() ? 0.0 : gap;
@@ -473,31 +473,31 @@ void Column::align_window(Direction direction, double gap) {
     }
 }
 
-ColumnWidth Column::get_width() const {
+StackWidth Stack::get_width() const {
     return width;
 }
 
-void Column::set_width_free() {
-    width = ColumnWidth::Free;
+void Stack::set_width_free() {
+    width = StackWidth::Free;
 }
 
 #ifdef COLORS_IPC
-std::string Column::get_width_name() const {
+std::string Stack::get_width_name() const {
     switch (width) {
-    case ColumnWidth::OneThird:
+    case StackWidth::OneThird:
         return "OneThird";
-    case ColumnWidth::OneHalf:
+    case StackWidth::OneHalf:
         return "OneHalf";
-    case ColumnWidth::TwoThirds:
+    case StackWidth::TwoThirds:
         return "TwoThirds";
-    case ColumnWidth::Free:
+    case StackWidth::Free:
         return "Free";
     default:
         return "";
     }
 }
 
-std::string Column::get_height_name() const {
+std::string Stack::get_height_name() const {
     switch (height) {
     case WindowHeight::Auto:
         return "Auto";
@@ -509,21 +509,21 @@ std::string Column::get_height_name() const {
 }
 #endif
 
-void Column::update_width(ColumnWidth cwidth, double maxw, double maxh) {
+void Stack::update_width(StackWidth cwidth, double maxw, double maxh) {
     if (maximized()) {
         geom.w = maxw;
     } else {
         switch (cwidth) {
-        case ColumnWidth::OneThird:
+        case StackWidth::OneThird:
             geom.w = maxw / 3.0;
             break;
-        case ColumnWidth::OneHalf:
+        case StackWidth::OneHalf:
             geom.w = maxw / 2.0;
             break;
-        case ColumnWidth::TwoThirds:
+        case StackWidth::TwoThirds:
             geom.w = 2.0 * maxw / 3.0;
             break;
-        case ColumnWidth::Free:
+        case StackWidth::Free:
             geom.w = maxw;
             break;
         default:
@@ -534,7 +534,7 @@ void Column::update_width(ColumnWidth cwidth, double maxw, double maxh) {
     width = cwidth;
 }
 
-void Column::fit_size(FitSize fitsize, const Vector2D &gap_x, double gap) {
+void Stack::fit_size(FitSize fitsize, const Vector2D &gap_x, double gap) {
     reorder = Reorder::Auto;
     ListNode<Window *> *from, *to;
     switch (fitsize) {
@@ -590,7 +590,7 @@ void Column::fit_size(FitSize fitsize, const Vector2D &gap_x, double gap) {
     }
 }
 
-void Column::cycle_size_active_window(int step, const Vector2D &gap_x, double gap) {
+void Stack::cycle_size_active_window(int step, const Vector2D &gap_x, double gap) {
     reorder = Reorder::Auto;
     WindowHeight height = active->data()->get_height();
     if (height == WindowHeight::Free) {
@@ -600,10 +600,10 @@ void Column::cycle_size_active_window(int step, const Vector2D &gap_x, double ga
         height = static_cast<WindowHeight>((number + static_cast<int>(height) + step) % number);
     }
     active->data()->update_height(height, geom.h);
-    recalculate_col_geometry(gap_x, gap);
+    recalculate_stack_geometry(gap_x, gap);
 }
 
-void Column::adjust_windows(ListNode<Window *> *win, const Vector2D &gap_x, double gap) {
+void Stack::adjust_windows(ListNode<Window *> *win, const Vector2D &gap_x, double gap) {
     if (win) {
         auto anchorWindow = win->data()->ptr().lock();
         if (anchorWindow) {
@@ -659,7 +659,7 @@ void Column::adjust_windows(ListNode<Window *> *win, const Vector2D &gap_x, doub
     }
 
     if (shiftedAbove > 0 || shiftedBelow > 0) {
-        spdlog::debug("col_recalc_reserved_shift: active_window={} reserved_top={} reserved_bottom={} shifted_above={} shifted_below={}",
+        spdlog::debug("stack_recalc_reserved_shift: active_window={} reserved_top={} reserved_bottom={} shifted_above={} shifted_below={}",
                       static_cast<const void*>(anchorWindow ? anchorWindow.get() : nullptr),
                       reservedTop,
                       reservedBottom,
@@ -681,7 +681,7 @@ void Column::adjust_windows(ListNode<Window *> *win, const Vector2D &gap_x, doub
     }
 }
 
-void Column::resize_active_window(double maxw, const Vector2D &gap_x, double gap, const Vector2D &delta) {
+void Stack::resize_active_window(double maxw, const Vector2D &gap_x, double gap, const Vector2D &delta) {
     auto border = active->data()->ptr().lock()->getRealBorderSize();
     auto rwidth = geom.w + delta.x - 2.0 * border - gap_x.x - gap_x.y;
     auto mwidth = geom.w + delta.x - 2.0 * (border + std::max(std::max(gap_x.x, gap_x.y), gap));
@@ -700,7 +700,7 @@ void Column::resize_active_window(double maxw, const Vector2D &gap_x, double gap
         }
     }
     reorder = Reorder::Auto;
-    width = ColumnWidth::Free;
+    width = StackWidth::Free;
 
     geom.w += delta.x;
     if (std::abs(static_cast<int>(delta.y)) > 0) {

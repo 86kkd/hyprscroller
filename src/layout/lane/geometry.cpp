@@ -1,4 +1,4 @@
-#include "row.h"
+#include "lane.h"
 
 #include <cmath>
 #include <sstream>
@@ -14,18 +14,18 @@
 
 namespace {
 namespace viewport {
-bool column_intersects_visible_box(const Column *column, const ScrollerCore::Box &visible_box) {
-    if (!column)
+bool stack_intersects_visible_box(const Stack *stack, const ScrollerCore::Box &visible_box) {
+    if (!stack)
         return false;
 
-    const auto left = column->get_geom_x();
-    const auto right = left + column->get_geom_w();
+    const auto left = stack->get_geom_x();
+    const auto right = left + stack->get_geom_w();
     return left < visible_box.x + visible_box.w && left >= visible_box.x ||
            right > visible_box.x && right <= visible_box.x + visible_box.w ||
            left < visible_box.x && right >= visible_box.x + visible_box.w;
 }
 
-double choose_anchor_x(const ListNode<Column *> *active, const double active_width,
+double choose_anchor_x(const ListNode<Stack *> *active, const double active_width,
                        const double fallback_x, const ScrollerCore::Box &visible_box) {
     const auto next = active->next();
     const auto prev = active->prev();
@@ -49,18 +49,18 @@ double choose_anchor_x(const ListNode<Column *> *active, const double active_wid
 } // namespace viewport
 
 namespace logging {
-const void* active_window_ptr(Column *column) {
-    if (!column)
+const void* active_window_ptr(Stack *stack) {
+    if (!stack)
         return nullptr;
 
-    const auto window = column->get_active_window();
+    const auto window = stack->get_active_window();
     return static_cast<const void*>(window ? window.get() : nullptr);
 }
 
-std::string summarize_columns(List<Column *>& columns) {
+std::string summarize_stacks(List<Stack *>& stacks) {
     std::ostringstream out;
-    for (auto col = columns.first(); col != nullptr; col = col->next()) {
-        if (col != columns.first())
+    for (auto col = stacks.first(); col != nullptr; col = col->next()) {
+        if (col != stacks.first())
             out << " | ";
 
         auto *data = col->data();
@@ -73,43 +73,43 @@ std::string summarize_columns(List<Column *>& columns) {
 } // namespace logging
 } // namespace
 
-Vector2D Row::calculate_gap_x(const ListNode<Column *> *column) const {
-    auto gap0 = column == columns.first() ? 0.0 : gap;
-    auto gap1 = column == columns.last() ? 0.0 : gap;
+Vector2D Lane::calculate_gap_x(const ListNode<Stack *> *stack) const {
+    auto gap0 = stack == stacks.first() ? 0.0 : gap;
+    auto gap1 = stack == stacks.last() ? 0.0 : gap;
     return Vector2D(gap0, gap1);
 }
 
-void Row::center_active_column() {
-    Column *column = active->data();
-    if (column->maximized())
+void Lane::center_active_stack() {
+    Stack *stack = active->data();
+    if (stack->maximized())
         return;
 
-    switch (column->get_width()) {
-    case ColumnWidth::OneThird:
-        column->set_geom_pos(max.x + max.w / 3.0, max.y);
+    switch (stack->get_width()) {
+    case StackWidth::OneThird:
+        stack->set_geom_pos(max.x + max.w / 3.0, max.y);
         break;
-    case ColumnWidth::OneHalf:
-        column->set_geom_pos(max.x + max.w / 4.0, max.y);
+    case StackWidth::OneHalf:
+        stack->set_geom_pos(max.x + max.w / 4.0, max.y);
         break;
-    case ColumnWidth::TwoThirds:
-        column->set_geom_pos(max.x + max.w / 6.0, max.y);
+    case StackWidth::TwoThirds:
+        stack->set_geom_pos(max.x + max.w / 6.0, max.y);
         break;
-    case ColumnWidth::Free:
-        column->set_geom_pos(0.5 * (max.w - column->get_geom_w()), max.y);
+    case StackWidth::Free:
+        stack->set_geom_pos(0.5 * (max.w - stack->get_geom_w()), max.y);
         break;
     default:
         break;
     }
 }
 
-Vector2D Row::predict_window_size() const {
+Vector2D Lane::predict_window_size() const {
     if (mode == Mode::Column)
         return Vector2D(max.w, 0.5 * max.h);
 
     return Vector2D(0.5 * max.w, max.h);
 }
 
-void Row::update_sizes(PHLMONITOR monitor) {
+void Lane::update_sizes(PHLMONITOR monitor) {
     static auto PGAPSINDATA = CConfigValue<Hyprlang::CUSTOMTYPE>("general:gaps_in");
     static auto PGAPSOUTDATA = CConfigValue<Hyprlang::CUSTOMTYPE>("general:gaps_out");
     auto *const PGAPSIN = (CCssGapData *)(PGAPSINDATA.ptr())->getData();
@@ -131,30 +131,30 @@ void Row::update_sizes(PHLMONITOR monitor) {
     gap = gaps_in;
 }
 
-void Row::set_fullscreen_active_window() {
+void Lane::set_fullscreen_active_window() {
     active->data()->set_fullscreen(full);
-    active->data()->recalculate_col_geometry(calculate_gap_x(active), gap);
+    active->data()->recalculate_stack_geometry(calculate_gap_x(active), gap);
 }
 
-void Row::toggle_fullscreen_active_window() {
-    Column *column = active->data();
-    (void)column->toggle_fullscreen(max, mode);
-    recalculate_row_geometry();
+void Lane::toggle_fullscreen_active_window() {
+    Stack *stack = active->data();
+    (void)stack->toggle_fullscreen(max, mode);
+    recalculate_lane_geometry();
 }
 
-void Row::toggle_maximize_active_column() {
-    Column *column = active->data();
-    column->toggle_maximized(max.w, max.h);
+void Lane::toggle_maximize_active_stack() {
+    Stack *stack = active->data();
+    stack->toggle_maximized(max.w, max.h);
     reorder = Reorder::Auto;
-    recalculate_row_geometry();
+    recalculate_lane_geometry();
 }
 
-void Row::toggle_overview() {
+void Lane::toggle_overview() {
     overview = !overview;
     if (overview) {
         Vector2D bmin(max.x + max.w, max.y + max.h);
         Vector2D bmax(max.x, max.y);
-        for (auto c = columns.first(); c != nullptr; c = c->next()) {
+        for (auto c = stacks.first(); c != nullptr; c = c->next()) {
             auto cx0 = c->data()->get_geom_x();
             auto cx1 = cx0 + c->data()->get_geom_w();
             Vector2D cheight = c->data()->get_height();
@@ -170,8 +170,8 @@ void Row::toggle_overview() {
         double w = bmax.x - bmin.x;
         double h = bmax.y - bmin.y;
         double scale = std::min(max.w / w, max.h / h);
-        for (auto c = columns.first(); c != nullptr; c = c->next()) {
-            Column *col = c->data();
+        for (auto c = stacks.first(); c != nullptr; c = c->next()) {
+            Stack *col = c->data();
             col->push_geom();
             Vector2D cheight = col->get_height();
             Vector2D offset(0.5 * (max.w - w * scale), 0.5 * (max.h - h * scale));
@@ -180,48 +180,48 @@ void Row::toggle_overview() {
             Vector2D start(offset.x + max.x, offset.y + max.y);
             col->scale(bmin, start, scale, gap);
         }
-        adjust_columns(columns.first());
+        adjust_stacks(stacks.first());
     } else {
-        for (auto c = columns.first(); c != nullptr; c = c->next()) {
-            Column *col = c->data();
+        for (auto c = stacks.first(); c != nullptr; c = c->next()) {
+            Stack *col = c->data();
             col->pop_geom();
         }
-        Column *acolumn = active->data();
+        Stack *acolumn = active->data();
         if (acolumn->get_geom_x() < max.x) {
             acolumn->set_geom_pos(max.x, max.y);
         } else if (acolumn->get_geom_x() + acolumn->get_geom_w() > max.x + max.w) {
             acolumn->set_geom_pos(max.x + max.w - acolumn->get_geom_w(), max.y);
         }
-        adjust_columns(active);
+        adjust_stacks(active);
     }
 }
 
-void Row::recalculate_row_geometry() {
+void Lane::recalculate_lane_geometry() {
     if (active == nullptr)
         return;
 
     if (const auto activeWindow = active->data()->get_active_window(); activeWindow && activeWindow->isFullscreen()) {
-        active->data()->recalculate_col_geometry(calculate_gap_x(active), gap);
+        active->data()->recalculate_stack_geometry(calculate_gap_x(active), gap);
         return;
     }
 #ifdef COLORS_IPC
     static auto *const FREECOLUMN = (CGradientValueData *) HyprlandAPI::getConfigValue(PHANDLE, "plugin:scroller:col.freecolumn_border")->data.get();
     static auto *const ACTIVECOL = (CGradientValueData *)g_pConfigManager->getConfigValuePtr("general:col.active_border")->data.get();
-    if (active->data()->get_width() == ColumnWidth::Free) {
+    if (active->data()->get_width() == StackWidth::Free) {
         active->data()->get_active_window()->m_cRealBorderColor = *FREECOLUMN;
     } else {
         active->data()->get_active_window()->m_cRealBorderColor = *ACTIVECOL;
     }
     g_pEventManager->postEvent(SHyprIPCEvent{"scroller", active->data()->get_width_name() + "," + active->data()->get_height_name()});
 #endif
-    if (columns.size() == 1 && active->data()->size() == 1) {
+    if (stacks.size() == 1 && active->data()->size() == 1) {
         active->data()->set_geom_pos(max.x, max.y);
         active->data()->set_geom_w(max.w);
-        active->data()->recalculate_col_geometry(calculate_gap_x(active), gap);
-        spdlog::debug("row_recalc_single: workspace={} active_window={} cols={}",
+        active->data()->recalculate_stack_geometry(calculate_gap_x(active), gap);
+        spdlog::debug("lane_recalc_single: workspace={} active_window={} stacks={}",
                       workspace,
                       logging::active_window_ptr(active->data()),
-                      logging::summarize_columns(columns));
+                      logging::summarize_stacks(stacks));
         return;
     }
 
@@ -231,7 +231,7 @@ void Row::recalculate_row_geometry() {
         a_x = active->data()->get_geom_x();
     } else {
         if (active->prev()) {
-            Column *prev = active->prev()->data();
+            Stack *prev = active->prev()->data();
             a_x = prev->get_geom_x() + prev->get_geom_w();
         } else if (active->next()) {
             a_x = active->data()->get_geom_x();
@@ -240,7 +240,7 @@ void Row::recalculate_row_geometry() {
         }
         active->data()->set_init();
     }
-    spdlog::debug("row_recalc_input: workspace={} active_window={} active_x={} active_w={} max=({}, {}, {}, {}) cols_before={}",
+    spdlog::debug("lane_recalc_input: workspace={} active_window={} active_x={} active_w={} max=({}, {}, {}, {}) stacks_before={}",
                   workspace,
                   logging::active_window_ptr(active->data()),
                   a_x,
@@ -249,72 +249,72 @@ void Row::recalculate_row_geometry() {
                   max.y,
                   max.w,
                   max.h,
-                  logging::summarize_columns(columns));
+                  logging::summarize_stacks(stacks));
     if (a_x < max.x) {
         a_x = max.x;
         active->data()->set_geom_pos(max.x, max.y);
-        adjust_columns(active);
-        spdlog::debug("row_recalc_clamp_left: workspace={} active_window={} active_x={} cols_after={}",
+        adjust_stacks(active);
+        spdlog::debug("lane_recalc_clamp_left: workspace={} active_window={} active_x={} stacks_after={}",
                       workspace,
                       logging::active_window_ptr(active->data()),
                       active->data()->get_geom_x(),
-                      logging::summarize_columns(columns));
+                      logging::summarize_stacks(stacks));
         return;
     }
     if (std::round(a_x + a_w) > max.x + max.w) {
         a_x = max.x + max.w - a_w;
         active->data()->set_geom_pos(a_x, max.y);
-        adjust_columns(active);
-        spdlog::debug("row_recalc_clamp_right: workspace={} active_window={} active_x={} cols_after={}",
+        adjust_stacks(active);
+        spdlog::debug("lane_recalc_clamp_right: workspace={} active_window={} active_x={} stacks_after={}",
                       workspace,
                       logging::active_window_ptr(active->data()),
                       active->data()->get_geom_x(),
-                      logging::summarize_columns(columns));
+                      logging::summarize_stacks(stacks));
         return;
     }
     if (reorder != Reorder::Auto) {
         active->data()->set_geom_pos(a_x, max.y);
-        adjust_columns(active);
-        spdlog::debug("row_recalc_lazy: workspace={} active_window={} active_x={} cols_after={}",
+        adjust_stacks(active);
+        spdlog::debug("lane_recalc_lazy: workspace={} active_window={} active_x={} stacks_after={}",
                       workspace,
                       logging::active_window_ptr(active->data()),
                       active->data()->get_geom_x(),
-                      logging::summarize_columns(columns));
+                      logging::summarize_stacks(stacks));
         return;
     }
 
     const Box active_window(max.x, max.y, max.w, max.h);
-    const bool prev_inside = viewport::column_intersects_visible_box(active->prev() ? active->prev()->data() : nullptr, active_window);
-    const bool next_inside = viewport::column_intersects_visible_box(active->next() ? active->next()->data() : nullptr, active_window);
+    const bool prev_inside = viewport::stack_intersects_visible_box(active->prev() ? active->prev()->data() : nullptr, active_window);
+    const bool next_inside = viewport::stack_intersects_visible_box(active->next() ? active->next()->data() : nullptr, active_window);
     const bool keep_current = prev_inside || next_inside;
     const double new_x = keep_current ? a_x : viewport::choose_anchor_x(active, a_w, a_x, max);
     active->data()->set_geom_pos(new_x, max.y);
-    adjust_columns(active);
-    spdlog::debug("row_recalc_auto: workspace={} active_window={} keep_current={} prev_inside={} next_inside={} new_x={} cols_after={}",
+    adjust_stacks(active);
+    spdlog::debug("lane_recalc_auto: workspace={} active_window={} keep_current={} prev_inside={} next_inside={} new_x={} stacks_after={}",
                   workspace,
                   logging::active_window_ptr(active->data()),
                   keep_current,
                   prev_inside,
                   next_inside,
                   new_x,
-                  logging::summarize_columns(columns));
+                  logging::summarize_stacks(stacks));
 }
 
-void Row::adjust_columns(ListNode<Column *> *column) {
-    for (auto col = column->prev(), prev = column; col != nullptr; prev = col, col = col->prev()) {
+void Lane::adjust_stacks(ListNode<Stack *> *stack) {
+    for (auto col = stack->prev(), prev = stack; col != nullptr; prev = col, col = col->prev()) {
         col->data()->set_geom_pos(prev->data()->get_geom_x() - col->data()->get_geom_w(), max.y);
         col->data()->set_init();
     }
-    for (auto col = column->next(), prev = column; col != nullptr; prev = col, col = col->next()) {
+    for (auto col = stack->next(), prev = stack; col != nullptr; prev = col, col = col->next()) {
         col->data()->set_geom_pos(prev->data()->get_geom_x() + prev->data()->get_geom_w(), max.y);
         col->data()->set_init();
     }
 
-    column->data()->set_init();
+    stack->data()->set_init();
 
-    for (auto col = columns.first(); col != nullptr; col = col->next()) {
-        auto gap0 = col == columns.first() ? 0.0 : gap;
-        auto gap1 = col == columns.last() ? 0.0 : gap;
-        col->data()->recalculate_col_geometry(Vector2D(gap0, gap1), gap);
+    for (auto col = stacks.first(); col != nullptr; col = col->next()) {
+        auto gap0 = col == stacks.first() ? 0.0 : gap;
+        auto gap1 = col == stacks.last() ? 0.0 : gap;
+        col->data()->recalculate_stack_geometry(Vector2D(gap0, gap1), gap);
     }
 }

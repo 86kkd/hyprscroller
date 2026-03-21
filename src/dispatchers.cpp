@@ -10,14 +10,14 @@
 #include <optional>
 
 #include "dispatchers.h"
-#include "layout/scroller/layout.h"
+#include "layout/canvas/layout.h"
 
 extern HANDLE PHANDLE;
 
 namespace {
     // Resolve scroller layout instance from workspace id, returning nullptr if that
     // workspace is not currently managed by this plugin.
-    ScrollerLayout *getScrollerForWorkspace(const int workspace_id) {
+    CanvasLayout *getCanvasForWorkspace(const int workspace_id) {
         const auto workspace = g_pCompositor->getWorkspaceByID(workspace_id);
         if (!workspace || !workspace->m_space) {
             return nullptr;
@@ -33,7 +33,7 @@ namespace {
             return nullptr;
         }
 
-        return dynamic_cast<ScrollerLayout *>(tiled.get());
+        return dynamic_cast<CanvasLayout *>(tiled.get());
     }
 
     PHLWORKSPACE getWorkspaceForAction(PHLMONITOR monitor) {
@@ -53,7 +53,7 @@ namespace {
 
     // Resolve layout by cursor position and current active workspace, while
     // excluding fullscreen contexts that should not react to plugin actions.
-    ScrollerLayout *layout_for_action(int *workspace) {
+    CanvasLayout *layout_for_action(int *workspace) {
         PHLMONITOR monitor = g_pCompositor->getMonitorFromCursor();
         if (!monitor) {
             spdlog::warn("layout_for_action: no monitor under cursor");
@@ -82,7 +82,7 @@ namespace {
         if (workspace)
             *workspace = workspace_id;
 
-        return getScrollerForWorkspace(workspace_id);
+        return getCanvasForWorkspace(workspace_id);
     }
 
     // Parse direction-like arguments used by movefocus/movewindow/alignwindow.
@@ -119,7 +119,7 @@ namespace {
         return {};
     }
 
-    // cyclesize(+1|-1): change active row/column width/height step.
+    // cyclesize(+1|-1): change active stack width/height step.
     void dispatch_cyclesize(std::string arg) {
         int workspace;
         auto layout = layout_for_action(&workspace);
@@ -156,7 +156,7 @@ namespace {
         }
     }
 
-    // movewindow <dir>: reorder active window inside row/column.
+    // movewindow <dir>: reorder active window inside lane/stack.
     void dispatch_movewindow(std::string arg) {
         int workspace;
         auto layout = layout_for_action(&workspace);
@@ -169,7 +169,7 @@ namespace {
         }
     }
 
-    // alignwindow <dir>: align active window/column against row/column geometry.
+    // alignwindow <dir>: align active window/stack against lane/stack geometry.
     void dispatch_alignwindow(std::string arg) {
         int workspace;
         auto layout = layout_for_action(&workspace);
@@ -192,7 +192,7 @@ namespace {
         layout->admit_window_left(workspace);
     }
 
-    // expelwindow: remove focused window from current column into a new one right
+    // expelwindow: remove focused window from current stack into a new one right
     // after it.
     void dispatch_expelwindow(std::string arg) {
         int workspace;

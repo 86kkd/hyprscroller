@@ -7,7 +7,7 @@
 #include <spdlog/spdlog.h>
 
 #include "../../core/core.h"
-#include "../row/row.h"
+#include "../lane/lane.h"
 #include "layout.h"
 #include "internal.h"
 
@@ -16,38 +16,38 @@ using namespace ScrollerCore;
 static Marks marks;
 
 namespace {
-ListNode<Row*>* find_row_node(List<Row*>& rows, Row* target) {
-    for (auto row = rows.first(); row != nullptr; row = row->next()) {
-        if (row->data() == target)
-            return row;
+ListNode<Lane*>* find_lane_node(List<Lane*>& lanes, Lane* target) {
+    for (auto lane = lanes.first(); lane != nullptr; lane = lane->next()) {
+        if (lane->data() == target)
+            return lane;
     }
     return nullptr;
 }
 
-void clear_rows(List<Row*>& rows) {
-    for (auto row = rows.first(); row != nullptr; row = row->next())
-        delete row->data();
-    rows.clear();
+void clear_lanes(List<Lane*>& lanes) {
+    for (auto lane = lanes.first(); lane != nullptr; lane = lane->next())
+        delete lane->data();
+    lanes.clear();
 }
 } // namespace
 
-Row *ScrollerLayout::getRowForWorkspace(int workspace) {
-    for (auto row = rows.first(); row != nullptr; row = row->next()) {
-        if (row->data()->get_workspace() == workspace)
-            return row->data();
+Lane *CanvasLayout::getLaneForWorkspace(int workspace) {
+    for (auto lane = lanes.first(); lane != nullptr; lane = lane->next()) {
+        if (lane->data()->get_workspace() == workspace)
+            return lane->data();
     }
     return nullptr;
 }
 
-Row *ScrollerLayout::getRowForWindow(PHLWINDOW window) {
-    for (auto row = rows.first(); row != nullptr; row = row->next()) {
-        if (row->data()->has_window(window))
-            return row->data();
+Lane *CanvasLayout::getLaneForWindow(PHLWINDOW window) {
+    for (auto lane = lanes.first(); lane != nullptr; lane = lane->next()) {
+        if (lane->data()->has_window(window))
+            return lane->data();
     }
     return nullptr;
 }
 
-void ScrollerLayout::newTarget(SP<Layout::ITarget> target) {
+void CanvasLayout::newTarget(SP<Layout::ITarget> target) {
     if (!target)
         return;
 
@@ -57,10 +57,10 @@ void ScrollerLayout::newTarget(SP<Layout::ITarget> target) {
 
     spdlog::info("newTarget: window={} workspace={}", static_cast<const void*>(window.get()), window->workspaceID());
     onWindowCreatedTiling(window, Math::DIRECTION_DEFAULT);
-    ScrollerLayoutInternal::switch_to_window(window);
+    CanvasLayoutInternal::switch_to_window(window);
 }
 
-void ScrollerLayout::movedTarget(SP<Layout::ITarget> target, std::optional<Vector2D>)
+void CanvasLayout::movedTarget(SP<Layout::ITarget> target, std::optional<Vector2D>)
 {
     if (!target)
         return;
@@ -72,7 +72,7 @@ void ScrollerLayout::movedTarget(SP<Layout::ITarget> target, std::optional<Vecto
     onWindowCreatedTiling(window, Math::DIRECTION_DEFAULT);
 }
 
-void ScrollerLayout::removeTarget(SP<Layout::ITarget> target)
+void CanvasLayout::removeTarget(SP<Layout::ITarget> target)
 {
     if (!target)
         return;
@@ -80,13 +80,13 @@ void ScrollerLayout::removeTarget(SP<Layout::ITarget> target)
     onWindowRemovedTiling(target->window());
 }
 
-void ScrollerLayout::resizeTarget(const Vector2D &delta, SP<Layout::ITarget> target, Layout::eRectCorner)
+void CanvasLayout::resizeTarget(const Vector2D &delta, SP<Layout::ITarget> target, Layout::eRectCorner)
 {
     auto window = windowFromTarget(target);
     if (!window)
         return;
 
-    auto s = getRowForWindow(window);
+    auto s = getLaneForWindow(window);
     if (s == nullptr) {
         if (window->m_realSize)
             *window->m_realSize = Vector2D(std::max((window->m_realSize->goal() + delta).x, 20.0), std::max((window->m_realSize->goal() + delta).y, 20.0));
@@ -98,40 +98,40 @@ void ScrollerLayout::resizeTarget(const Vector2D &delta, SP<Layout::ITarget> tar
     s->resize_active_window(delta);
 }
 
-void ScrollerLayout::recalculate()
+void CanvasLayout::recalculate()
 {
-    for (auto row = rows.first(); row != nullptr; row = row->next()) {
-        const auto workspace = g_pCompositor->getWorkspaceByID(row->data()->get_workspace());
+    for (auto lane = lanes.first(); lane != nullptr; lane = lane->next()) {
+        const auto workspace = g_pCompositor->getWorkspaceByID(lane->data()->get_workspace());
         if (!workspace)
             continue;
 
-        const auto monitor = ScrollerLayoutInternal::visible_monitor_for_workspace(workspace);
+        const auto monitor = CanvasLayoutInternal::visible_monitor_for_workspace(workspace);
         if (!monitor)
             continue;
 
-        ScrollerLayoutInternal::recalculate_workspace_row(row->data(), monitor, workspace, true);
+        CanvasLayoutInternal::recalculate_workspace_lane(lane->data(), monitor, workspace, true);
     }
 }
 
-std::expected<void, std::string> ScrollerLayout::layoutMsg(const std::string_view&)
+std::expected<void, std::string> CanvasLayout::layoutMsg(const std::string_view&)
 {
     return {};
 }
 
-std::optional<Vector2D> ScrollerLayout::predictSizeForNewTarget()
+std::optional<Vector2D> CanvasLayout::predictSizeForNewTarget()
 {
     auto monitor = monitorFromPointingOrCursor();
     if (!monitor)
         return {};
 
-    auto row = getRowForWorkspace(monitor->activeWorkspaceID());
-    if (!row)
+    auto lane = getLaneForWorkspace(monitor->activeWorkspaceID());
+    if (!lane)
         return Vector2D(monitor->m_size.x, monitor->m_size.y);
 
-    return row->predict_window_size();
+    return lane->predict_window_size();
 }
 
-SP<Layout::ITarget> ScrollerLayout::getNextCandidate(SP<Layout::ITarget> old)
+SP<Layout::ITarget> CanvasLayout::getNextCandidate(SP<Layout::ITarget> old)
 {
     int workspace_id = WORKSPACE_INVALID;
     if (auto oldWindow = windowFromTarget(old))
@@ -142,7 +142,7 @@ SP<Layout::ITarget> ScrollerLayout::getNextCandidate(SP<Layout::ITarget> old)
             workspace_id = monitor->activeWorkspaceID();
     }
 
-    auto s = getRowForWorkspace(workspace_id);
+    auto s = getLaneForWorkspace(workspace_id);
     if (!s)
         return {};
 
@@ -153,55 +153,55 @@ SP<Layout::ITarget> ScrollerLayout::getNextCandidate(SP<Layout::ITarget> old)
     return active->layoutTarget();
 }
 
-void ScrollerLayout::swapTargets(SP<Layout::ITarget> a, SP<Layout::ITarget> b)
+void CanvasLayout::swapTargets(SP<Layout::ITarget> a, SP<Layout::ITarget> b)
 {
     auto wa = windowFromTarget(a);
     auto wb = windowFromTarget(b);
-    auto sa = getRowForWindow(wa);
-    auto sb = getRowForWindow(wb);
+    auto sa = getLaneForWindow(wa);
+    auto sb = getLaneForWindow(wb);
     if (!wa || !wb || !sa || !sb || sa != sb)
         return;
 
     sa->swapWindows(wa, wb);
 }
 
-void ScrollerLayout::moveTargetInDirection(SP<Layout::ITarget> t, Math::eDirection direction, bool)
+void CanvasLayout::moveTargetInDirection(SP<Layout::ITarget> t, Math::eDirection direction, bool)
 {
     auto window = windowFromTarget(t);
-    auto s = getRowForWindow(window);
+    auto s = getLaneForWindow(window);
     if (!s || !window)
         return;
 
     s->focus_window(window);
     switch (direction) {
         case Math::DIRECTION_LEFT:
-            s->move_active_column(Direction::Left);
+            s->move_active_stack(Direction::Left);
             break;
         case Math::DIRECTION_RIGHT:
-            s->move_active_column(Direction::Right);
+            s->move_active_stack(Direction::Right);
             break;
         case Math::DIRECTION_UP:
-            s->move_active_column(Direction::Up);
+            s->move_active_stack(Direction::Up);
             break;
         case Math::DIRECTION_DOWN:
-            s->move_active_column(Direction::Down);
+            s->move_active_stack(Direction::Down);
             break;
         default:
             return;
     }
 }
 
-void ScrollerLayout::onWindowCreatedTiling(PHLWINDOW window, Math::eDirection)
+void CanvasLayout::onWindowCreatedTiling(PHLWINDOW window, Math::eDirection)
 {
-    auto s = getRowForWorkspace(window->workspaceID());
+    auto s = getLaneForWorkspace(window->workspaceID());
     if (s == nullptr) {
-        s = new Row(window);
-        rows.push_back(s);
+        s = new Lane(window);
+        lanes.push_back(s);
     }
     s->add_active_window(window);
 }
 
-void ScrollerLayout::onWindowRemovedTiling(PHLWINDOW window)
+void CanvasLayout::onWindowRemovedTiling(PHLWINDOW window)
 {
     const auto windowPtr = static_cast<const void*>(window.get());
     const auto workspace = window ? window->workspaceID() : WORKSPACE_INVALID;
@@ -209,51 +209,51 @@ void ScrollerLayout::onWindowRemovedTiling(PHLWINDOW window)
 
     marks.remove(window);
 
-    auto s = getRowForWindow(window);
+    auto s = getLaneForWindow(window);
     if (s == nullptr) {
-        spdlog::debug("onWindowRemovedTiling: no row found for window={} workspace={}", windowPtr, workspace);
+        spdlog::debug("onWindowRemovedTiling: no lane found for window={} workspace={}", windowPtr, workspace);
         return;
     }
 
     if (s->remove_window(window))
         return;
 
-    auto row = find_row_node(rows, s);
-    if (!row) {
-        spdlog::warn("onWindowRemovedTiling: empty row missing from list row={} workspace={}",
+    auto lane = find_lane_node(lanes, s);
+    if (!lane) {
+        spdlog::warn("onWindowRemovedTiling: empty lane missing from list lane={} workspace={}",
                      static_cast<const void*>(s), workspace);
         return;
     }
 
-    auto doomed = row->data();
-    spdlog::info("onWindowRemovedTiling: deleting empty row={} workspace={}",
+    auto doomed = lane->data();
+    spdlog::info("onWindowRemovedTiling: deleting empty lane={} workspace={}",
                  static_cast<const void*>(doomed), doomed->get_workspace());
-    rows.erase(row);
+    lanes.erase(lane);
     delete doomed;
 }
 
-bool ScrollerLayout::isWindowTiled(PHLWINDOW window)
+bool CanvasLayout::isWindowTiled(PHLWINDOW window)
 {
-    return getRowForWindow(window) != nullptr;
+    return getLaneForWindow(window) != nullptr;
 }
 
-void ScrollerLayout::recalculateWindow(PHLWINDOW window)
+void CanvasLayout::recalculateWindow(PHLWINDOW window)
 {
-    auto s = getRowForWindow(window);
+    auto s = getLaneForWindow(window);
     if (s == nullptr)
         return;
 
-    s->recalculate_row_geometry();
+    s->recalculate_lane_geometry();
 }
 
-void ScrollerLayout::resizeActiveWindow(PHLWINDOW window, const Vector2D &delta,
+void CanvasLayout::resizeActiveWindow(PHLWINDOW window, const Vector2D &delta,
                                         Layout::eRectCorner, PHLWINDOW pWindow)
 {
     const auto PWINDOW = pWindow ? pWindow : window;
     if (!PWINDOW)
         return;
 
-    auto s = getRowForWindow(PWINDOW);
+    auto s = getLaneForWindow(PWINDOW);
     if (s == nullptr) {
         if (PWINDOW->m_realSize)
             *PWINDOW->m_realSize = Vector2D(std::max((PWINDOW->m_realSize->goal() + delta).x, 20.0), std::max((PWINDOW->m_realSize->goal() + delta).y, 20.0));
@@ -264,12 +264,12 @@ void ScrollerLayout::resizeActiveWindow(PHLWINDOW window, const Vector2D &delta,
     s->resize_active_window(delta);
 }
 
-void ScrollerLayout::alterSplitRatio(PHLWINDOW, float, bool)
+void CanvasLayout::alterSplitRatio(PHLWINDOW, float, bool)
 {
 }
 
-void ScrollerLayout::onEnable() {
-    clear_rows(rows);
+void CanvasLayout::onEnable() {
+    clear_lanes(lanes);
     marks.reset();
 
     const auto algorithm = m_parent.lock();
@@ -297,40 +297,40 @@ void ScrollerLayout::onEnable() {
         onWindowCreatedTiling(window);
     }
 
-    const auto monitor = ScrollerLayoutInternal::visible_monitor_for_workspace(workspace);
+    const auto monitor = CanvasLayoutInternal::visible_monitor_for_workspace(workspace);
     if (!monitor) {
         spdlog::debug("onEnable: no visible monitor for instance={} workspace={}",
                       static_cast<const void*>(this), workspace->m_id);
         return;
     }
 
-    ScrollerLayoutInternal::recalculate_workspace_row(getRowForWorkspace(workspace->m_id), monitor, workspace, !workspace->m_isSpecialWorkspace);
+    CanvasLayoutInternal::recalculate_workspace_lane(getLaneForWorkspace(workspace->m_id), monitor, workspace, !workspace->m_isSpecialWorkspace);
 }
 
-void ScrollerLayout::onDisable() {
-    clear_rows(rows);
+void CanvasLayout::onDisable() {
+    clear_lanes(lanes);
     marks.reset();
 }
 
-Vector2D ScrollerLayout::predictSizeForNewWindowTiled() {
+Vector2D CanvasLayout::predictSizeForNewWindowTiled() {
     auto monitor = monitorFromPointingOrCursor();
     if (!monitor)
         return {};
 
     int workspace_id = monitor->activeWorkspaceID();
-    auto s = getRowForWorkspace(workspace_id);
+    auto s = getLaneForWorkspace(workspace_id);
     if (s == nullptr)
         return monitor->m_size;
 
     return s->predict_window_size();
 }
 
-void ScrollerLayout::replaceWindowDataWith(PHLWINDOW, PHLWINDOW)
+void CanvasLayout::replaceWindowDataWith(PHLWINDOW, PHLWINDOW)
 {
 }
 
-void ScrollerLayout::marks_add(const std::string &name) {
-    auto workspace = getRowForWorkspace(ScrollerLayoutInternal::get_workspace_id());
+void CanvasLayout::marks_add(const std::string &name) {
+    auto workspace = getLaneForWorkspace(CanvasLayoutInternal::get_workspace_id());
     if (!workspace)
         return;
 
@@ -341,16 +341,16 @@ void ScrollerLayout::marks_add(const std::string &name) {
     marks.add(w, name);
 }
 
-void ScrollerLayout::marks_delete(const std::string &name) {
+void CanvasLayout::marks_delete(const std::string &name) {
     marks.del(name);
 }
 
-void ScrollerLayout::marks_visit(const std::string &name) {
+void CanvasLayout::marks_visit(const std::string &name) {
     PHLWINDOW window = marks.visit(name);
     if (window != nullptr)
-        ScrollerLayoutInternal::switch_to_window(window);
+        CanvasLayoutInternal::switch_to_window(window);
 }
 
-void ScrollerLayout::marks_reset() {
+void CanvasLayout::marks_reset() {
     marks.reset();
 }

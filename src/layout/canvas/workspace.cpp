@@ -13,11 +13,11 @@
 #include "internal.h"
 
 namespace {
-PHLMONITOR effective_workspace_monitor(Row* row, PHLMONITOR monitor, PHLWORKSPACE workspace) {
-    if (!row || !monitor || !workspace || !workspace->m_isSpecialWorkspace)
+PHLMONITOR effective_workspace_monitor(Lane* lane, PHLMONITOR monitor, PHLWORKSPACE workspace) {
+    if (!lane || !monitor || !workspace || !workspace->m_isSpecialWorkspace)
         return monitor;
 
-    const auto active_window = row->get_active_window();
+    const auto active_window = lane->get_active_window();
     if (!active_window)
         return monitor;
 
@@ -25,7 +25,7 @@ PHLMONITOR effective_workspace_monitor(Row* row, PHLMONITOR monitor, PHLWORKSPAC
     if (!active_monitor || active_monitor == monitor)
         return monitor;
 
-    spdlog::debug("recalculate_workspace_row: overriding special workspace monitor workspace={} from_monitor={} to_monitor={} active_window={}",
+    spdlog::debug("recalculate_workspace_lane: overriding special workspace monitor workspace={} from_monitor={} to_monitor={} active_window={}",
                   workspace->m_id,
                   monitor->m_id,
                   active_monitor->m_id,
@@ -76,7 +76,7 @@ double secondary_cross_monitor_score(PHLWINDOW window, PHLWINDOW source_window, 
 }
 } // namespace
 
-namespace ScrollerLayoutInternal {
+namespace CanvasLayoutInternal {
 const char* direction_name(Direction direction) {
     switch (direction) {
         case Direction::Left: return "left";
@@ -90,18 +90,18 @@ const char* direction_name(Direction direction) {
     }
 }
 
-void recalculate_workspace_row(Row* row, PHLMONITOR monitor, PHLWORKSPACE workspace, bool honor_fullscreen) {
-    if (!row || !monitor || !workspace)
+void recalculate_workspace_lane(Lane* lane, PHLMONITOR monitor, PHLWORKSPACE workspace, bool honor_fullscreen) {
+    if (!lane || !monitor || !workspace)
         return;
 
-    monitor = effective_workspace_monitor(row, monitor, workspace);
-    row->update_sizes(monitor);
+    monitor = effective_workspace_monitor(lane, monitor, workspace);
+    lane->update_sizes(monitor);
     if (honor_fullscreen && workspace->m_hasFullscreenWindow && workspace->m_fullscreenMode == FSMODE_FULLSCREEN) {
-        row->set_fullscreen_active_window();
+        lane->set_fullscreen_active_window();
         return;
     }
 
-    row->recalculate_row_geometry();
+    lane->recalculate_lane_geometry();
 }
 
 WORKSPACEID preferred_workspace_id(PHLMONITOR monitor, WORKSPACEID) {
@@ -130,7 +130,7 @@ PHLMONITOR visible_monitor_for_workspace(PHLWORKSPACE workspace) {
     return nullptr;
 }
 
-ScrollerLayout* get_scroller_for_workspace(const WORKSPACEID workspace_id) {
+CanvasLayout* get_canvas_for_workspace(const WORKSPACEID workspace_id) {
     const auto workspace = g_pCompositor->getWorkspaceByID(workspace_id);
     if (!workspace || !workspace->m_space)
         return nullptr;
@@ -143,7 +143,7 @@ ScrollerLayout* get_scroller_for_workspace(const WORKSPACEID workspace_id) {
     if (!tiled)
         return nullptr;
 
-    return dynamic_cast<ScrollerLayout*>(tiled.get());
+    return dynamic_cast<CanvasLayout*>(tiled.get());
 }
 
 std::optional<Math::eDirection> direction_to_math(Direction direction) {
@@ -195,9 +195,9 @@ int get_workspace_id() {
 
     return workspace_id;
 }
-} // namespace ScrollerLayoutInternal
+} // namespace CanvasLayoutInternal
 
-void ScrollerLayout::recalculateMonitor(const int &monitor_id)
+void CanvasLayout::recalculateMonitor(const int &monitor_id)
 {
     const auto monitor = g_pCompositor->getMonitorFromID(monitor_id);
     if (!monitor)
@@ -209,12 +209,12 @@ void ScrollerLayout::recalculateMonitor(const int &monitor_id)
     if (!workspace)
         return;
 
-    ScrollerLayoutInternal::recalculate_workspace_row(getRowForWorkspace(workspace->m_id), monitor, workspace, true);
+    CanvasLayoutInternal::recalculate_workspace_lane(getLaneForWorkspace(workspace->m_id), monitor, workspace, true);
 
     const auto special_workspace_id = monitor->activeSpecialWorkspaceID();
     const auto special_workspace = g_pCompositor->getWorkspaceByID(special_workspace_id);
     spdlog::debug("recalculateMonitor: monitor={} active_ws={} special_ws={} special_exists={}",
                   monitor_id, workspace->m_id, special_workspace_id, special_workspace != nullptr);
 
-    ScrollerLayoutInternal::recalculate_workspace_row(getRowForWorkspace(special_workspace_id), monitor, special_workspace, false);
+    CanvasLayoutInternal::recalculate_workspace_lane(getLaneForWorkspace(special_workspace_id), monitor, special_workspace, false);
 }

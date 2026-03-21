@@ -1,4 +1,4 @@
-#include "model.h"
+#include "stack.h"
 
 namespace ScrollerModel {
 

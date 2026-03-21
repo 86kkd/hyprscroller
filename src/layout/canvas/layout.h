@@ -2,8 +2,8 @@
  * @file layout.h
  * @brief Layout controller for Hyprscroller's tiled workspace orchestration.
  *
- * Declares `ScrollerLayout`, the Hyprland tiled algorithm implementation that
- * owns workspace rows, translates Hyprland layout callbacks, and exposes
+ * Declares `CanvasLayout`, the Hyprland tiled algorithm implementation that
+ * owns workspace lanes, translates Hyprland layout callbacks, and exposes
  * command-facing operations through dispatchers.
  */
 #pragma once
@@ -22,9 +22,9 @@ enum class Direction { Left, Right, Up, Down, Begin, End, Center };
 enum class FitSize { Active, Visible, All, ToEnd, ToBeg };
 enum class Mode { Row, Column };
 
-class Row;
+class Lane;
 
-class ScrollerLayout : public Layout::ITiledAlgorithm {
+class CanvasLayout : public Layout::ITiledAlgorithm {
 public:
     // Public hooks required by Hyprland's tiled algorithm interface.
     void                             newTarget(SP<Layout::ITarget> target) override;
@@ -60,7 +60,7 @@ public:
     // Compatibility no-op for split ratio events.
     void alterSplitRatio(PHLWINDOW, float, bool);
     PHLWINDOW getNextWindowCandidate(PHLWINDOW);
-    // Keep active row/column selection synchronized with focus changes.
+    // Keep active lane/stack selection synchronized with focus changes.
     void onWindowFocusChange(PHLWINDOW);
     void replaceWindowDataWith(PHLWINDOW from, PHLWINDOW to);
     Vector2D predictSizeForNewWindowTiled();
@@ -84,9 +84,9 @@ public:
     void marks_reset();
 
 private:
-    // Resolve the active row for a workspace or a specific window.
-    Row *getRowForWorkspace(int workspace);
-    Row *getRowForWindow(PHLWINDOW window);
+    // Resolve the active lane for a workspace or a specific window.
+    Lane *getLaneForWorkspace(int workspace);
+    Lane *getLaneForWindow(PHLWINDOW window);
 
-    List<Row *> rows;
+    List<Lane *> lanes;
 };

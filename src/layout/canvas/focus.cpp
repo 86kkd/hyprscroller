@@ -11,7 +11,7 @@
 
 extern HANDLE PHANDLE;
 
-namespace ScrollerLayoutInternal {
+namespace CanvasLayoutInternal {
 void dispatch_builtin_movefocus(Direction direction) {
     switch (direction) {
         case Direction::Left:
@@ -70,36 +70,36 @@ void switch_to_window(PHLWINDOW window, bool warp_cursor)
     if (warp_cursor)
         window->warpCursor(true);
 }
-} // namespace ScrollerLayoutInternal
+} // namespace CanvasLayoutInternal
 
-void ScrollerLayout::onWindowFocusChange(PHLWINDOW window)
+void CanvasLayout::onWindowFocusChange(PHLWINDOW window)
 {
     if (window == nullptr)
         return;
 
-    auto s = getRowForWindow(window);
+    auto s = getLaneForWindow(window);
     if (s == nullptr)
         return;
 
     s->focus_window(window);
 }
 
-void ScrollerLayout::moveWindowTo(PHLWINDOW window, const std::string &direction, bool)
+void CanvasLayout::moveWindowTo(PHLWINDOW window, const std::string &direction, bool)
 {
-    auto s = getRowForWindow(window);
+    auto s = getLaneForWindow(window);
     if (s == nullptr || !s->is_active(window))
         return;
 
     switch (direction.at(0)) {
-        case 'l': s->move_active_column(Direction::Left); break;
-        case 'r': s->move_active_column(Direction::Right); break;
-        case 'u': s->move_active_column(Direction::Up); break;
-        case 'd': s->move_active_column(Direction::Down); break;
+        case 'l': s->move_active_stack(Direction::Left); break;
+        case 'r': s->move_active_stack(Direction::Right); break;
+        case 'u': s->move_active_stack(Direction::Up); break;
+        case 'd': s->move_active_stack(Direction::Down); break;
         default: break;
     }
 }
 
-void ScrollerLayout::move_focus(int workspace, Direction direction)
+void CanvasLayout::move_focus(int workspace, Direction direction)
 {
     const auto focus_move_result_name = [](FocusMoveResult result) {
         switch (result) {
@@ -115,31 +115,31 @@ void ScrollerLayout::move_focus(int workspace, Direction direction)
     };
 
     static auto* const *focus_wrap = (Hyprlang::INT* const *)HyprlandAPI::getConfigValue(PHANDLE, "plugin:scroller:focus_wrap")->getDataStaticPtr();
-    auto s = getRowForWorkspace(workspace);
+    auto s = getLaneForWorkspace(workspace);
     const auto before = s ? s->get_active_window() : nullptr;
     const auto beforeMonitor = before ? g_pCompositor->getMonitorFromID(before->monitorID()) : monitorFromPointingOrCursor();
     const auto beforeActiveWorkspaceId = beforeMonitor ? beforeMonitor->activeWorkspaceID() : WORKSPACE_INVALID;
     const auto beforeSpecialWorkspaceId = beforeMonitor ? beforeMonitor->activeSpecialWorkspaceID() : WORKSPACE_INVALID;
-    spdlog::info("move_focus: workspace={} direction={} row_found={} before={}",
-                 workspace, ScrollerLayoutInternal::direction_name(direction), s != nullptr,
+    spdlog::info("move_focus: workspace={} direction={} lane_found={} before={}",
+                 workspace, CanvasLayoutInternal::direction_name(direction), s != nullptr,
                  static_cast<const void*>(before ? before.get() : nullptr));
     if (s == nullptr) {
-        ScrollerLayoutInternal::dispatch_builtin_movefocus(direction);
+        CanvasLayoutInternal::dispatch_builtin_movefocus(direction);
         return;
     }
 
     const auto moveResult = s->move_focus(direction, **focus_wrap != 0);
     if (moveResult == FocusMoveResult::CrossMonitor) {
-        const auto monitorDirection = ScrollerLayoutInternal::direction_to_math(direction);
+        const auto monitorDirection = CanvasLayoutInternal::direction_to_math(direction);
         auto monitor = beforeMonitor && monitorDirection ? g_pCompositor->getMonitorInDirection(beforeMonitor, *monitorDirection) : nullptr;
         const auto activeWorkspaceId = monitor ? monitor->activeWorkspaceID() : WORKSPACE_INVALID;
-        const auto workspaceId = ScrollerLayoutInternal::preferred_workspace_id(monitor, workspace);
+        const auto workspaceId = CanvasLayoutInternal::preferred_workspace_id(monitor, workspace);
         const auto specialWorkspaceId = monitor ? monitor->activeSpecialWorkspaceID() : WORKSPACE_INVALID;
         spdlog::info(
             "move_focus_cross_monitor: source_workspace={} direction={} source_window={} "
             "source_active_ws={} source_special_ws={} dest_active_ws={} dest_special_ws={} selected_ws={}",
             workspace,
-            ScrollerLayoutInternal::direction_name(direction),
+            CanvasLayoutInternal::direction_name(direction),
             static_cast<const void*>(before ? before.get() : nullptr),
             beforeActiveWorkspaceId,
             beforeSpecialWorkspaceId,
@@ -148,62 +148,62 @@ void ScrollerLayout::move_focus(int workspace, Direction direction)
             workspaceId);
         if (!monitor) {
             spdlog::warn("move_focus: no monitor in direction={} from workspace={}",
-                         ScrollerLayoutInternal::direction_name(direction), workspace);
+                         CanvasLayoutInternal::direction_name(direction), workspace);
             return;
         }
 
         const char* targetSelection = "geometry";
-        auto targetLayout = ScrollerLayoutInternal::get_scroller_for_workspace(workspaceId);
-        auto targetRow = targetLayout ? targetLayout->getRowForWorkspace(workspaceId) : nullptr;
-        auto crossMonitorTarget = targetRow ? targetRow->get_active_window() : nullptr;
+        auto targetLayout = CanvasLayoutInternal::get_canvas_for_workspace(workspaceId);
+        auto targetLane = targetLayout ? targetLayout->getLaneForWorkspace(workspaceId) : nullptr;
+        auto crossMonitorTarget = targetLane ? targetLane->get_active_window() : nullptr;
         if (crossMonitorTarget)
             targetSelection = "active";
         else
-            crossMonitorTarget = ScrollerLayoutInternal::pick_cross_monitor_target_window(monitor, workspaceId, direction, before);
+            crossMonitorTarget = CanvasLayoutInternal::pick_cross_monitor_target_window(monitor, workspaceId, direction, before);
         if (!crossMonitorTarget) {
             spdlog::warn("move_focus: no target window for crossed monitor workspace={}", workspaceId);
             return;
         }
 
-        if (!targetRow || !targetRow->has_window(crossMonitorTarget))
-            targetRow = targetLayout ? targetLayout->getRowForWindow(crossMonitorTarget) : nullptr;
+        if (!targetLane || !targetLane->has_window(crossMonitorTarget))
+            targetLane = targetLayout ? targetLayout->getLaneForWindow(crossMonitorTarget) : nullptr;
         spdlog::info(
             "move_focus_cross_monitor_target: selected_ws={} target_window={} target_workspace={} "
-            "target_layout_found={} target_row_found={} selection={} target_pos=({}, {}) target_size=({}, {})",
+            "target_layout_found={} target_lane_found={} selection={} target_pos=({}, {}) target_size=({}, {})",
             workspaceId,
             static_cast<const void*>(crossMonitorTarget ? crossMonitorTarget.get() : nullptr),
             crossMonitorTarget ? crossMonitorTarget->workspaceID() : WORKSPACE_INVALID,
             targetLayout != nullptr,
-            targetRow != nullptr,
+            targetLane != nullptr,
             targetSelection,
             crossMonitorTarget ? crossMonitorTarget->m_position.x : 0.0,
             crossMonitorTarget ? crossMonitorTarget->m_position.y : 0.0,
             crossMonitorTarget ? crossMonitorTarget->m_size.x : 0.0,
             crossMonitorTarget ? crossMonitorTarget->m_size.y : 0.0);
 
-        if (targetRow != nullptr)
-            targetRow->focus_window(crossMonitorTarget);
+        if (targetLane != nullptr)
+            targetLane->focus_window(crossMonitorTarget);
         else
-            spdlog::warn("move_focus: no row for crossed monitor target window={} workspace={}",
+            spdlog::warn("move_focus: no lane for crossed monitor target window={} workspace={}",
                          static_cast<const void*>(crossMonitorTarget.get()), workspaceId);
 
         spdlog::info("move_focus: workspace={} direction={} after={} result={}",
                      workspace,
-                     ScrollerLayoutInternal::direction_name(direction),
+                     CanvasLayoutInternal::direction_name(direction),
                      static_cast<const void*>(crossMonitorTarget.get()),
                      focus_move_result_name(moveResult));
-        ScrollerLayoutInternal::switch_to_window(crossMonitorTarget, true);
+        CanvasLayoutInternal::switch_to_window(crossMonitorTarget, true);
         return;
     }
 
     const auto after = s->get_active_window();
     spdlog::info("move_focus: workspace={} direction={} after={} result={}",
                  workspace,
-                 ScrollerLayoutInternal::direction_name(direction),
+                 CanvasLayoutInternal::direction_name(direction),
                  static_cast<const void*>(after ? after.get() : nullptr),
                  focus_move_result_name(moveResult));
     if (moveResult == FocusMoveResult::NoOp)
         return;
 
-    ScrollerLayoutInternal::switch_to_window(s->get_active_window(), true);
+    CanvasLayoutInternal::switch_to_window(s->get_active_window(), true);
 }

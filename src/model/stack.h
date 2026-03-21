@@ -1,15 +1,15 @@
 /**
- * @file model.h
+ * @file stack.h
  * @brief Core model layer for scroller layout state.
  *
  * This module owns the lightweight in-memory objects that represent
- * tiled layout data independent of monitor/row orchestration.
+ * tiled layout data independent of monitor/lane orchestration.
  * `Window` stores per-window geometry state (logical height, cached
- * positions, and height mode), while `Column` manages an ordered stack
- * of windows and all column-level layout math for movement, resizing,
+ * positions, and height mode), while `Stack` manages an ordered stack
+ * of windows and all stack-level layout math for movement, resizing,
  * fullscreen/maximized behavior, and alignment.
  *
- * The row/controller layer composes these primitives to implement
+ * The lane/controller layer composes these primitives to implement
  * workspace-level navigation and monitor integration.
  */
 #pragma once
@@ -20,12 +20,12 @@
 
 #include "../list.h"
 #include "../core/core.h"
-#include "../layout/scroller/layout.h"
+#include "../layout/canvas/layout.h"
 
 namespace ScrollerModel {
 
-enum class ColumnWidth {
-    // Predefined proportional width presets used when creating or cycling columns.
+enum class StackWidth {
+    // Predefined proportional width presets used when creating or cycling stacks.
     OneThird = 0,
     // Exactly half of available workspace width.
     OneHalf,
@@ -33,12 +33,12 @@ enum class ColumnWidth {
     TwoThirds,
     // Sentinal used to count user-defined width states.
     Number,
-    // Keep column at explicit width (free mode or carried-over width).
+    // Keep stack at explicit width (free mode or carried-over width).
     Free
 };
 
 enum class WindowHeight {
-    // Common per-window ratios for column heights.
+    // Common per-window ratios for stack heights.
     OneThird,
     OneHalf,
     TwoThirds,
@@ -64,7 +64,7 @@ enum class FocusMoveResult {
     CrossMonitor
 };
 
-// Internal window wrapper used by Column to keep geometry, history and height mode.
+// Internal window wrapper used by Stack to keep geometry, history and height mode.
 class Window {
 public:
     // Construct model wrapper for a backend window and its initial logical geometry.
@@ -108,20 +108,20 @@ private:
     Memory mem;
 };
 
-// A column is a vertical list of windows sharing horizontal bounds.
-class Column {
+// A stack is a vertical list of windows sharing horizontal bounds.
+class Stack {
 public:
-    // Build a new column from a compositor window with configuration defaults.
-    Column(PHLWINDOW cwindow, double maxw, double maxh);
-    // Build a new column from an existing model window when splitting.
-    Column(Window *window, ColumnWidth width, double maxw, double maxh);
-    // Destroy all windows in this column.
-    ~Column();
+    // Build a new stack from a compositor window with configuration defaults.
+    Stack(PHLWINDOW cwindow, double maxw, double maxh);
+    // Build a new stack from an existing model window when splitting.
+    Stack(Window *window, StackWidth width, double maxw, double maxh);
+    // Destroy all windows in this stack.
+    ~Stack();
 
     // Initialization state is used for first-time placement logic.
     bool get_init() const;
     void set_init();
-    // Number of windows in this column.
+    // Number of windows in this stack.
     size_t size();
 
     // Window membership / reorder helpers.
@@ -137,12 +137,12 @@ public:
     // Geometry accessors used by layout composition.
     double get_geom_x() const;
     double get_geom_w() const;
-    // Mutate current column width only; callers must recalc afterwards.
+    // Mutate current stack width only; callers must recalc afterwards.
     void set_geom_w(double w);
     // Return vertical bounds (top of first and bottom of last rendered window).
     Vector2D get_height() const;
 
-    // Apply relative scale to all windows in this column.
+    // Apply relative scale to all windows in this stack.
     void scale(const Vector2D &bmin, const Vector2D &start, double scale, double gap);
     // Toggle fullscreen state request and report the target fullscreen flag.
     bool toggle_fullscreen(const ScrollerCore::Box &fullbbox, Mode mode);
@@ -158,14 +158,14 @@ public:
 
     bool fullscreen() const;
     bool maximized() const;
-    // Set absolute x/y placement of the column.
+    // Set absolute x/y placement of the stack.
     void set_geom_pos(double x, double y);
 
     // Recompute active-window geometry and propagate updates to siblings.
-    void recalculate_col_geometry(const Vector2D &gap_x, double gap);
+    void recalculate_stack_geometry(const Vector2D &gap_x, double gap);
     // Return currently active compositor window.
     PHLWINDOW get_active_window();
-    // Move active model window inside the same column list.
+    // Move active model window inside the same stack list.
     void move_active_up();
     void move_active_down();
     // Focus movement with wrap behavior across monitor edges.
@@ -175,19 +175,19 @@ public:
     // Insert/remove window while keeping active tracking consistent.
     void admit_window(Window *window);
     Window *expel_active(double gap);
-    // Move active window toward viewport edges/center inside the current column.
+    // Move active window toward viewport edges/center inside the current stack.
     void align_window(Direction direction, double gap);
 
     // Width and height mode inspection + mutation.
-    ColumnWidth get_width() const;
+    StackWidth get_width() const;
     void set_width_free();
 #ifdef COLORS_IPC
     std::string get_width_name() const;
     std::string get_height_name() const;
 #endif
 
-    // Update column width from a predefined mode and current monitor bounds.
-    void update_width(ColumnWidth cwidth, double maxw, double maxh);
+    // Update stack width from a predefined mode and current monitor bounds.
+    void update_width(StackWidth cwidth, double maxw, double maxh);
     // Resize a window range (all/visible/active/to ends) to fill available height.
     void fit_size(FitSize fitsize, const Vector2D &gap_x, double gap);
     // Cycle active window logical height and recompute geometry.
@@ -202,7 +202,7 @@ private:
         ScrollerCore::Box geom;
     };
 
-    ColumnWidth width;
+    StackWidth width;
     WindowHeight height;
     Reorder reorder;
     bool initialized;
