@@ -43,6 +43,21 @@ static void recalculate_workspace_row(Row* row, PHLMONITOR monitor, PHLWORKSPACE
     if (!row || !monitor || !workspace)
         return;
 
+    if (workspace->m_isSpecialWorkspace) {
+        const auto active_window = row->get_active_window();
+        if (active_window) {
+            const auto active_monitor = g_pCompositor->getMonitorFromID(active_window->monitorID());
+            if (active_monitor && active_monitor != monitor) {
+                spdlog::debug("recalculate_workspace_row: overriding special workspace monitor workspace={} from_monitor={} to_monitor={} active_window={}",
+                              workspace->m_id,
+                              monitor->m_id,
+                              active_monitor->m_id,
+                              static_cast<const void*>(active_window.get()));
+                monitor = active_monitor;
+            }
+        }
+    }
+
     row->update_sizes(monitor);
     if (honor_fullscreen && workspace->m_hasFullscreenWindow && workspace->m_fullscreenMode == FSMODE_FULLSCREEN) {
         row->set_fullscreen_active_window();
@@ -65,13 +80,12 @@ static const char* direction_name(Direction direction) {
     }
 }
 
-static WORKSPACEID preferred_workspace_id(PHLMONITOR monitor, WORKSPACEID source_workspace_id) {
+static WORKSPACEID preferred_workspace_id(PHLMONITOR monitor, WORKSPACEID) {
     if (!monitor)
         return WORKSPACE_INVALID;
 
-    const bool source_is_special = source_workspace_id != WORKSPACE_INVALID && source_workspace_id < 0;
     const auto special_workspace_id = monitor->activeSpecialWorkspaceID();
-    if (source_is_special && g_pCompositor->getWorkspaceByID(special_workspace_id))
+    if (g_pCompositor->getWorkspaceByID(special_workspace_id))
         return special_workspace_id;
 
     return monitor->activeWorkspaceID();
@@ -496,20 +510,45 @@ void ScrollerLayout::alterSplitRatio(PHLWINDOW, float, bool)
 }
 
 void ScrollerLayout::onEnable() {
+    for (auto row = rows.first(); row != nullptr; row = row->next()) {
+        delete row->data();
+    }
+    rows.clear();
     marks.reset();
-    spdlog::info("onEnable: rebuilding scroller rows from mapped windows");
+
+    const auto algorithm = m_parent.lock();
+    const auto space = algorithm ? algorithm->space() : nullptr;
+    const auto workspace = space ? space->workspace() : nullptr;
+    if (!workspace) {
+        spdlog::warn("onEnable: missing parent workspace for layout instance={}",
+                     static_cast<const void*>(this));
+        return;
+    }
+
+    spdlog::info("onEnable: rebuilding layout instance={} workspace={} from mapped windows",
+                 static_cast<const void*>(this), workspace->m_id);
     for (auto& window : g_pCompositor->m_windows) {
-        spdlog::debug("onEnable: candidate window={} workspace={} mapped={} hidden={} floating={}",
+        spdlog::debug("onEnable: candidate instance={} window={} workspace={} mapped={} hidden={} floating={}",
+                      static_cast<const void*>(this),
                       static_cast<const void*>(window.get()), window->workspaceID(), window->m_isMapped,
                       window->isHidden(), window->m_isFloating);
-        if (window->m_isFloating || !window->m_isMapped)
+        if (window->workspaceID() != workspace->m_id || window->m_isFloating || !window->m_isMapped)
             continue;
 
-        spdlog::info("onEnable: registering window={} workspace={} hidden={}",
-                     static_cast<const void*>(window.get()), window->workspaceID(), window->isHidden());
+        spdlog::info("onEnable: registering instance={} window={} workspace={} hidden={}",
+                     static_cast<const void*>(this), static_cast<const void*>(window.get()),
+                     window->workspaceID(), window->isHidden());
         onWindowCreatedTiling(window);
-        recalculateMonitor(window->monitorID());
     }
+
+    const auto monitor = visible_monitor_for_workspace(workspace);
+    if (!monitor) {
+        spdlog::debug("onEnable: no visible monitor for instance={} workspace={}",
+                      static_cast<const void*>(this), workspace->m_id);
+        return;
+    }
+
+    recalculate_workspace_row(getRowForWorkspace(workspace->m_id), monitor, workspace, !workspace->m_isSpecialWorkspace);
 }
 
 void ScrollerLayout::onDisable() {
@@ -549,6 +588,20 @@ static void switch_to_window(PHLWINDOW window, bool warp_cursor)
 {
     if (!window)
         return;
+
+    const auto targetMonitor = g_pCompositor->getMonitorFromID(window->monitorID());
+    const auto currentMonitor = g_pCompositor->getMonitorFromCursor();
+
+    if (targetMonitor && currentMonitor && targetMonitor != currentMonitor) {
+        const auto focusMonitor = g_pKeybindManager->m_dispatchers.find("focusmonitor");
+        if (focusMonitor != g_pKeybindManager->m_dispatchers.end() && !targetMonitor->m_name.empty()) {
+            spdlog::debug("switch_to_window: focusing monitor={} before window={} workspace={}",
+                          targetMonitor->m_name,
+                          static_cast<const void*>(window.get()),
+                          window->workspaceID());
+            focusMonitor->second(targetMonitor->m_name);
+        }
+    }
 
     if (!g_pCompositor->isWindowActive(window)) {
         spdlog::debug("switch_to_window: focusing window={} workspace={}",
