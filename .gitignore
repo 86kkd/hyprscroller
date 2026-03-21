@@ -5,3 +5,4 @@ hyprscroller.so
 compile_commands.json
 build/
 .nvmrc
+hypr.conf
