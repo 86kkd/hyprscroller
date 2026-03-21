@@ -13,36 +13,48 @@
 #endif
 
 namespace {
-bool is_left_or_right_inside(const Column *col, const ScrollerCore::Box &box) {
-    if (!col)
+namespace viewport {
+bool column_intersects_visible_box(const Column *column, const ScrollerCore::Box &visible_box) {
+    if (!column)
         return false;
-    const auto x0 = col->get_geom_x();
-    const auto x1 = x0 + col->get_geom_w();
-    return x0 < box.x + box.w && x0 >= box.x ||
-           x1 > box.x && x1 <= box.x + box.w ||
-           x0 < box.x && x1 >= box.x + box.w;
+
+    const auto left = column->get_geom_x();
+    const auto right = left + column->get_geom_w();
+    return left < visible_box.x + visible_box.w && left >= visible_box.x ||
+           right > visible_box.x && right <= visible_box.x + visible_box.w ||
+           left < visible_box.x && right >= visible_box.x + visible_box.w;
 }
 
-double choose_anchor_x(const ListNode<Column *> *active, const double active_w,
-                       const double fallback_x, const ScrollerCore::Box &max_box) {
+double choose_anchor_x(const ListNode<Column *> *active, const double active_width,
+                       const double fallback_x, const ScrollerCore::Box &visible_box) {
     const auto next = active->next();
     const auto prev = active->prev();
     if (next) {
-        const auto next_w = next->data()->get_geom_w();
-        if (active_w + next_w <= max_box.w)
-            return max_box.x + max_box.w - active_w - next_w;
-        if (prev && prev->data()->get_geom_w() + active_w <= max_box.w)
-            return max_box.x + prev->data()->get_geom_w();
+        const auto next_width = next->data()->get_geom_w();
+        if (active_width + next_width <= visible_box.w)
+            return visible_box.x + visible_box.w - active_width - next_width;
+        if (prev && prev->data()->get_geom_w() + active_width <= visible_box.w)
+            return visible_box.x + prev->data()->get_geom_w();
         if (!prev)
-            return max_box.x;
+            return visible_box.x;
         return fallback_x;
     }
     if (prev) {
-        if (prev->data()->get_geom_w() + active_w <= max_box.w)
-            return max_box.x + prev->data()->get_geom_w();
-        return max_box.x + max_box.w - active_w;
+        if (prev->data()->get_geom_w() + active_width <= visible_box.w)
+            return visible_box.x + prev->data()->get_geom_w();
+        return visible_box.x + visible_box.w - active_width;
     }
     return fallback_x;
+}
+} // namespace viewport
+
+namespace logging {
+const void* active_window_ptr(Column *column) {
+    if (!column)
+        return nullptr;
+
+    const auto window = column->get_active_window();
+    return static_cast<const void*>(window ? window.get() : nullptr);
 }
 
 std::string summarize_columns(List<Column *>& columns) {
@@ -51,14 +63,14 @@ std::string summarize_columns(List<Column *>& columns) {
         if (col != columns.first())
             out << " | ";
 
-        auto* data = col->data();
-        const auto window = data ? data->get_active_window() : nullptr;
-        out << static_cast<const void*>(window ? window.get() : nullptr)
+        auto *data = col->data();
+        out << active_window_ptr(data)
             << "@x=" << (data ? data->get_geom_x() : 0.0)
             << ",w=" << (data ? data->get_geom_w() : 0.0);
     }
     return out.str();
 }
+} // namespace logging
 } // namespace
 
 Vector2D Row::calculate_gap_x(const ListNode<Column *> *column) const {
@@ -208,8 +220,8 @@ void Row::recalculate_row_geometry() {
         active->data()->recalculate_col_geometry(calculate_gap_x(active), gap);
         spdlog::debug("row_recalc_single: workspace={} active_window={} cols={}",
                       workspace,
-                      static_cast<const void*>(active->data()->get_active_window() ? active->data()->get_active_window().get() : nullptr),
-                      summarize_columns(columns));
+                      logging::active_window_ptr(active->data()),
+                      logging::summarize_columns(columns));
         return;
     }
 
@@ -230,23 +242,23 @@ void Row::recalculate_row_geometry() {
     }
     spdlog::debug("row_recalc_input: workspace={} active_window={} active_x={} active_w={} max=({}, {}, {}, {}) cols_before={}",
                   workspace,
-                  static_cast<const void*>(active->data()->get_active_window() ? active->data()->get_active_window().get() : nullptr),
+                  logging::active_window_ptr(active->data()),
                   a_x,
                   a_w,
                   max.x,
                   max.y,
                   max.w,
                   max.h,
-                  summarize_columns(columns));
+                  logging::summarize_columns(columns));
     if (a_x < max.x) {
         a_x = max.x;
         active->data()->set_geom_pos(max.x, max.y);
         adjust_columns(active);
         spdlog::debug("row_recalc_clamp_left: workspace={} active_window={} active_x={} cols_after={}",
                       workspace,
-                      static_cast<const void*>(active->data()->get_active_window() ? active->data()->get_active_window().get() : nullptr),
+                      logging::active_window_ptr(active->data()),
                       active->data()->get_geom_x(),
-                      summarize_columns(columns));
+                      logging::summarize_columns(columns));
         return;
     }
     if (std::round(a_x + a_w) > max.x + max.w) {
@@ -255,9 +267,9 @@ void Row::recalculate_row_geometry() {
         adjust_columns(active);
         spdlog::debug("row_recalc_clamp_right: workspace={} active_window={} active_x={} cols_after={}",
                       workspace,
-                      static_cast<const void*>(active->data()->get_active_window() ? active->data()->get_active_window().get() : nullptr),
+                      logging::active_window_ptr(active->data()),
                       active->data()->get_geom_x(),
-                      summarize_columns(columns));
+                      logging::summarize_columns(columns));
         return;
     }
     if (reorder != Reorder::Auto) {
@@ -265,27 +277,27 @@ void Row::recalculate_row_geometry() {
         adjust_columns(active);
         spdlog::debug("row_recalc_lazy: workspace={} active_window={} active_x={} cols_after={}",
                       workspace,
-                      static_cast<const void*>(active->data()->get_active_window() ? active->data()->get_active_window().get() : nullptr),
+                      logging::active_window_ptr(active->data()),
                       active->data()->get_geom_x(),
-                      summarize_columns(columns));
+                      logging::summarize_columns(columns));
         return;
     }
 
     const Box active_window(max.x, max.y, max.w, max.h);
-    const bool prev_inside = is_left_or_right_inside(active->prev() ? active->prev()->data() : nullptr, active_window);
-    const bool next_inside = is_left_or_right_inside(active->next() ? active->next()->data() : nullptr, active_window);
+    const bool prev_inside = viewport::column_intersects_visible_box(active->prev() ? active->prev()->data() : nullptr, active_window);
+    const bool next_inside = viewport::column_intersects_visible_box(active->next() ? active->next()->data() : nullptr, active_window);
     const bool keep_current = prev_inside || next_inside;
-    const double new_x = keep_current ? a_x : choose_anchor_x(active, a_w, a_x, max);
+    const double new_x = keep_current ? a_x : viewport::choose_anchor_x(active, a_w, a_x, max);
     active->data()->set_geom_pos(new_x, max.y);
     adjust_columns(active);
     spdlog::debug("row_recalc_auto: workspace={} active_window={} keep_current={} prev_inside={} next_inside={} new_x={} cols_after={}",
                   workspace,
-                  static_cast<const void*>(active->data()->get_active_window() ? active->data()->get_active_window().get() : nullptr),
+                  logging::active_window_ptr(active->data()),
                   keep_current,
                   prev_inside,
                   next_inside,
                   new_x,
-                  summarize_columns(columns));
+                  logging::summarize_columns(columns));
 }
 
 void Row::adjust_columns(ListNode<Column *> *column) {
