@@ -65,15 +65,31 @@ static const char* direction_name(Direction direction) {
     }
 }
 
-static WORKSPACEID preferred_workspace_id(PHLMONITOR monitor) {
+static WORKSPACEID preferred_workspace_id(PHLMONITOR monitor, WORKSPACEID source_workspace_id) {
     if (!monitor)
         return WORKSPACE_INVALID;
 
+    const bool source_is_special = source_workspace_id != WORKSPACE_INVALID && source_workspace_id < 0;
     const auto special_workspace_id = monitor->activeSpecialWorkspaceID();
-    if (g_pCompositor->getWorkspaceByID(special_workspace_id))
+    if (source_is_special && g_pCompositor->getWorkspaceByID(special_workspace_id))
         return special_workspace_id;
 
     return monitor->activeWorkspaceID();
+}
+
+static PHLMONITOR visible_monitor_for_workspace(PHLWORKSPACE workspace) {
+    if (!workspace)
+        return nullptr;
+
+    if (!workspace->m_isSpecialWorkspace)
+        return g_pCompositor->getMonitorFromID(workspace->monitorID());
+
+    for (const auto& monitor : g_pCompositor->m_monitors) {
+        if (monitor && monitor->activeSpecialWorkspaceID() == workspace->m_id)
+            return monitor;
+    }
+
+    return nullptr;
 }
 
 static ScrollerLayout* get_scroller_for_workspace(const WORKSPACEID workspace_id) {
@@ -250,7 +266,7 @@ void ScrollerLayout::recalculate()
         const auto workspace = g_pCompositor->getWorkspaceByID(row->data()->get_workspace());
         if (!workspace)
             continue;
-        const auto monitor = g_pCompositor->getMonitorFromID(workspace->monitorID());
+        const auto monitor = visible_monitor_for_workspace(workspace);
         if (!monitor)
             continue;
 
@@ -597,7 +613,7 @@ void ScrollerLayout::move_focus(int workspace, Direction direction)
         const auto monitorDirection = direction_to_math(direction);
         auto monitor = beforeMonitor && monitorDirection ? g_pCompositor->getMonitorInDirection(beforeMonitor, *monitorDirection) : nullptr;
         const auto activeWorkspaceId = monitor ? monitor->activeWorkspaceID() : WORKSPACE_INVALID;
-        const auto workspaceId = preferred_workspace_id(monitor);
+        const auto workspaceId = preferred_workspace_id(monitor, workspace);
         const auto specialWorkspaceId = monitor ? monitor->activeSpecialWorkspaceID() : WORKSPACE_INVALID;
         spdlog::info(
             "move_focus_cross_monitor: source_workspace={} direction={} source_window={} "
@@ -746,7 +762,7 @@ static int get_workspace_id() {
     if (!monitor)
         return -1;
 
-    workspace_id = preferred_workspace_id(monitor);
+    workspace_id = preferred_workspace_id(monitor, monitor->activeSpecialWorkspaceID());
     if (workspace_id == WORKSPACE_INVALID)
         return -1;
     if (g_pCompositor->getWorkspaceByID(workspace_id) == nullptr)
