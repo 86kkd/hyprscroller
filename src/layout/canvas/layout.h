@@ -3,7 +3,7 @@
  * @brief Layout controller for Hyprscroller's tiled workspace orchestration.
  *
  * Declares `CanvasLayout`, the Hyprland tiled algorithm implementation that
- * owns workspace lanes, translates Hyprland layout callbacks, and exposes
+ * owns the lanes of a canvas, translates Hyprland layout callbacks, and exposes
  * command-facing operations through dispatchers.
  */
 #pragma once
@@ -84,9 +84,11 @@ public:
     void marks_reset();
 
 private:
-    // Resolve the active lane for a workspace or a specific window.
-    Lane *getLaneForWorkspace(int workspace);
+    PHLWORKSPACE getCanvasWorkspace() const;
+    Lane *getActiveLane();
+    void setActiveLane(Lane *lane);
     Lane *getLaneForWindow(PHLWINDOW window);
 
+    ListNode<Lane *> *activeLane = nullptr;
     List<Lane *> lanes;
 };

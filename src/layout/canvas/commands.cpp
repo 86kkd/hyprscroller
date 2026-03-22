@@ -4,7 +4,8 @@
 
 void CanvasLayout::cycle_window_size(int workspace, int step)
 {
-    auto lane = getLaneForWorkspace(workspace);
+    (void)workspace;
+    auto lane = getActiveLane();
     if (!lane)
         return;
 
@@ -12,7 +13,8 @@ void CanvasLayout::cycle_window_size(int workspace, int step)
 }
 
 void CanvasLayout::move_window(int workspace, Direction direction) {
-    auto lane = getLaneForWorkspace(workspace);
+    (void)workspace;
+    auto lane = getActiveLane();
     if (!lane)
         return;
 
@@ -21,7 +23,8 @@ void CanvasLayout::move_window(int workspace, Direction direction) {
 }
 
 void CanvasLayout::align_window(int workspace, Direction direction) {
-    auto lane = getLaneForWorkspace(workspace);
+    (void)workspace;
+    auto lane = getActiveLane();
     if (!lane)
         return;
 
@@ -29,7 +32,8 @@ void CanvasLayout::align_window(int workspace, Direction direction) {
 }
 
 void CanvasLayout::admit_window_left(int workspace) {
-    auto lane = getLaneForWorkspace(workspace);
+    (void)workspace;
+    auto lane = getActiveLane();
     if (!lane)
         return;
 
@@ -37,7 +41,8 @@ void CanvasLayout::admit_window_left(int workspace) {
 }
 
 void CanvasLayout::expel_window_right(int workspace) {
-    auto lane = getLaneForWorkspace(workspace);
+    (void)workspace;
+    auto lane = getActiveLane();
     if (!lane)
         return;
 
@@ -45,7 +50,8 @@ void CanvasLayout::expel_window_right(int workspace) {
 }
 
 void CanvasLayout::set_mode(int workspace, Mode mode) {
-    auto lane = getLaneForWorkspace(workspace);
+    (void)workspace;
+    auto lane = getActiveLane();
     if (!lane)
         return;
 
@@ -53,7 +59,8 @@ void CanvasLayout::set_mode(int workspace, Mode mode) {
 }
 
 void CanvasLayout::fit_size(int workspace, FitSize fitsize) {
-    auto lane = getLaneForWorkspace(workspace);
+    (void)workspace;
+    auto lane = getActiveLane();
     if (!lane)
         return;
 
@@ -61,7 +68,8 @@ void CanvasLayout::fit_size(int workspace, FitSize fitsize) {
 }
 
 void CanvasLayout::toggle_overview(int workspace) {
-    auto lane = getLaneForWorkspace(workspace);
+    (void)workspace;
+    auto lane = getActiveLane();
     if (!lane)
         return;
 
@@ -69,7 +77,8 @@ void CanvasLayout::toggle_overview(int workspace) {
 }
 
 void CanvasLayout::toggle_fullscreen(int workspace) {
-    auto lane = getLaneForWorkspace(workspace);
+    (void)workspace;
+    auto lane = getActiveLane();
     if (!lane)
         return;
 

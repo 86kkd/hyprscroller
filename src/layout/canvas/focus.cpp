@@ -81,6 +81,7 @@ void CanvasLayout::onWindowFocusChange(PHLWINDOW window)
     if (s == nullptr)
         return;
 
+    setActiveLane(s);
     s->focus_window(window);
 }
 
@@ -115,7 +116,7 @@ void CanvasLayout::move_focus(int workspace, Direction direction)
     };
 
     static auto* const *focus_wrap = (Hyprlang::INT* const *)HyprlandAPI::getConfigValue(PHANDLE, "plugin:scroller:focus_wrap")->getDataStaticPtr();
-    auto s = getLaneForWorkspace(workspace);
+    auto s = getActiveLane();
     const auto before = s ? s->get_active_window() : nullptr;
     const auto beforeMonitor = before ? g_pCompositor->getMonitorFromID(before->monitorID()) : monitorFromPointingOrCursor();
     const auto beforeActiveWorkspaceId = beforeMonitor ? beforeMonitor->activeWorkspaceID() : WORKSPACE_INVALID;
@@ -154,7 +155,7 @@ void CanvasLayout::move_focus(int workspace, Direction direction)
 
         const char* targetSelection = "geometry";
         auto targetLayout = CanvasLayoutInternal::get_canvas_for_workspace(workspaceId);
-        auto targetLane = targetLayout ? targetLayout->getLaneForWorkspace(workspaceId) : nullptr;
+        auto targetLane = targetLayout ? targetLayout->getActiveLane() : nullptr;
         auto crossMonitorTarget = targetLane ? targetLane->get_active_window() : nullptr;
         if (crossMonitorTarget)
             targetSelection = "active";
@@ -182,6 +183,8 @@ void CanvasLayout::move_focus(int workspace, Direction direction)
             crossMonitorTarget ? crossMonitorTarget->m_size.y : 0.0);
 
         if (targetLane != nullptr)
+            targetLayout->setActiveLane(targetLane);
+        if (targetLane != nullptr)
             targetLane->focus_window(crossMonitorTarget);
         else
             spdlog::warn("move_focus: no lane for crossed monitor target window={} workspace={}",
@@ -205,5 +208,6 @@ void CanvasLayout::move_focus(int workspace, Direction direction)
     if (moveResult == FocusMoveResult::NoOp)
         return;
 
+    setActiveLane(s);
     CanvasLayoutInternal::switch_to_window(s->get_active_window(), true);
 }

@@ -3,8 +3,7 @@
 #include <hyprland/src/Compositor.hpp>
 
 Lane::Lane(PHLWINDOW window)
-    : workspace(window->workspaceID()), mode(Mode::Row), reorder(Reorder::Auto),
-      overview(false), active(nullptr) {
+    : mode(Mode::Row), reorder(Reorder::Auto), overview(false), active(nullptr) {
     const auto monitor = g_pCompositor->getMonitorFromID(window->monitorID());
     if (!monitor)
         return;
@@ -18,10 +17,6 @@ Lane::~Lane() {
         delete col->data();
     }
     stacks.clear();
-}
-
-int Lane::get_workspace() const {
-    return workspace;
 }
 
 bool Lane::has_window(PHLWINDOW window) const {

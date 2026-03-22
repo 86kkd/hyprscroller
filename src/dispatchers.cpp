@@ -138,7 +138,7 @@ namespace {
     }
 
     // movefocus <dir>: move focus inside scroller layout, with optional monitor
-    // fallback when the active row cannot move in requested direction.
+    // fallback when the active lane cannot move in requested direction.
     void dispatch_movefocus(std::string arg) {
         int workspace;
         auto layout = layout_for_action(&workspace);
@@ -182,7 +182,7 @@ namespace {
         }
     }
 
-    // admitwindow: split active column and move focused window to previous column.
+    // admitwindow: split active stack and move focused window to the previous stack.
     void dispatch_admitwindow(std::string arg) {
         int workspace;
         auto layout = layout_for_action(&workspace);

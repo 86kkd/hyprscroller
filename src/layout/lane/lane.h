@@ -21,7 +21,6 @@ public:
     Lane(PHLWINDOW window);
     ~Lane();
 
-    int get_workspace() const;
     bool has_window(PHLWINDOW window) const;
     PHLWINDOW get_active_window() const;
     bool is_active(PHLWINDOW window) const;
@@ -61,7 +60,6 @@ private:
     void center_active_stack();
     void adjust_stacks(ListNode<Stack *> *stack);
 
-    int workspace;
     Box full;
     Box max;
     bool overview;

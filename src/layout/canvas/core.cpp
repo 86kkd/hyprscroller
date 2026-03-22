@@ -31,12 +31,24 @@ void clear_lanes(List<Lane*>& lanes) {
 }
 } // namespace
 
-Lane *CanvasLayout::getLaneForWorkspace(int workspace) {
-    for (auto lane = lanes.first(); lane != nullptr; lane = lane->next()) {
-        if (lane->data()->get_workspace() == workspace)
-            return lane->data();
+PHLWORKSPACE CanvasLayout::getCanvasWorkspace() const {
+    const auto algorithm = m_parent.lock();
+    const auto space = algorithm ? algorithm->space() : nullptr;
+    return space ? space->workspace() : nullptr;
+}
+
+Lane *CanvasLayout::getActiveLane() {
+    if (activeLane)
+        return activeLane->data();
+    if (lanes.first()) {
+        activeLane = lanes.first();
+        return activeLane->data();
     }
     return nullptr;
+}
+
+void CanvasLayout::setActiveLane(Lane *lane) {
+    activeLane = lane ? find_lane_node(lanes, lane) : nullptr;
 }
 
 Lane *CanvasLayout::getLaneForWindow(PHLWINDOW window) {
@@ -100,17 +112,16 @@ void CanvasLayout::resizeTarget(const Vector2D &delta, SP<Layout::ITarget> targe
 
 void CanvasLayout::recalculate()
 {
-    for (auto lane = lanes.first(); lane != nullptr; lane = lane->next()) {
-        const auto workspace = g_pCompositor->getWorkspaceByID(lane->data()->get_workspace());
-        if (!workspace)
-            continue;
+    const auto workspace = getCanvasWorkspace();
+    if (!workspace)
+        return;
 
-        const auto monitor = CanvasLayoutInternal::visible_monitor_for_workspace(workspace);
-        if (!monitor)
-            continue;
+    const auto monitor = CanvasLayoutInternal::visible_monitor_for_workspace(workspace);
+    if (!monitor)
+        return;
 
+    for (auto lane = lanes.first(); lane != nullptr; lane = lane->next())
         CanvasLayoutInternal::recalculate_workspace_lane(lane->data(), monitor, workspace, true);
-    }
 }
 
 std::expected<void, std::string> CanvasLayout::layoutMsg(const std::string_view&)
@@ -124,7 +135,7 @@ std::optional<Vector2D> CanvasLayout::predictSizeForNewTarget()
     if (!monitor)
         return {};
 
-    auto lane = getLaneForWorkspace(monitor->activeWorkspaceID());
+    auto lane = getActiveLane();
     if (!lane)
         return Vector2D(monitor->m_size.x, monitor->m_size.y);
 
@@ -133,16 +144,7 @@ std::optional<Vector2D> CanvasLayout::predictSizeForNewTarget()
 
 SP<Layout::ITarget> CanvasLayout::getNextCandidate(SP<Layout::ITarget> old)
 {
-    int workspace_id = WORKSPACE_INVALID;
-    if (auto oldWindow = windowFromTarget(old))
-        workspace_id = oldWindow->workspaceID();
-    if (workspace_id == WORKSPACE_INVALID) {
-        auto monitor = monitorFromPointingOrCursor();
-        if (monitor)
-            workspace_id = monitor->activeWorkspaceID();
-    }
-
-    auto s = getLaneForWorkspace(workspace_id);
+    auto s = getActiveLane();
     if (!s)
         return {};
 
@@ -193,10 +195,11 @@ void CanvasLayout::moveTargetInDirection(SP<Layout::ITarget> t, Math::eDirection
 
 void CanvasLayout::onWindowCreatedTiling(PHLWINDOW window, Math::eDirection)
 {
-    auto s = getLaneForWorkspace(window->workspaceID());
+    auto s = getActiveLane();
     if (s == nullptr) {
         s = new Lane(window);
         lanes.push_back(s);
+        activeLane = lanes.last();
     }
     s->add_active_window(window);
 }
@@ -227,7 +230,9 @@ void CanvasLayout::onWindowRemovedTiling(PHLWINDOW window)
 
     auto doomed = lane->data();
     spdlog::info("onWindowRemovedTiling: deleting empty lane={} workspace={}",
-                 static_cast<const void*>(doomed), doomed->get_workspace());
+                 static_cast<const void*>(doomed), workspace);
+    if (activeLane == lane)
+        activeLane = lane->next() ? lane->next() : lane->prev();
     lanes.erase(lane);
     delete doomed;
 }
@@ -270,6 +275,7 @@ void CanvasLayout::alterSplitRatio(PHLWINDOW, float, bool)
 
 void CanvasLayout::onEnable() {
     clear_lanes(lanes);
+    activeLane = nullptr;
     marks.reset();
 
     const auto algorithm = m_parent.lock();
@@ -304,11 +310,13 @@ void CanvasLayout::onEnable() {
         return;
     }
 
-    CanvasLayoutInternal::recalculate_workspace_lane(getLaneForWorkspace(workspace->m_id), monitor, workspace, !workspace->m_isSpecialWorkspace);
+    for (auto lane = lanes.first(); lane != nullptr; lane = lane->next())
+        CanvasLayoutInternal::recalculate_workspace_lane(lane->data(), monitor, workspace, !workspace->m_isSpecialWorkspace);
 }
 
 void CanvasLayout::onDisable() {
     clear_lanes(lanes);
+    activeLane = nullptr;
     marks.reset();
 }
 
@@ -317,8 +325,7 @@ Vector2D CanvasLayout::predictSizeForNewWindowTiled() {
     if (!monitor)
         return {};
 
-    int workspace_id = monitor->activeWorkspaceID();
-    auto s = getLaneForWorkspace(workspace_id);
+    auto s = getActiveLane();
     if (s == nullptr)
         return monitor->m_size;
 
@@ -330,11 +337,11 @@ void CanvasLayout::replaceWindowDataWith(PHLWINDOW, PHLWINDOW)
 }
 
 void CanvasLayout::marks_add(const std::string &name) {
-    auto workspace = getLaneForWorkspace(CanvasLayoutInternal::get_workspace_id());
-    if (!workspace)
+    auto lane = getActiveLane();
+    if (!lane)
         return;
 
-    PHLWINDOW w = workspace->get_active_window();
+    PHLWINDOW w = lane->get_active_window();
     if (!w)
         return;
 

@@ -199,22 +199,15 @@ int get_workspace_id() {
 
 void CanvasLayout::recalculateMonitor(const int &monitor_id)
 {
-    const auto monitor = g_pCompositor->getMonitorFromID(monitor_id);
-    if (!monitor)
-        return;
-
-    g_pHyprRenderer->damageMonitor(monitor);
-
-    const auto workspace = monitor->m_activeWorkspace;
+    const auto workspace = getCanvasWorkspace();
     if (!workspace)
         return;
 
-    CanvasLayoutInternal::recalculate_workspace_lane(getLaneForWorkspace(workspace->m_id), monitor, workspace, true);
+    const auto monitor = CanvasLayoutInternal::visible_monitor_for_workspace(workspace);
+    if (!monitor || monitor->m_id != monitor_id)
+        return;
 
-    const auto special_workspace_id = monitor->activeSpecialWorkspaceID();
-    const auto special_workspace = g_pCompositor->getWorkspaceByID(special_workspace_id);
-    spdlog::debug("recalculateMonitor: monitor={} active_ws={} special_ws={} special_exists={}",
-                  monitor_id, workspace->m_id, special_workspace_id, special_workspace != nullptr);
-
-    CanvasLayoutInternal::recalculate_workspace_lane(getLaneForWorkspace(special_workspace_id), monitor, special_workspace, false);
+    g_pHyprRenderer->damageMonitor(monitor);
+    for (auto lane = lanes.first(); lane != nullptr; lane = lane->next())
+        CanvasLayoutInternal::recalculate_workspace_lane(lane->data(), monitor, workspace, !workspace->m_isSpecialWorkspace);
 }

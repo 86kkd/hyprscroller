@@ -218,8 +218,7 @@ void Lane::recalculate_lane_geometry() {
         active->data()->set_geom_pos(max.x, max.y);
         active->data()->set_geom_w(max.w);
         active->data()->recalculate_stack_geometry(calculate_gap_x(active), gap);
-        spdlog::debug("lane_recalc_single: workspace={} active_window={} stacks={}",
-                      workspace,
+        spdlog::debug("lane_recalc_single: active_window={} stacks={}",
                       logging::active_window_ptr(active->data()),
                       logging::summarize_stacks(stacks));
         return;
@@ -240,8 +239,7 @@ void Lane::recalculate_lane_geometry() {
         }
         active->data()->set_init();
     }
-    spdlog::debug("lane_recalc_input: workspace={} active_window={} active_x={} active_w={} max=({}, {}, {}, {}) stacks_before={}",
-                  workspace,
+    spdlog::debug("lane_recalc_input: active_window={} active_x={} active_w={} max=({}, {}, {}, {}) stacks_before={}",
                   logging::active_window_ptr(active->data()),
                   a_x,
                   a_w,
@@ -254,8 +252,7 @@ void Lane::recalculate_lane_geometry() {
         a_x = max.x;
         active->data()->set_geom_pos(max.x, max.y);
         adjust_stacks(active);
-        spdlog::debug("lane_recalc_clamp_left: workspace={} active_window={} active_x={} stacks_after={}",
-                      workspace,
+        spdlog::debug("lane_recalc_clamp_left: active_window={} active_x={} stacks_after={}",
                       logging::active_window_ptr(active->data()),
                       active->data()->get_geom_x(),
                       logging::summarize_stacks(stacks));
@@ -265,8 +262,7 @@ void Lane::recalculate_lane_geometry() {
         a_x = max.x + max.w - a_w;
         active->data()->set_geom_pos(a_x, max.y);
         adjust_stacks(active);
-        spdlog::debug("lane_recalc_clamp_right: workspace={} active_window={} active_x={} stacks_after={}",
-                      workspace,
+        spdlog::debug("lane_recalc_clamp_right: active_window={} active_x={} stacks_after={}",
                       logging::active_window_ptr(active->data()),
                       active->data()->get_geom_x(),
                       logging::summarize_stacks(stacks));
@@ -275,8 +271,7 @@ void Lane::recalculate_lane_geometry() {
     if (reorder != Reorder::Auto) {
         active->data()->set_geom_pos(a_x, max.y);
         adjust_stacks(active);
-        spdlog::debug("lane_recalc_lazy: workspace={} active_window={} active_x={} stacks_after={}",
-                      workspace,
+        spdlog::debug("lane_recalc_lazy: active_window={} active_x={} stacks_after={}",
                       logging::active_window_ptr(active->data()),
                       active->data()->get_geom_x(),
                       logging::summarize_stacks(stacks));
@@ -290,8 +285,7 @@ void Lane::recalculate_lane_geometry() {
     const double new_x = keep_current ? a_x : viewport::choose_anchor_x(active, a_w, a_x, max);
     active->data()->set_geom_pos(new_x, max.y);
     adjust_stacks(active);
-    spdlog::debug("lane_recalc_auto: workspace={} active_window={} keep_current={} prev_inside={} next_inside={} new_x={} stacks_after={}",
-                  workspace,
+    spdlog::debug("lane_recalc_auto: active_window={} keep_current={} prev_inside={} next_inside={} new_x={} stacks_after={}",
                   logging::active_window_ptr(active->data()),
                   keep_current,
                   prev_inside,
