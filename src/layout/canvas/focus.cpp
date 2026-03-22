@@ -269,6 +269,7 @@ void CanvasLayout::move_focus(int workspace, Direction direction)
         if (auto targetLaneNode = CanvasLayoutInternal::adjacent_lane(activeLane, mode, direction)) {
             activeLane = targetLaneNode;
             dropEmptySourceLane(beforeMonitor);
+            relayoutCurrentCanvas(beforeMonitor);
 
             const auto targetWindow = activeLane->data()->get_active_window();
             spdlog::info("move_focus: workspace={} direction={} lane_switch={} target_window={}",

@@ -115,9 +115,9 @@ void CanvasLayout::relayoutCanvas(PHLMONITOR monitor, bool honor_fullscreen) {
         if (paged) {
             const auto delta = static_cast<double>(index) - static_cast<double>(activeIndex);
             if (mode == Mode::Row)
-                laneBox = Box(max.x, max.y + delta * max.h, max.w, max.h);
+                laneBox = Box(max.x, max.y + delta * full.h, max.w, max.h);
             else
-                laneBox = Box(max.x + delta * max.w, max.y, max.w, max.h);
+                laneBox = Box(max.x + delta * full.w, max.y, max.w, max.h);
         } else if (mode == Mode::Row) {
             const auto unit = max.h / count;
             const auto y = max.y + unit * index;
