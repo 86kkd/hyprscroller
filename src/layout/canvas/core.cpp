@@ -31,6 +31,23 @@ void clear_lanes(List<Lane*>& lanes) {
         delete lane->data();
     lanes.clear();
 }
+
+bool has_ephemeral_lane(const List<Lane*>& lanes) {
+    for (auto lane = lanes.first(); lane != nullptr; lane = lane->next()) {
+        if (lane->data() && lane->data()->is_ephemeral())
+            return true;
+    }
+    return false;
+}
+
+size_t lane_index(const List<Lane*>& lanes, const ListNode<Lane*>* target) {
+    size_t index = 0;
+    for (auto lane = lanes.first(); lane != nullptr; lane = lane->next(), ++index) {
+        if (lane == target)
+            return index;
+    }
+    return 0;
+}
 } // namespace
 
 PHLWORKSPACE CanvasLayout::getCanvasWorkspace() const {
@@ -89,11 +106,19 @@ void CanvasLayout::relayoutCanvas(PHLMONITOR monitor, bool honor_fullscreen) {
                          size.y - gapOutTopLeft.y - gapOutBottomRight.y - 2 * gaps_out);
 
     const auto mode = getActiveLane() ? getActiveLane()->get_mode() : Mode::Row;
+    const auto paged = has_ephemeral_lane(lanes);
     const auto count = static_cast<double>(lanes.size());
+    const auto activeIndex = lane_index(lanes, activeLane ? activeLane : lanes.first());
     size_t index = 0;
     for (auto lane = lanes.first(); lane != nullptr; lane = lane->next(), ++index) {
         Box laneBox = max;
-        if (mode == Mode::Row) {
+        if (paged) {
+            const auto delta = static_cast<double>(index) - static_cast<double>(activeIndex);
+            if (mode == Mode::Row)
+                laneBox = Box(max.x, max.y + delta * max.h, max.w, max.h);
+            else
+                laneBox = Box(max.x + delta * max.w, max.y, max.w, max.h);
+        } else if (mode == Mode::Row) {
             const auto unit = max.h / count;
             const auto y = max.y + unit * index;
             const auto h = index + 1 == lanes.size() ? max.y + max.h - y : unit;

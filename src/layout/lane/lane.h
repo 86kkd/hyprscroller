@@ -25,6 +25,8 @@ public:
 
     bool empty() const;
     Mode get_mode() const;
+    bool is_ephemeral() const;
+    void set_ephemeral(bool value);
     bool has_window(PHLWINDOW window) const;
     PHLWINDOW get_active_window() const;
     bool is_active(PHLWINDOW window) const;
@@ -69,6 +71,7 @@ private:
     Box full;
     Box max;
     bool overview;
+    bool ephemeral;
     int gap;
     Reorder reorder;
     Mode mode;

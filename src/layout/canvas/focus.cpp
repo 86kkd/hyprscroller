@@ -292,6 +292,7 @@ void CanvasLayout::move_focus(int workspace, Direction direction)
             return;
 
         auto newLane = new Lane(beforeMonitor, mode);
+        newLane->set_ephemeral(true);
         lanes.push_back(newLane);
         auto newLaneNode = lanes.last();
         if (CanvasLayoutInternal::direction_inserts_before_current(mode, direction))
