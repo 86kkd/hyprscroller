@@ -15,6 +15,7 @@
 
 #include <hyprland/src/layout/algorithm/TiledAlgorithm.hpp>
 #include <hyprland/src/layout/target/Target.hpp>
+#include <hyprland/src/helpers/signal/Signal.hpp>
 
 #include "../../list.h"
 
@@ -92,6 +93,7 @@ private:
     Lane *getLaneForWindow(PHLWINDOW window);
     void relayoutCanvas(PHLMONITOR monitor, bool honor_fullscreen);
 
+    CHyprSignalListener m_focusCallback;
     ListNode<Lane *> *activeLane = nullptr;
     List<Lane *> lanes;
 };

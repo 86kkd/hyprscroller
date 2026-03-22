@@ -3,6 +3,7 @@
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/config/ConfigManager.hpp>
 #include <hyprland/src/config/ConfigValue.hpp>
+#include <hyprland/src/event/EventBus.hpp>
 #include <hyprland/src/helpers/Monitor.hpp>
 #include <hyprland/src/layout/algorithm/Algorithm.hpp>
 #include <hyprland/src/layout/space/Space.hpp>
@@ -352,6 +353,9 @@ void CanvasLayout::onEnable() {
     clear_lanes(lanes);
     activeLane = nullptr;
     marks.reset();
+    m_focusCallback = Event::bus()->m_events.window.active.listen([this](PHLWINDOW window, Desktop::eFocusReason) {
+        onWindowFocusChange(window);
+    });
 
     const auto algorithm = m_parent.lock();
     const auto space = algorithm ? algorithm->space() : nullptr;
@@ -389,6 +393,7 @@ void CanvasLayout::onEnable() {
 }
 
 void CanvasLayout::onDisable() {
+    m_focusCallback = nullptr;
     clear_lanes(lanes);
     activeLane = nullptr;
     marks.reset();
