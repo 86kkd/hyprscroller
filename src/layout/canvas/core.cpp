@@ -304,13 +304,32 @@ void CanvasLayout::onWindowRemovedTiling(PHLWINDOW window)
         return;
     }
 
+    const auto workspaceHandle = getCanvasWorkspace();
+    Lane* preferredLane = nullptr;
+    if (workspaceHandle) {
+        const auto focusedWindow = workspaceHandle->getLastFocusedWindow();
+        if (focusedWindow && focusedWindow != window)
+            preferredLane = getLaneForWindow(focusedWindow);
+    }
+
+    Lane* fallbackLane = nullptr;
+    if (activeLane == lane) {
+        if (lane->next())
+            fallbackLane = lane->next()->data();
+        else if (lane->prev())
+            fallbackLane = lane->prev()->data();
+    }
+
     auto doomed = lane->data();
     spdlog::info("onWindowRemovedTiling: deleting empty lane={} workspace={}",
                  static_cast<const void*>(doomed), workspace);
-    if (activeLane == lane)
-        activeLane = lane->next() ? lane->next() : lane->prev();
     lanes.erase(lane);
     delete doomed;
+
+    setActiveLane(preferredLane ? preferredLane : fallbackLane);
+
+    if (const auto monitor = workspaceHandle ? CanvasLayoutInternal::visible_monitor_for_workspace(workspaceHandle) : nullptr)
+        relayoutCanvas(monitor, !workspaceHandle->m_isSpecialWorkspace);
 }
 
 bool CanvasLayout::isWindowTiled(PHLWINDOW window)
