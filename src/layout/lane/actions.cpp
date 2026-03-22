@@ -90,6 +90,9 @@ void Lane::focus_window(PHLWINDOW window) {
 }
 
 FocusMoveResult Lane::move_focus(Direction dir, bool focus_wrap) {
+    if (!active)
+        return FocusMoveResult::NoOp;
+
     reorder = Reorder::Auto;
     FocusMoveResult result = FocusMoveResult::NoOp;
     switch (dir) {
@@ -166,6 +169,9 @@ void Lane::move_focus_end() {
 }
 
 void Lane::resize_active_stack(int step) {
+    if (!active)
+        return;
+
     if (active->data()->maximized())
         return;
 
@@ -187,6 +193,9 @@ void Lane::resize_active_stack(int step) {
 }
 
 void Lane::resize_active_window(const Vector2D &delta) {
+    if (!active)
+        return;
+
     if (active->data()->maximized() ||
         active->data()->fullscreen() ||
         active->data()->expanded())
@@ -201,6 +210,9 @@ void Lane::set_mode(Mode m) {
 }
 
 void Lane::align_stack(Direction dir) {
+    if (!active)
+        return;
+
     if (active->data()->maximized() ||
         active->data()->fullscreen() ||
         active->data()->expanded())
@@ -234,6 +246,9 @@ void Lane::align_stack(Direction dir) {
 }
 
 void Lane::move_active_stack(Direction dir) {
+    if (!active)
+        return;
+
     switch (dir) {
     case Direction::Right:
         if (active != stacks.last()) {
@@ -270,6 +285,9 @@ void Lane::move_active_stack(Direction dir) {
 }
 
 void Lane::admit_window_left() {
+    if (!active)
+        return;
+
     if (active->data()->maximized() ||
         active->data()->fullscreen() ||
         active->data()->expanded() ||

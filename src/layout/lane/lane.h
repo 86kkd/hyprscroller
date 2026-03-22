@@ -19,6 +19,7 @@ class Lane {
     // A lane contains all stacks for one workspace and owns horizontal navigation.
 public:
     Lane(PHLWINDOW window);
+    Lane(PHLMONITOR monitor, Mode mode);
     Lane(Stack *stack);
     ~Lane();
 

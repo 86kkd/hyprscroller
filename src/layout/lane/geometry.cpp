@@ -80,6 +80,9 @@ Vector2D Lane::calculate_gap_x(const ListNode<Stack *> *stack) const {
 }
 
 void Lane::center_active_stack() {
+    if (!active)
+        return;
+
     Stack *stack = active->data();
     if (stack->maximized())
         return;
@@ -132,17 +135,26 @@ void Lane::update_sizes(PHLMONITOR monitor) {
 }
 
 void Lane::set_fullscreen_active_window() {
+    if (!active)
+        return;
+
     active->data()->set_fullscreen(full);
     active->data()->recalculate_stack_geometry(calculate_gap_x(active), gap);
 }
 
 void Lane::toggle_fullscreen_active_window() {
+    if (!active)
+        return;
+
     Stack *stack = active->data();
     (void)stack->toggle_fullscreen(max, mode);
     recalculate_lane_geometry();
 }
 
 void Lane::toggle_maximize_active_stack() {
+    if (!active)
+        return;
+
     Stack *stack = active->data();
     stack->toggle_maximized(max.w, max.h);
     reorder = Reorder::Auto;
@@ -150,6 +162,9 @@ void Lane::toggle_maximize_active_stack() {
 }
 
 void Lane::toggle_overview() {
+    if (stacks.empty() || !active)
+        return;
+
     overview = !overview;
     if (overview) {
         Vector2D bmin(max.x + max.w, max.y + max.h);

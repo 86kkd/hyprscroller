@@ -12,6 +12,12 @@ Lane::Lane(PHLWINDOW window)
     update_sizes(monitor);
 }
 
+Lane::Lane(PHLMONITOR monitor, Mode laneMode)
+    : mode(laneMode), reorder(Reorder::Auto), overview(false), active(nullptr) {
+    if (monitor)
+        update_sizes(monitor);
+}
+
 Lane::Lane(Stack *stack)
     : mode(Mode::Row), reorder(Reorder::Auto), overview(false), active(nullptr) {
     const auto window = stack ? stack->get_active_window() : nullptr;
@@ -52,6 +58,9 @@ bool Lane::has_window(PHLWINDOW window) const {
 }
 
 PHLWINDOW Lane::get_active_window() const {
+    if (!active)
+        return nullptr;
+
     return active->data()->get_active_window();
 }
 
