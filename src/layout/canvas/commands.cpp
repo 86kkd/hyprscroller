@@ -78,6 +78,7 @@ void CanvasLayout::toggle_overview(int workspace) {
 
 void CanvasLayout::toggle_fullscreen(int workspace) {
     (void)workspace;
+    syncActiveStateFromWorkspaceFocus();
     auto lane = getActiveLane();
     if (!lane)
         return;

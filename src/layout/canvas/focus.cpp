@@ -56,6 +56,24 @@ ListNode<Lane*>* adjacent_lane(ListNode<Lane*>* current, Mode mode, Direction di
     return nullptr;
 }
 
+ListNode<Lane*>* edge_lane_anchor(List<Lane*>& lanes, Mode mode, Direction direction) {
+    if (lanes.empty())
+        return nullptr;
+
+    if (direction_inserts_before_current(mode, direction))
+        return lanes.first();
+
+    return lanes.last();
+}
+
+bool should_sync_workspace_focus_before_move(ListNode<Lane*>* activeLaneNode) {
+    if (!activeLaneNode || !activeLaneNode->data())
+        return true;
+
+    const auto lane = activeLaneNode->data();
+    return !(lane->is_ephemeral() && lane->empty());
+}
+
 void dispatch_builtin_movefocus(Direction direction) {
     switch (direction) {
         case Direction::Left:
@@ -118,15 +136,122 @@ void switch_to_window(PHLWINDOW window, bool warp_cursor)
 
 void CanvasLayout::onWindowFocusChange(PHLWINDOW window)
 {
-    if (window == nullptr)
+    const auto laneIndexOf = [this](Lane *lane) -> int {
+        if (lane == nullptr)
+            return -1;
+
+        auto index = 0;
+        for (auto node = lanes.first(); node; node = node->next(), ++index) {
+            if (node->data() == lane)
+                return index;
+        }
+
+        return -1;
+    };
+
+    const auto laneCount = [this]() -> int {
+        auto count = 0;
+        for (auto node = lanes.first(); node; node = node->next(), ++count) { }
+        return count;
+    };
+
+    const auto beforeLane = activeLane ? activeLane->data() : nullptr;
+    const auto beforeWindow = beforeLane ? beforeLane->get_active_window() : nullptr;
+    const auto beforeLaneIndex = laneIndexOf(beforeLane);
+    const auto totalLanes = laneCount();
+
+    if (window == nullptr) {
+        spdlog::debug("onWindowFocusChange: ignored null window canvas_ws={} lanes={} before_lane={} before_lane_index={} before_window={}",
+                      CanvasLayoutInternal::get_workspace_id(),
+                      totalLanes,
+                      static_cast<const void*>(beforeLane),
+                      beforeLaneIndex,
+                      static_cast<const void*>(beforeWindow ? beforeWindow.get() : nullptr));
         return;
+    }
 
     auto s = getLaneForWindow(window);
-    if (s == nullptr)
+    const auto targetWindow = s ? s->get_active_window() : nullptr;
+    const auto targetLaneIndex = laneIndexOf(s);
+    spdlog::info(
+        "onWindowFocusChange: window={} workspace={} monitor={} canvas_ws={} lane_found={} lanes={} before_lane={} before_lane_index={} before_window={} target_lane={} target_lane_index={} target_window={} same_lane={}",
+        static_cast<const void*>(window.get()),
+        window->workspaceID(),
+        window->monitorID(),
+        CanvasLayoutInternal::get_workspace_id(),
+        s != nullptr,
+        totalLanes,
+        static_cast<const void*>(beforeLane),
+        beforeLaneIndex,
+        static_cast<const void*>(beforeWindow ? beforeWindow.get() : nullptr),
+        static_cast<const void*>(s),
+        targetLaneIndex,
+        static_cast<const void*>(targetWindow ? targetWindow.get() : nullptr),
+        beforeLane == s);
+
+    if (s == nullptr) {
+        spdlog::warn("onWindowFocusChange: window={} not managed by current canvas canvas_ws={} lanes={}",
+                     static_cast<const void*>(window.get()),
+                     CanvasLayoutInternal::get_workspace_id(),
+                     totalLanes);
         return;
+    }
 
     setActiveLane(s);
     s->focus_window(window);
+
+    const auto afterLane = activeLane ? activeLane->data() : nullptr;
+    const auto afterWindow = afterLane ? afterLane->get_active_window() : nullptr;
+    spdlog::info("onWindowFocusChange: synced window={} canvas_ws={} after_lane={} after_lane_index={} after_window={}",
+                 static_cast<const void*>(window.get()),
+                 CanvasLayoutInternal::get_workspace_id(),
+                 static_cast<const void*>(afterLane),
+                 laneIndexOf(afterLane),
+                 static_cast<const void*>(afterWindow ? afterWindow.get() : nullptr));
+}
+
+void CanvasLayout::syncActiveStateFromWorkspaceFocus()
+{
+    const auto workspace = getCanvasWorkspace();
+    if (!workspace)
+        return;
+
+    const auto focusedWindow = workspace->getLastFocusedWindow();
+    const auto currentLane = activeLane ? activeLane->data() : nullptr;
+    const auto currentWindow = currentLane ? currentLane->get_active_window() : nullptr;
+    const auto managed = focusedWindow && getLaneForWindow(focusedWindow) != nullptr;
+
+    spdlog::debug("syncActiveStateFromWorkspaceFocus: canvas_ws={} focused_window={} focused_workspace={} focused_monitor={} managed={} current_window={}",
+                  workspace->m_id,
+                  static_cast<const void*>(focusedWindow ? focusedWindow.get() : nullptr),
+                  focusedWindow ? focusedWindow->workspaceID() : WORKSPACE_INVALID,
+                  focusedWindow ? focusedWindow->monitorID() : MONITOR_INVALID,
+                  managed,
+                  static_cast<const void*>(currentWindow ? currentWindow.get() : nullptr));
+
+    if (managed && activeLane && currentLane && currentLane->is_ephemeral() && currentLane->empty()) {
+        const auto targetLane = getLaneForWindow(focusedWindow);
+        if (targetLane && targetLane != currentLane) {
+            auto doomedNode = activeLane;
+            auto doomedLane = currentLane;
+            setActiveLane(targetLane);
+            lanes.erase(doomedNode);
+            delete doomedLane;
+
+            const auto monitor = CanvasLayoutInternal::visible_monitor_for_workspace(workspace);
+            if (monitor)
+                relayoutCanvas(monitor, !workspace->m_isSpecialWorkspace);
+
+            spdlog::info("syncActiveStateFromWorkspaceFocus: dropped empty ephemeral lane canvas_ws={} focused_window={}",
+                         workspace->m_id,
+                         static_cast<const void*>(focusedWindow.get()));
+        }
+    }
+
+    if (!managed || currentWindow == focusedWindow)
+        return;
+
+    onWindowFocusChange(focusedWindow);
 }
 
 void CanvasLayout::moveWindowTo(PHLWINDOW window, const std::string &direction, bool)
@@ -160,6 +285,8 @@ void CanvasLayout::move_focus(int workspace, Direction direction)
     };
 
     static auto* const *focus_wrap = (Hyprlang::INT* const *)HyprlandAPI::getConfigValue(PHANDLE, "plugin:scroller:focus_wrap")->getDataStaticPtr();
+    if (CanvasLayoutInternal::should_sync_workspace_focus_before_move(activeLane))
+        syncActiveStateFromWorkspaceFocus();
     auto s = getActiveLane();
     const auto before = s ? s->get_active_window() : nullptr;
     const auto beforeMonitor = before ? g_pCompositor->getMonitorFromID(before->monitorID()) : monitorFromPointingOrCursor();
@@ -219,6 +346,8 @@ void CanvasLayout::move_focus(int workspace, Direction direction)
 
         const char* targetSelection = "geometry";
         auto targetLayout = CanvasLayoutInternal::get_canvas_for_workspace(workspaceId);
+        if (targetLayout)
+            targetLayout->syncActiveStateFromWorkspaceFocus();
         auto targetLane = targetLayout ? targetLayout->getActiveLane() : nullptr;
         auto crossMonitorTarget = targetLane ? targetLane->get_active_window() : nullptr;
         if (crossMonitorTarget)
@@ -255,6 +384,13 @@ void CanvasLayout::move_focus(int workspace, Direction direction)
         else
             spdlog::warn("move_focus: no lane for crossed monitor target window={} workspace={}",
                          static_cast<const void*>(crossMonitorTarget.get()), workspaceId);
+
+        if (targetLayout != nullptr && targetLane != nullptr) {
+            const auto targetWorkspace = targetLayout->getCanvasWorkspace();
+            auto targetMonitor = targetWorkspace ? CanvasLayoutInternal::visible_monitor_for_workspace(targetWorkspace) : monitor;
+            if (targetMonitor)
+                targetLayout->relayoutCanvas(targetMonitor, targetWorkspace && !targetWorkspace->m_isSpecialWorkspace);
+        }
 
         spdlog::info("move_focus: workspace={} direction={} after={} result={}",
                      workspace,
@@ -296,10 +432,13 @@ void CanvasLayout::move_focus(int workspace, Direction direction)
         newLane->set_ephemeral(true);
         lanes.push_back(newLane);
         auto newLaneNode = lanes.last();
-        if (CanvasLayoutInternal::direction_inserts_before_current(mode, direction))
-            lanes.move_before(sourceLaneNode, newLaneNode);
-        else if (sourceLaneNode != newLaneNode)
-            lanes.move_after(sourceLaneNode, newLaneNode);
+        const auto edgeAnchor = CanvasLayoutInternal::edge_lane_anchor(lanes, mode, direction);
+        if (edgeAnchor && edgeAnchor != newLaneNode) {
+            if (CanvasLayoutInternal::direction_inserts_before_current(mode, direction))
+                lanes.move_before(edgeAnchor, newLaneNode);
+            else
+                lanes.move_after(edgeAnchor, newLaneNode);
+        }
 
         activeLane = newLaneNode;
         relayoutCurrentCanvas(beforeMonitor);

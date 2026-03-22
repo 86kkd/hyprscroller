@@ -92,6 +92,7 @@ private:
     void setActiveLane(Lane *lane);
     Lane *getLaneForWindow(PHLWINDOW window);
     void relayoutCanvas(PHLMONITOR monitor, bool honor_fullscreen);
+    void syncActiveStateFromWorkspaceFocus();
 
     CHyprSignalListener m_focusCallback;
     ListNode<Lane *> *activeLane = nullptr;
