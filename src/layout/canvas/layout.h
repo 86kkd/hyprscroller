@@ -76,6 +76,8 @@ public:
     void fit_size(int workspace, FitSize);
     void toggle_overview(int workspace);
     void toggle_fullscreen(int workspace);
+    void create_lane(int workspace, Direction);
+    void focus_lane(int workspace, Direction);
 
     // Mark helpers: lightweight named bookmarks for focused windows.
     void marks_add(const std::string &name);
@@ -88,6 +90,7 @@ private:
     Lane *getActiveLane();
     void setActiveLane(Lane *lane);
     Lane *getLaneForWindow(PHLWINDOW window);
+    void relayoutCanvas(PHLMONITOR monitor, bool honor_fullscreen);
 
     ListNode<Lane *> *activeLane = nullptr;
     List<Lane *> lanes;

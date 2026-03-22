@@ -1,6 +1,8 @@
 #include <algorithm>
 
 #include <hyprland/src/Compositor.hpp>
+#include <hyprland/src/config/ConfigManager.hpp>
+#include <hyprland/src/config/ConfigValue.hpp>
 #include <hyprland/src/helpers/Monitor.hpp>
 #include <hyprland/src/layout/algorithm/Algorithm.hpp>
 #include <hyprland/src/layout/space/Space.hpp>
@@ -57,6 +59,55 @@ Lane *CanvasLayout::getLaneForWindow(PHLWINDOW window) {
             return lane->data();
     }
     return nullptr;
+}
+
+void CanvasLayout::relayoutCanvas(PHLMONITOR monitor, bool honor_fullscreen) {
+    const auto workspace = getCanvasWorkspace();
+    if (!workspace || !monitor || lanes.empty())
+        return;
+
+    if (lanes.size() == 1) {
+        CanvasLayoutInternal::recalculate_workspace_lane(lanes.first()->data(), monitor, workspace, honor_fullscreen);
+        return;
+    }
+
+    static auto PGAPSINDATA = CConfigValue<Hyprlang::CUSTOMTYPE>("general:gaps_in");
+    static auto PGAPSOUTDATA = CConfigValue<Hyprlang::CUSTOMTYPE>("general:gaps_out");
+    auto *const PGAPSIN = (CCssGapData *)(PGAPSINDATA.ptr())->getData();
+    auto *const PGAPSOUT = (CCssGapData *)(PGAPSOUTDATA.ptr())->getData();
+    const auto gaps_in = PGAPSIN->m_top;
+    const auto gaps_out = PGAPSOUT->m_top;
+    const auto reserved = monitor->m_reservedArea;
+    const auto gapOutTopLeft = Vector2D(reserved.left(), reserved.top());
+    const auto gapOutBottomRight = Vector2D(reserved.right(), reserved.bottom());
+    const auto size = Vector2D(monitor->m_size.x, monitor->m_size.y);
+    const auto pos = Vector2D(monitor->m_position.x, monitor->m_position.y);
+    const auto full = Box(pos, size);
+    const auto max = Box(pos.x + gapOutTopLeft.x + gaps_out,
+                         pos.y + gapOutTopLeft.y + gaps_out,
+                         size.x - gapOutTopLeft.x - gapOutBottomRight.x - 2 * gaps_out,
+                         size.y - gapOutTopLeft.y - gapOutBottomRight.y - 2 * gaps_out);
+
+    const auto mode = getActiveLane() ? getActiveLane()->get_mode() : Mode::Row;
+    const auto count = static_cast<double>(lanes.size());
+    size_t index = 0;
+    for (auto lane = lanes.first(); lane != nullptr; lane = lane->next(), ++index) {
+        Box laneBox = max;
+        if (mode == Mode::Row) {
+            const auto unit = max.h / count;
+            const auto y = max.y + unit * index;
+            const auto h = index + 1 == lanes.size() ? max.y + max.h - y : unit;
+            laneBox = Box(max.x, y, max.w, h);
+        } else {
+            const auto unit = max.w / count;
+            const auto x = max.x + unit * index;
+            const auto w = index + 1 == lanes.size() ? max.x + max.w - x : unit;
+            laneBox = Box(x, max.y, w, max.h);
+        }
+
+        lane->data()->set_canvas_geometry(full, laneBox, gaps_in);
+        lane->data()->recalculate_lane_geometry();
+    }
 }
 
 void CanvasLayout::newTarget(SP<Layout::ITarget> target) {
@@ -120,8 +171,7 @@ void CanvasLayout::recalculate()
     if (!monitor)
         return;
 
-    for (auto lane = lanes.first(); lane != nullptr; lane = lane->next())
-        CanvasLayoutInternal::recalculate_workspace_lane(lane->data(), monitor, workspace, true);
+    relayoutCanvas(monitor, true);
 }
 
 std::expected<void, std::string> CanvasLayout::layoutMsg(const std::string_view&)
@@ -310,8 +360,7 @@ void CanvasLayout::onEnable() {
         return;
     }
 
-    for (auto lane = lanes.first(); lane != nullptr; lane = lane->next())
-        CanvasLayoutInternal::recalculate_workspace_lane(lane->data(), monitor, workspace, !workspace->m_isSpecialWorkspace);
+    relayoutCanvas(monitor, !workspace->m_isSpecialWorkspace);
 }
 
 void CanvasLayout::onDisable() {

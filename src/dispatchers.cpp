@@ -253,6 +253,32 @@ namespace {
         layout->toggle_fullscreen(workspace);
     }
 
+    // createlane <dir>: move the active stack into a new adjacent lane.
+    void dispatch_createlane(std::string arg) {
+        int workspace;
+        auto layout = layout_for_action(&workspace);
+        if (!layout || workspace == -1)
+            return;
+
+        auto args = CVarList(arg);
+        if (auto direction = parse_move_arg(args[0])) {
+            layout->create_lane(workspace, *direction);
+        }
+    }
+
+    // focuslane <dir>: switch the active lane inside the current canvas.
+    void dispatch_focuslane(std::string arg) {
+        int workspace;
+        auto layout = layout_for_action(&workspace);
+        if (!layout || workspace == -1)
+            return;
+
+        auto args = CVarList(arg);
+        if (auto direction = parse_move_arg(args[0])) {
+            layout->focus_lane(workspace, *direction);
+        }
+    }
+
     // marksadd <name>: save focused window under a named mark.
     void dispatch_marksadd(std::string arg) {
         int workspace;
@@ -307,6 +333,8 @@ void dispatchers::addDispatchers() {
     HyprlandAPI::addDispatcherV2(PHANDLE, "scroller:fitsize", wrap(dispatch_fitsize));
     HyprlandAPI::addDispatcherV2(PHANDLE, "scroller:toggleoverview", wrap(dispatch_toggleoverview));
     HyprlandAPI::addDispatcherV2(PHANDLE, "scroller:togglefullscreen", wrap(dispatch_togglefullscreen));
+    HyprlandAPI::addDispatcherV2(PHANDLE, "scroller:createlane", wrap(dispatch_createlane));
+    HyprlandAPI::addDispatcherV2(PHANDLE, "scroller:focuslane", wrap(dispatch_focuslane));
     HyprlandAPI::addDispatcherV2(PHANDLE, "scroller:marksadd", wrap(dispatch_marksadd));
     HyprlandAPI::addDispatcherV2(PHANDLE, "scroller:marksdelete", wrap(dispatch_marksdelete));
     HyprlandAPI::addDispatcherV2(PHANDLE, "scroller:marksvisit", wrap(dispatch_marksvisit));

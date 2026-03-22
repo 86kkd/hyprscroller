@@ -84,3 +84,72 @@ void CanvasLayout::toggle_fullscreen(int workspace) {
 
     lane->toggle_fullscreen_active_window();
 }
+
+void CanvasLayout::create_lane(int workspace, Direction direction) {
+    (void)workspace;
+    auto lane = getActiveLane();
+    if (!lane || !activeLane)
+        return;
+
+    auto stack = lane->extract_active_stack();
+    if (!stack)
+        return;
+
+    auto currentLaneNode = activeLane;
+    auto newLane = new Lane(stack);
+    lanes.push_back(newLane);
+    auto newLaneNode = lanes.last();
+
+    if (direction == Direction::Left || direction == Direction::Up || direction == Direction::Begin)
+        lanes.move_before(currentLaneNode, newLaneNode);
+    else if (currentLaneNode != newLaneNode)
+        lanes.move_after(currentLaneNode, newLaneNode);
+
+    activeLane = newLaneNode;
+
+    if (lane->empty()) {
+        lanes.erase(currentLaneNode);
+        delete lane;
+    }
+
+    const auto workspaceHandle = getCanvasWorkspace();
+    const auto monitor = workspaceHandle ? CanvasLayoutInternal::visible_monitor_for_workspace(workspaceHandle) : nullptr;
+    if (monitor)
+        relayoutCanvas(monitor, workspaceHandle && !workspaceHandle->m_isSpecialWorkspace);
+
+    if (const auto window = newLane->get_active_window())
+        CanvasLayoutInternal::switch_to_window(window, true);
+}
+
+void CanvasLayout::focus_lane(int workspace, Direction direction) {
+    (void)workspace;
+    if (!activeLane || lanes.size() < 2)
+        return;
+
+    auto target = activeLane;
+    switch (direction) {
+    case Direction::Left:
+    case Direction::Up:
+        target = activeLane->prev() ? activeLane->prev() : lanes.last();
+        break;
+    case Direction::Right:
+    case Direction::Down:
+        target = activeLane->next() ? activeLane->next() : lanes.first();
+        break;
+    case Direction::Begin:
+        target = lanes.first();
+        break;
+    case Direction::End:
+        target = lanes.last();
+        break;
+    default:
+        return;
+    }
+
+    if (!target || target == activeLane)
+        return;
+
+    activeLane = target;
+    if (const auto window = activeLane->data()->get_active_window())
+        CanvasLayoutInternal::switch_to_window(window, true);
+}

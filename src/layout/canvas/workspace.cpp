@@ -208,6 +208,5 @@ void CanvasLayout::recalculateMonitor(const int &monitor_id)
         return;
 
     g_pHyprRenderer->damageMonitor(monitor);
-    for (auto lane = lanes.first(); lane != nullptr; lane = lane->next())
-        CanvasLayoutInternal::recalculate_workspace_lane(lane->data(), monitor, workspace, !workspace->m_isSpecialWorkspace);
+    relayoutCanvas(monitor, !workspace->m_isSpecialWorkspace);
 }

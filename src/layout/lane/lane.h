@@ -19,12 +19,17 @@ class Lane {
     // A lane contains all stacks for one workspace and owns horizontal navigation.
 public:
     Lane(PHLWINDOW window);
+    Lane(Stack *stack);
     ~Lane();
 
+    bool empty() const;
+    Mode get_mode() const;
     bool has_window(PHLWINDOW window) const;
     PHLWINDOW get_active_window() const;
     bool is_active(PHLWINDOW window) const;
     void add_active_window(PHLWINDOW window);
+    Stack *extract_active_stack();
+    void set_canvas_geometry(const Box &full_box, const Box &max_box, int gap_size);
 
     // Remove a window and re-adapt lanes and stacks, returning true on success.
     bool remove_window(PHLWINDOW window);
