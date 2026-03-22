@@ -317,6 +317,11 @@ void CanvasLayout::move_focus(int workspace, Direction direction)
     }
 
     const auto moveResult = s->move_focus(direction, **focus_wrap != 0);
+    if (moveResult != FocusMoveResult::Moved && CanvasLayoutInternal::direction_moves_between_lanes(mode, direction)) {
+        moveAcrossLanesOrCreate();
+        return;
+    }
+
     if (moveResult == FocusMoveResult::CrossMonitor) {
         const auto monitorDirection = CanvasLayoutInternal::direction_to_math(direction);
         auto monitor = beforeMonitor && monitorDirection ? g_pCompositor->getMonitorInDirection(beforeMonitor, *monitorDirection) : nullptr;
