@@ -50,12 +50,15 @@ void init_logging() {
 }
 } // namespace
 
-// Report the Hyprland plugin API version this build targets.
+// Report the Hyprland plugin API version this build targets. Hyprland queries
+// this symbol before accepting the plugin.
 APICALL EXPORT std::string PLUGIN_API_VERSION() {
     return HYPRLAND_API_VERSION;
 }
 
 // Register config values, dispatchers, and the tiled algorithm implementation.
+// The returned description tuple is shown by Hyprland/plugin tooling as:
+// { name, description, author, version }.
 APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     PHANDLE = handle;
     init_logging();
@@ -82,6 +85,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         &typeid(CanvasLayout),
         []() -> UP<Layout::ITiledAlgorithm> { return makeUnique<CanvasLayout>(); });
 
+    // Keep the exported plugin metadata stable for plugin discovery and UI.
     return {"hyprscroller", "scrolling window layout", "dawser", "1.0"};
 }
 
