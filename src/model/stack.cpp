@@ -13,6 +13,8 @@
 #include <hyprland/src/layout/space/Space.hpp>
 #include <hyprland/src/layout/target/Target.hpp>
 
+#include "../core/interval.h"
+
 extern HANDLE PHANDLE;
 
 namespace ScrollerModel {
@@ -50,7 +52,7 @@ static bool is_window_fully_visible(Window *window, double gap, const ScrollerCo
         return false;
     const auto y0 = std::round(window->get_geom_y());
     const auto y1 = std::round(window->get_geom_y() + window->get_geom_h());
-    return y0 >= geom.y && y1 <= geom.y + geom.h;
+    return ScrollerCore::Interval::fully_visible(y0, y1, geom.y, geom.y + geom.h);
 }
 
 static bool is_window_intersect_viewport(Window *window, double gap, const ScrollerCore::Box &geom) {
@@ -58,9 +60,7 @@ static bool is_window_intersect_viewport(Window *window, double gap, const Scrol
         return false;
     const auto y0 = window->get_geom_y();
     const auto y1 = window->get_geom_y() + window->get_geom_h();
-    return y0 < geom.y + geom.h && y0 >= geom.y ||
-           y1 > geom.y && y1 <= geom.y + geom.h ||
-           y0 < geom.y && y1 >= geom.y + geom.h;
+    return ScrollerCore::Interval::intersects(y0, y1, geom.y, geom.y + geom.h);
 }
 
 static double window_active_x(const ScrollerCore::Box &geom, double border_x, double gap_x) {

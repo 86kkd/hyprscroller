@@ -12,6 +12,7 @@
 #include <hyprland/src/managers/EventManager.hpp>
 #endif
 
+#include "../../core/interval.h"
 #include "../canvas/internal.h"
 
 namespace {
@@ -22,9 +23,7 @@ bool stack_intersects_visible_box(const Stack *stack, const ScrollerCore::Box &v
 
     const auto left = stack->get_geom_x();
     const auto right = left + stack->get_geom_w();
-    return left < visible_box.x + visible_box.w && left >= visible_box.x ||
-           right > visible_box.x && right <= visible_box.x + visible_box.w ||
-           left < visible_box.x && right >= visible_box.x + visible_box.w;
+    return ScrollerCore::Interval::intersects(left, right, visible_box.x, visible_box.x + visible_box.w);
 }
 
 double choose_anchor_x(const ListNode<Stack *> *active, const double active_width,

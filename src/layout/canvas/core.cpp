@@ -338,19 +338,22 @@ void CanvasLayout::moveTargetInDirection(SP<Layout::ITarget> t, Math::eDirection
     if (!s || !window)
         return;
 
-    s->focus_window(window);
     switch (direction) {
         case Math::DIRECTION_LEFT:
-            s->move_active_stack(Direction::Left);
+            onWindowFocusChange(window);
+            move_window(window->workspaceID(), Direction::Left);
             break;
         case Math::DIRECTION_RIGHT:
-            s->move_active_stack(Direction::Right);
+            onWindowFocusChange(window);
+            move_window(window->workspaceID(), Direction::Right);
             break;
         case Math::DIRECTION_UP:
-            s->move_active_stack(Direction::Up);
+            onWindowFocusChange(window);
+            move_window(window->workspaceID(), Direction::Up);
             break;
         case Math::DIRECTION_DOWN:
-            s->move_active_stack(Direction::Down);
+            onWindowFocusChange(window);
+            move_window(window->workspaceID(), Direction::Down);
             break;
         default:
             return;
