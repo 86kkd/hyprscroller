@@ -16,6 +16,7 @@
 
 using namespace ScrollerCore;
 
+// Global mark registry shared by all canvas instances.
 static Marks marks;
 
 namespace {

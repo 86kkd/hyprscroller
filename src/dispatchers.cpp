@@ -1,3 +1,12 @@
+/**
+ * @file dispatchers.cpp
+ * @brief Hyprland dispatcher registration and argument parsing glue.
+ *
+ * The functions in this file translate Hyprland string dispatcher arguments
+ * into strongly typed plugin commands, resolve the active canvas layout for the
+ * current monitor/workspace context, and then forward execution into
+ * `CanvasLayout`.
+ */
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/includes.hpp>
 #include <hyprlang.hpp>
@@ -15,8 +24,8 @@
 extern HANDLE PHANDLE;
 
 namespace {
-    // Resolve scroller layout instance from workspace id, returning nullptr if that
-    // workspace is not currently managed by this plugin.
+    // Resolve canvas layout instance from workspace id, returning nullptr when
+    // the workspace is not currently managed by this plugin.
     CanvasLayout *getCanvasForWorkspace(const int workspace_id) {
         const auto workspace = g_pCompositor->getWorkspaceByID(workspace_id);
         if (!workspace || !workspace->m_space) {
@@ -36,6 +45,7 @@ namespace {
         return dynamic_cast<CanvasLayout *>(tiled.get());
     }
 
+    // Pick the visible workspace on a monitor, preferring special workspaces.
     PHLWORKSPACE getWorkspaceForAction(PHLMONITOR monitor) {
         if (!monitor)
             return nullptr;
@@ -85,7 +95,7 @@ namespace {
         return getCanvasForWorkspace(workspace_id);
     }
 
-    // Parse direction-like arguments used by movefocus/movewindow/alignwindow.
+    // Parse direction-like arguments used by directional dispatchers.
     std::optional<Direction> parse_move_arg(std::string arg) {
         if (arg == "l" || arg == "left")
             return Direction::Left;
@@ -316,6 +326,7 @@ namespace {
 
 // Register all plugin dispatchers into Hyprland's dispatcher map.
 void dispatchers::addDispatchers() {
+    // Wrap raw std::string handlers into Hyprland's dispatcher result type.
     const auto wrap = [](auto fn) {
         return [fn = std::move(fn)](const std::string& arg) -> SDispatchResult {
             fn(arg);

@@ -93,13 +93,22 @@ private:
     void center_active_stack();
     void adjust_stacks(ListNode<Stack *> *stack);
 
+    // Raw monitor bounds for this lane's current canvas placement.
     Box full;
+    // Workarea bounds after reserved areas and gaps are applied.
     Box max;
+    // Whether overview projection is currently active.
     bool overview;
+    // Whether this lane is a temporary navigation-only lane.
     bool ephemeral;
+    // Inner gap used between stacked windows.
     int gap;
+    // Current reorder policy for relayout decisions.
     Reorder reorder;
+    // Current navigation/insertion mode for the lane.
     Mode mode;
+    // Active stack node inside this lane.
     ListNode<Stack *> *active;
+    // Ordered stacks owned by this lane.
     List<Stack *> stacks;
 };

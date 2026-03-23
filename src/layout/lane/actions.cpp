@@ -1,8 +1,17 @@
+/**
+ * @file actions.cpp
+ * @brief Command-facing lane operations and focus movement.
+ *
+ * These methods mutate the active lane in response to user commands: inserting
+ * and removing windows, moving focus, reordering stacks, and splitting/merging
+ * windows between neighboring stacks.
+ */
 #include "lane.h"
 
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/helpers/Monitor.hpp>
 
+// Insert a new window into the active lane, respecting the current lane mode.
 void Lane::add_active_window(PHLWINDOW window) {
     if (mode == Mode::Column && active != nullptr) {
         const auto windowCountBefore = active->data()->size();
@@ -26,6 +35,7 @@ void Lane::add_active_window(PHLWINDOW window) {
     recalculate_lane_geometry();
 }
 
+// Remove a window from this lane and keep stack/lane state coherent.
 bool Lane::remove_window(PHLWINDOW window) {
     reorder = Reorder::Auto;
     for (auto c = stacks.first(); c != nullptr; c = c->next()) {
@@ -60,6 +70,7 @@ bool Lane::remove_window(PHLWINDOW window) {
     return true;
 }
 
+// Swap two windows when they both belong to the same stack in this lane.
 bool Lane::swapWindows(PHLWINDOW a, PHLWINDOW b) {
     ListNode<Stack *> *ca = nullptr;
     ListNode<Stack *> *cb = nullptr;
@@ -77,6 +88,7 @@ bool Lane::swapWindows(PHLWINDOW a, PHLWINDOW b) {
     return ca->data()->swap_windows(a, b);
 }
 
+// Focus the stack and window that owns the given compositor window.
 void Lane::focus_window(PHLWINDOW window) {
     for (auto c = stacks.first(); c != nullptr; c = c->next()) {
         if (!c->data()->has_window(window))
@@ -89,6 +101,7 @@ void Lane::focus_window(PHLWINDOW window) {
     }
 }
 
+// Execute directional focus movement inside this lane.
 FocusMoveResult Lane::move_focus(Direction dir, bool focus_wrap) {
     if (!active)
         return FocusMoveResult::NoOp;
@@ -130,6 +143,7 @@ FocusMoveResult Lane::move_focus(Direction dir, bool focus_wrap) {
     return result;
 }
 
+// Move focus to the previous stack, wrapping or crossing monitor when needed.
 FocusMoveResult Lane::move_focus_left(bool focus_wrap) {
     if (active == stacks.first()) {
         PHLMONITOR monitor = g_pCompositor->getMonitorInDirection(Math::fromChar('l'));
@@ -145,6 +159,7 @@ FocusMoveResult Lane::move_focus_left(bool focus_wrap) {
     return FocusMoveResult::Moved;
 }
 
+// Move focus to the next stack, wrapping or crossing monitor when needed.
 FocusMoveResult Lane::move_focus_right(bool focus_wrap) {
     if (active == stacks.last()) {
         PHLMONITOR monitor = g_pCompositor->getMonitorInDirection(Math::fromChar('r'));
@@ -160,14 +175,17 @@ FocusMoveResult Lane::move_focus_right(bool focus_wrap) {
     return FocusMoveResult::Moved;
 }
 
+// Jump focus to the first stack in the lane.
 void Lane::move_focus_begin() {
     active = stacks.first();
 }
 
+// Jump focus to the last stack in the lane.
 void Lane::move_focus_end() {
     active = stacks.last();
 }
 
+// Cycle the active stack width or active window height, depending on mode.
 void Lane::resize_active_stack(int step) {
     if (!active)
         return;
@@ -192,6 +210,7 @@ void Lane::resize_active_stack(int step) {
     recalculate_lane_geometry();
 }
 
+// Resize the active window inside the current stack when resizing is allowed.
 void Lane::resize_active_window(const Vector2D &delta) {
     if (!active)
         return;
@@ -205,10 +224,12 @@ void Lane::resize_active_window(const Vector2D &delta) {
     recalculate_lane_geometry();
 }
 
+// Change the lane traversal mode used by focus and insertion logic.
 void Lane::set_mode(Mode m) {
     mode = m;
 }
 
+// Align the active stack or active window against the current lane viewport.
 void Lane::align_stack(Direction dir) {
     if (!active)
         return;
@@ -245,6 +266,7 @@ void Lane::align_stack(Direction dir) {
     recalculate_lane_geometry();
 }
 
+// Reorder stacks in row mode or windows in column mode.
 void Lane::move_active_stack(Direction dir) {
     if (!active)
         return;
@@ -284,6 +306,7 @@ void Lane::move_active_stack(Direction dir) {
     recalculate_lane_geometry();
 }
 
+// Move the active window into the previous stack.
 void Lane::admit_window_left() {
     if (!active)
         return;
@@ -305,6 +328,7 @@ void Lane::admit_window_left() {
     recalculate_lane_geometry();
 }
 
+// Split the active window into a new stack to the right.
 void Lane::expel_window_right() {
     if (active->data()->maximized() ||
         active->data()->fullscreen() ||
@@ -322,6 +346,7 @@ void Lane::expel_window_right() {
     recalculate_lane_geometry();
 }
 
+// Fit stack/window sizes to the requested visible range.
 void Lane::fit_size(FitSize fitsize) {
     if (mode == Mode::Column) {
         active->data()->fit_size(fitsize, calculate_gap_x(active), gap);

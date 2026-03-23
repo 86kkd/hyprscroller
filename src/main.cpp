@@ -1,3 +1,11 @@
+/**
+ * @file main.cpp
+ * @brief Plugin entrypoints, config registration, and logging bootstrap.
+ *
+ * This file is intentionally small: it wires Hyprland's plugin ABI to the
+ * layout implementation, registers plugin config values and dispatchers, and
+ * initializes the dedicated file logger used for debugging layout behavior.
+ */
 #include <hyprland/src/config/ConfigManager.hpp>
 #include <hyprland/src/plugins/PluginAPI.hpp>
 #include <cstdlib>
@@ -11,15 +19,18 @@
 #include "hyprlang.hpp"
 #include "layout/canvas/layout.h"
 
+// Hyprland plugin handle used by config lookups and dispatcher registration.
 HANDLE PHANDLE = nullptr;
 
 namespace {
+// Resolve the dedicated log file used by the plugin across sessions.
 std::string log_file_path() {
     const char* home = std::getenv("HOME");
     const auto base = home ? std::filesystem::path(home) : std::filesystem::path("/tmp");
     return (base / ".hyprland/plugins/hyprscroller/hyprscroller.log").string();
 }
 
+// Initialize the file-backed spdlog logger used by all plugin code.
 void init_logging() {
     const auto path = log_file_path();
     std::filesystem::create_directories(std::filesystem::path(path).parent_path());
@@ -39,10 +50,12 @@ void init_logging() {
 }
 } // namespace
 
+// Report the Hyprland plugin API version this build targets.
 APICALL EXPORT std::string PLUGIN_API_VERSION() {
     return HYPRLAND_API_VERSION;
 }
 
+// Register config values, dispatchers, and the tiled algorithm implementation.
 APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     PHANDLE = handle;
     init_logging();
@@ -72,6 +85,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     return {"hyprscroller", "scrolling window layout", "dawser", "1.0"};
 }
 
+// Plugin shutdown hook used for final logging only.
 APICALL EXPORT void PLUGIN_EXIT() {
     spdlog::info("pluginExit");
 }

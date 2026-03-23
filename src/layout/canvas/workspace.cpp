@@ -1,3 +1,11 @@
+/**
+ * @file workspace.cpp
+ * @brief Workspace and monitor resolution helpers for `CanvasLayout`.
+ *
+ * This file owns the monitor/workspace side of the controller layer: choosing
+ * the visible monitor for a workspace, selecting the correct workspace during
+ * monitor handoff, and choosing cross-monitor focus targets.
+ */
 #include <cmath>
 #include <limits>
 #include <optional>
@@ -13,6 +21,8 @@
 #include "internal.h"
 
 namespace {
+// Special workspaces can be rendered on a different monitor than the fallback
+// monitor passed into relayout. Use the active window to recover the real one.
 PHLMONITOR effective_workspace_monitor(Lane* lane, PHLMONITOR monitor, PHLWORKSPACE workspace) {
     if (!lane || !monitor || !workspace || !workspace->m_isSpecialWorkspace)
         return monitor;
@@ -33,6 +43,7 @@ PHLMONITOR effective_workspace_monitor(Lane* lane, PHLMONITOR monitor, PHLWORKSP
     return active_monitor;
 }
 
+// Primary score: how close a candidate window is to the crossing edge.
 double primary_cross_monitor_score(PHLWINDOW window, PHLMONITOR monitor, Direction direction) {
     const auto window_left = window->m_position.x;
     const auto window_right = window->m_position.x + window->m_size.x;
@@ -57,6 +68,8 @@ double primary_cross_monitor_score(PHLWINDOW window, PHLMONITOR monitor, Directi
     }
 }
 
+// Secondary score: prefer candidates aligned with the source window on the
+// perpendicular axis.
 double secondary_cross_monitor_score(PHLWINDOW window, PHLWINDOW source_window, Direction direction) {
     if (!source_window)
         return 0.0;
@@ -77,6 +90,7 @@ double secondary_cross_monitor_score(PHLWINDOW window, PHLWINDOW source_window, 
 } // namespace
 
 namespace CanvasLayoutInternal {
+// Human-readable labels used by logs and diagnostics.
 const char* direction_name(Direction direction) {
     switch (direction) {
         case Direction::Left: return "left";
@@ -90,6 +104,7 @@ const char* direction_name(Direction direction) {
     }
 }
 
+// Recalculate a single lane against a workspace/monitor pairing.
 void recalculate_workspace_lane(Lane* lane, PHLMONITOR monitor, PHLWORKSPACE workspace, bool honor_fullscreen) {
     if (!lane || !monitor || !workspace)
         return;
@@ -104,6 +119,7 @@ void recalculate_workspace_lane(Lane* lane, PHLMONITOR monitor, PHLWORKSPACE wor
     lane->recalculate_lane_geometry();
 }
 
+// Pick the workspace a cross-monitor action should land on for a monitor.
 WORKSPACEID preferred_workspace_id(PHLMONITOR monitor, WORKSPACEID) {
     if (!monitor)
         return WORKSPACE_INVALID;
@@ -115,6 +131,7 @@ WORKSPACEID preferred_workspace_id(PHLMONITOR monitor, WORKSPACEID) {
     return monitor->activeWorkspaceID();
 }
 
+// Resolve the monitor currently showing a workspace, including special workspaces.
 PHLMONITOR visible_monitor_for_workspace(PHLWORKSPACE workspace) {
     if (!workspace)
         return nullptr;
@@ -130,6 +147,7 @@ PHLMONITOR visible_monitor_for_workspace(PHLWORKSPACE workspace) {
     return nullptr;
 }
 
+// Lookup the `CanvasLayout` instance bound to a workspace.
 CanvasLayout* get_canvas_for_workspace(const WORKSPACEID workspace_id) {
     const auto workspace = g_pCompositor->getWorkspaceByID(workspace_id);
     if (!workspace || !workspace->m_space)
@@ -146,6 +164,7 @@ CanvasLayout* get_canvas_for_workspace(const WORKSPACEID workspace_id) {
     return dynamic_cast<CanvasLayout*>(tiled.get());
 }
 
+// Translate plugin directions to Hyprland monitor directions.
 std::optional<Math::eDirection> direction_to_math(Direction direction) {
     switch (direction) {
         case Direction::Left:
@@ -161,6 +180,7 @@ std::optional<Math::eDirection> direction_to_math(Direction direction) {
     }
 }
 
+// Choose the best visible target window on another monitor for cross-monitor focus.
 PHLWINDOW pick_cross_monitor_target_window(PHLMONITOR monitor, WORKSPACEID workspace_id, Direction direction, PHLWINDOW source_window) {
     PHLWINDOW best = nullptr;
     auto best_primary = std::numeric_limits<double>::infinity();
@@ -182,6 +202,7 @@ PHLWINDOW pick_cross_monitor_target_window(PHLMONITOR monitor, WORKSPACEID works
     return best;
 }
 
+// Return the current action workspace id from the active monitor context.
 int get_workspace_id() {
     const auto monitor = monitorFromPointingOrCursor();
     if (!monitor)
@@ -197,6 +218,7 @@ int get_workspace_id() {
 }
 } // namespace CanvasLayoutInternal
 
+// Recalculate this canvas only when the requested monitor is the visible one.
 void CanvasLayout::recalculateMonitor(const int &monitor_id)
 {
     const auto workspace = getCanvasWorkspace();

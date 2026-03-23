@@ -138,7 +138,10 @@ private:
             std::forward<Fn>(fn)(lane);
     }
 
+    // Optional Hyprland focus listener used to keep canvas state synchronized.
     CHyprSignalListener m_focusCallback;
+    // Currently active lane inside this canvas.
     ListNode<Lane *> *activeLane = nullptr;
+    // Ordered lanes that make up the current canvas.
     List<Lane *> lanes;
 };
