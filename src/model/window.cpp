@@ -1,3 +1,11 @@
+/**
+ * @file window.cpp
+ * @brief Implementation of the lightweight per-window model used by `Stack`.
+ *
+ * This file intentionally stays small: it only manages logical height and Y
+ * state for a single tiled window. Canvas, lane, and stack placement are
+ * handled at higher layers.
+ */
 #include "stack.h"
 
 namespace ScrollerModel {
@@ -29,16 +37,19 @@ void Window::set_geom_y(double geom_y) {
 }
 
 void Window::push_geom() {
+    // Save logical geometry before a temporary transform such as expand/overview.
     mem.box_h = box_h;
     mem.box_y = box_y;
 }
 
 void Window::pop_geom() {
+    // Restore the previously saved logical geometry.
     box_h = mem.box_h;
     box_y = mem.box_y;
 }
 
 bool Window::toggle_expand(double maxh) {
+    // Expand only affects logical height; callers are responsible for relayout.
     if (is_expanded) {
         pop_geom();
         is_expanded = false;

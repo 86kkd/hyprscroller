@@ -59,12 +59,22 @@ enum class Reorder {
 };
 
 enum class FocusMoveResult {
+    // Focus moved inside the current stack/lane.
     Moved,
+    // No focus change happened.
     NoOp,
+    // Movement should continue on another monitor.
     CrossMonitor
 };
 
-// Internal window wrapper used by Stack to keep geometry, history and height mode.
+/**
+ * @brief Lightweight model wrapper around a compositor window.
+ *
+ * `Window` stores the logical vertical geometry used by the scrolling model.
+ * It intentionally does not own lane/canvas placement concerns; its job is to
+ * remember the per-window height policy, temporary expanded state, and the
+ * logical Y/H values that stack relayout operates on.
+ */
 class Window {
 public:
     // Construct model wrapper for a backend window and its initial logical geometry.
@@ -95,20 +105,34 @@ public:
     void set_height_free();
 
 private:
+    // Minimal restore point used by fullscreen/overview style transforms.
     struct Memory {
         double box_y;
         double box_h;
     };
 
+    // Weak reference to the backend Hyprland window.
     PHLWINDOWREF window;
+    // Current logical height preset for resize/cycle commands.
     WindowHeight height;
+    // Logical top position inside the owning stack.
     double box_y;
+    // Logical height inside the owning stack.
     double box_h;
+    // Portrait-only expanded flag used by scroller fullscreen behavior.
     bool is_expanded = false;
+    // Last saved logical geometry.
     Memory mem;
 };
 
-// A stack is a vertical list of windows sharing horizontal bounds.
+/**
+ * @brief Ordered vertical group of windows sharing one horizontal slot.
+ *
+ * `Stack` is the lowest layout unit that still performs real geometry work.
+ * It owns the ordered windows inside one slot, tracks the active model window,
+ * applies width/height policies, and recalculates the stacked window geometry
+ * that the lane layer later positions on the canvas.
+ */
 class Stack {
 public:
     // Build a new stack from a compositor window with configuration defaults.
@@ -196,22 +220,35 @@ public:
     void resize_active_window(double maxw, const Vector2D &gap_x, double gap, const Vector2D &delta);
 
 private:
+    // Shift a window range so the active window stays visible inside the stack viewport.
     void adjust_windows(ListNode<Window *> *win, const Vector2D &gap_x, double gap);
 
+    // Restore point for stack-level geometry transforms.
     struct Memory {
         ScrollerCore::Box geom;
     };
 
+    // Current horizontal width mode of the stack.
     StackWidth width;
+    // Height preset of the active window when cycling window sizes.
     WindowHeight height;
+    // Auto/lazy reorder policy used by viewport adjustments.
     Reorder reorder;
+    // Whether this stack already has stable initial geometry.
     bool initialized;
+    // Current stack geometry in canvas coordinates.
     ScrollerCore::Box geom;
+    // Scroller-managed fullscreen state.
     bool fullscreened = false;
+    // Stack-level maximized state.
     bool maxdim;
+    // Saved stack geometry for temporary transforms.
     Memory mem;
+    // Full monitor box used by fullscreen behavior.
     ScrollerCore::Box full;
+    // Currently active model window node.
     ListNode<Window *> *active;
+    // Ordered windows inside this stack.
     List<Window *> windows;
 };
 

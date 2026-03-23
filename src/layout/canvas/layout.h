@@ -27,6 +27,14 @@ enum class ActiveLaneSyncPolicy { None, WorkspaceFocus };
 
 class Lane;
 
+/**
+ * @brief Tiled layout controller for one canvas/workspace instance.
+ *
+ * `CanvasLayout` is the integration layer between Hyprland's tiled algorithm
+ * API and the plugin's internal model. It owns the ordered set of lanes for a
+ * canvas, keeps active-lane state in sync with Hyprland focus, and exposes the
+ * dispatcher-facing operations used by the plugin.
+ */
 class CanvasLayout : public Layout::ITiledAlgorithm {
 public:
     // Public hooks required by Hyprland's tiled algorithm interface.
@@ -89,23 +97,39 @@ public:
     void marks_reset();
 
 private:
+    // Resolve the workspace that owns this canvas instance.
     PHLWORKSPACE getCanvasWorkspace() const;
+    // Return the currently active lane, defaulting to the first lane when needed.
     Lane *getActiveLane();
+    // Point the canvas at a new active lane.
     void setActiveLane(Lane *lane);
+    // Find the lane that currently owns a window.
     Lane *getLaneForWindow(PHLWINDOW window);
+    // Return the list node for a lane inside this canvas.
     ListNode<Lane *> *getLaneNode(Lane *lane) const;
+    // Return the zero-based index of a lane for logs and paging math.
     int laneIndexOf(Lane *lane) const;
+    // Count lanes in the current canvas.
     size_t laneCount() const;
+    // Resolve the monitor currently showing this canvas.
     PHLMONITOR getVisibleCanvasMonitor(PHLMONITOR fallbackMonitor = nullptr) const;
+    // Relayout this canvas on its visible monitor.
     void relayoutVisibleCanvas(PHLMONITOR fallbackMonitor = nullptr);
+    // Recalculate all lanes inside the canvas against one monitor.
     void relayoutCanvas(PHLMONITOR monitor, bool honor_fullscreen);
+    // Sync active lane/window state from Hyprland's remembered workspace focus.
     void syncActiveStateFromWorkspaceFocus();
+    // Adopt the lane containing a newly focused window.
     bool adoptFocusedLane(PHLWINDOW focusedWindow, PHLMONITOR fallbackMonitor = nullptr);
+    // Drop an empty lane and resolve a valid replacement active lane.
     bool dropEmptyLane(ListNode<Lane *> *laneNode, Lane *preferredLane = nullptr, PHLMONITOR fallbackMonitor = nullptr, bool ephemeralOnly = false);
+    // Compatibility wrapper used by older ephemeral-lane call sites.
     bool dropEmptyEphemeralLane(ListNode<Lane *> *laneNode, Lane *preferredLane = nullptr, PHLMONITOR fallbackMonitor = nullptr);
+    // Choose the active lane that should survive after lane removal.
     Lane *resolveActiveLaneAfterRemoval(ListNode<Lane *> *laneNode, PHLWINDOW removedWindow);
 
     template <typename Fn>
+    // Execute a command against the current active lane with optional focus sync.
     void withActiveLane(ActiveLaneSyncPolicy syncPolicy, Fn&& fn) {
         if (syncPolicy == ActiveLaneSyncPolicy::WorkspaceFocus)
             syncActiveStateFromWorkspaceFocus();

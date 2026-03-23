@@ -15,6 +15,13 @@
 using namespace ScrollerCore;
 using namespace ScrollerModel;
 
+/**
+ * @brief Transfer object used when moving an active window between lanes.
+ *
+ * A moved window needs more than the raw `Window*`: the destination lane also
+ * needs the stack width semantics and any free-width value so it can rebuild a
+ * destination stack without losing sizing intent.
+ */
 struct ActiveWindowPayload {
     Window*    window = nullptr;
     StackWidth width = StackWidth::OneHalf;
@@ -26,13 +33,14 @@ struct ActiveWindowPayload {
 };
 
 class Lane {
-    // A lane contains all stacks for one workspace and owns horizontal navigation.
+    // A lane owns the ordered stacks visible on one canvas strip.
 public:
     Lane(PHLWINDOW window);
     Lane(PHLMONITOR monitor, Mode mode);
     Lane(Stack *stack);
     ~Lane();
 
+    // Structural and state queries.
     bool empty() const;
     Mode get_mode() const;
     bool is_ephemeral() const;
@@ -40,9 +48,13 @@ public:
     bool has_window(PHLWINDOW window) const;
     PHLWINDOW get_active_window() const;
     bool is_active(PHLWINDOW window) const;
+
+    // Window/stack membership changes.
     void add_active_window(PHLWINDOW window);
     Stack *extract_active_stack();
+    // Remove the active window and return the payload needed to insert it elsewhere.
     ActiveWindowPayload extract_active_window_payload();
+    // Insert a previously extracted window payload into this lane.
     void insert_window_payload(const ActiveWindowPayload& payload, Direction direction);
     void set_canvas_geometry(const Box &full_box, const Box &max_box, int gap_size);
 
@@ -52,6 +64,7 @@ public:
     void focus_window(PHLWINDOW window);
     FocusMoveResult move_focus(Direction dir, bool focus_wrap);
 
+    // Command-facing stack and window operations.
     void resize_active_stack(int step);
     void resize_active_window(const Vector2D &delta);
     void set_mode(Mode m);
@@ -69,7 +82,7 @@ public:
     void recalculate_lane_geometry();
 
 private:
-    // Calculate lateral gaps for a stack.
+    // Calculate lateral gaps for a stack based on neighbor presence.
     Vector2D calculate_gap_x(const ListNode<Stack *> *stack) const;
 
     FocusMoveResult move_focus_left(bool focus_wrap);
