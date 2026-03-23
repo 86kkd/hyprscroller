@@ -1,3 +1,12 @@
+/**
+ * @file stack.cpp
+ * @brief Implementation of stack-level geometry, movement, and sizing logic.
+ *
+ * `Stack` owns the lowest-level tiled geometry decisions in the plugin: it
+ * manages ordered windows inside one slot, decides which windows are visible in
+ * the stack viewport, and translates logical window geometry into Hyprland
+ * target/window rectangles.
+ */
 #include "stack.h"
 
 #include <algorithm>
@@ -19,11 +28,13 @@ extern HANDLE PHANDLE;
 
 namespace ScrollerModel {
 namespace {
+// Parsed width preset used when constructing a stack from user config.
 struct StackWidthPreset {
     StackWidth width;
     double     maxw;
 };
 
+// Map the configured default width preset string to concrete stack sizing data.
 StackWidthPreset parse_stack_width_preset(PHLWINDOW window, double fallback_maxw) {
     static auto const *column_default_width =
         (Hyprlang::STRING const *)HyprlandAPI::getConfigValue(PHANDLE, "plugin:scroller:column_default_width")->getDataStaticPtr();
@@ -47,6 +58,7 @@ StackWidthPreset parse_stack_width_preset(PHLWINDOW window, double fallback_maxw
     return {StackWidth::OneHalf, fallback_maxw};
 }
 
+// Return true when a window is fully contained inside the stack viewport.
 static bool is_window_fully_visible(Window *window, double gap, const ScrollerCore::Box &geom) {
     if (!window)
         return false;
@@ -55,6 +67,7 @@ static bool is_window_fully_visible(Window *window, double gap, const ScrollerCo
     return ScrollerCore::Interval::fully_visible(y0, y1, geom.y, geom.y + geom.h);
 }
 
+// Return true when a window intersects the stack viewport.
 static bool is_window_intersect_viewport(Window *window, double gap, const ScrollerCore::Box &geom) {
     if (!window)
         return false;
@@ -63,10 +76,12 @@ static bool is_window_intersect_viewport(Window *window, double gap, const Scrol
     return ScrollerCore::Interval::intersects(y0, y1, geom.y, geom.y + geom.h);
 }
 
+// Compute the real X coordinate where stacked windows should render.
 static double window_active_x(const ScrollerCore::Box &geom, double border_x, double gap_x) {
     return geom.x + border_x + gap_x;
 }
 
+// Choose the Y anchor that keeps the active window and a useful neighbor visible.
 static double choose_anchor_y(bool has_next, bool has_prev, double active_h, double next_h, double prev_h,
                              const ScrollerCore::Box &geom) {
     const auto base_y = geom.y;
@@ -86,6 +101,7 @@ static double choose_anchor_y(bool has_next, bool has_prev, double active_h, dou
     return base_y;
 }
 
+// Keep Hyprland's layout target geometry synchronized with plugin-side geometry.
 static void sync_window_target_geometry(PHLWINDOW window) {
     if (!window)
         return;
@@ -98,6 +114,7 @@ static void sync_window_target_geometry(PHLWINDOW window) {
 }
 } // namespace
 
+// Build a new stack from a compositor window using configured default width.
 Stack::Stack(PHLWINDOW cwindow, double maxw, double maxh)
     : height(WindowHeight::One), reorder(Reorder::Auto), initialized(false), maxdim(false) {
     const auto preset = parse_stack_width_preset(cwindow, maxw);
@@ -111,6 +128,7 @@ Stack::Stack(PHLWINDOW cwindow, double maxw, double maxh)
     active = windows.first();
 }
 
+// Build a stack directly from an extracted model window payload.
 Stack::Stack(Window *window, StackWidth width, double maxw, double maxh)
     : width(width), height(WindowHeight::One), reorder(Reorder::Auto), initialized(true), maxdim(false) {
     window->set_geom_h(maxh);
@@ -222,6 +240,7 @@ void Stack::set_geom_w(double w) {
     geom.w = w;
 }
 
+// Return the current vertical extent occupied by the windows in this stack.
 Vector2D Stack::get_height() const {
     Vector2D height;
     auto *first = windows.first()->data();
@@ -231,6 +250,7 @@ Vector2D Stack::get_height() const {
     return height;
 }
 
+// Apply overview scaling to every window in the stack.
 void Stack::scale(const Vector2D &bmin, const Vector2D &start, double scale, double gap) {
     for (auto win = windows.first(); win != nullptr; win = win->next()) {
         const auto oldY = win->data()->get_geom_y();
@@ -250,6 +270,7 @@ void Stack::scale(const Vector2D &bmin, const Vector2D &start, double scale, dou
     }
 }
 
+// Toggle scroller-managed fullscreen/expanded behavior for the active window/stack.
 bool Stack::toggle_fullscreen(const ScrollerCore::Box &fullbbox, Mode mode) {
     full = fullbbox;
 
@@ -267,10 +288,12 @@ bool Stack::toggle_fullscreen(const ScrollerCore::Box &fullbbox, Mode mode) {
     return active->data()->toggle_expand(fullbbox.h);
 }
 
+// Cache the fullscreen bounding box used by fullscreen-aware relayout.
 void Stack::set_fullscreen(const ScrollerCore::Box &fullbbox) {
     full = fullbbox;
 }
 
+// Snapshot current stack and window geometry before a temporary transform.
 void Stack::push_geom() {
     mem.geom = geom;
     for (auto w = windows.first(); w != nullptr; w = w->next()) {
@@ -278,6 +301,7 @@ void Stack::push_geom() {
     }
 }
 
+// Restore stack and window geometry after a temporary transform.
 void Stack::pop_geom() {
     geom = mem.geom;
     for (auto w = windows.first(); w != nullptr; w = w->next()) {
@@ -285,6 +309,7 @@ void Stack::pop_geom() {
     }
 }
 
+// Toggle maximized stack geometry while preserving previous stack/window state.
 void Stack::toggle_maximized(double maxw, double maxh) {
     maxdim = !maxdim;
     if (maxdim) {
@@ -298,6 +323,7 @@ void Stack::toggle_maximized(double maxw, double maxh) {
     }
 }
 
+// Return whether Hyprland native fullscreen is currently active for this stack.
 bool Stack::fullscreen() const {
     if (!active)
         return false;
@@ -306,18 +332,23 @@ bool Stack::fullscreen() const {
     return window ? window->isFullscreen() : false;
 }
 
+// Return whether either scroller fullscreen or portrait expansion is active.
 bool Stack::expanded() const {
     return fullscreened || (active && active->data()->expanded());
 }
 
+// Return whether stack-level maximize mode is active.
 bool Stack::maximized() const {
     return maxdim;
 }
 
+// Set the absolute stack origin used by later relayout.
 void Stack::set_geom_pos(double x, double y) {
     geom.set_pos(x, y);
 }
 
+// Main relayout pass for a stack: keep the active window visible and update all
+// compositor window rectangles from logical geometry.
 void Stack::recalculate_stack_geometry(const Vector2D &gap_x, double gap) {
     if (fullscreen()) {
         PHLWINDOW wactive = active->data()->ptr().lock();
@@ -389,10 +420,12 @@ void Stack::recalculate_stack_geometry(const Vector2D &gap_x, double gap) {
                   new_y);
 }
 
+// Return the compositor window currently active inside this stack.
 PHLWINDOW Stack::get_active_window() {
     return active->data()->ptr().lock();
 }
 
+// Move the active model window one step upward inside the stack.
 void Stack::move_active_up() {
     if (active == windows.first())
         return;
@@ -402,6 +435,7 @@ void Stack::move_active_up() {
     windows.swap(active, prev);
 }
 
+// Move the active model window one step downward inside the stack.
 void Stack::move_active_down() {
     if (active == windows.last())
         return;
@@ -411,6 +445,7 @@ void Stack::move_active_down() {
     windows.swap(active, next);
 }
 
+// Move focus upward inside the stack, optionally wrapping or crossing monitors.
 FocusMoveResult Stack::move_focus_up(bool focus_wrap) {
     if (active != windows.first()) {
         reorder = Reorder::Auto;
@@ -429,6 +464,7 @@ FocusMoveResult Stack::move_focus_up(bool focus_wrap) {
     return active != previous ? FocusMoveResult::Moved : FocusMoveResult::NoOp;
 }
 
+// Move focus downward inside the stack, optionally wrapping or crossing monitors.
 FocusMoveResult Stack::move_focus_down(bool focus_wrap) {
     if (active != windows.last()) {
         reorder = Reorder::Auto;
@@ -446,6 +482,7 @@ FocusMoveResult Stack::move_focus_down(bool focus_wrap) {
     return active != previous ? FocusMoveResult::Moved : FocusMoveResult::NoOp;
 }
 
+// Insert an extracted window into the current stack next to the active window.
 void Stack::admit_window(Window *window) {
     reorder = Reorder::Auto;
     if (!window) {
@@ -464,6 +501,7 @@ void Stack::admit_window(Window *window) {
     active = windows.emplace_after(active, window);
 }
 
+// Remove and return the active model window from this stack.
 Window *Stack::expel_active(double gap) {
     reorder = Reorder::Auto;
     Window *window = active->data();
@@ -473,6 +511,7 @@ Window *Stack::expel_active(double gap) {
     return window;
 }
 
+// Align the active window vertically inside the current stack viewport.
 void Stack::align_window(Direction direction, double gap) {
     PHLWINDOW window = active->data()->ptr().lock();
     auto border = window->getRealBorderSize();
@@ -532,6 +571,7 @@ std::string Stack::get_height_name() const {
 }
 #endif
 
+// Update stack width from a preset or explicit width source.
 void Stack::update_width(StackWidth cwidth, double maxw, double maxh) {
     if (maximized()) {
         geom.w = maxw;
@@ -557,6 +597,7 @@ void Stack::update_width(StackWidth cwidth, double maxw, double maxh) {
     width = cwidth;
 }
 
+// Resize a requested window range so it fills the current stack viewport.
 void Stack::fit_size(FitSize fitsize, const Vector2D &gap_x, double gap) {
     reorder = Reorder::Auto;
     ListNode<Window *> *from, *to;
@@ -613,6 +654,7 @@ void Stack::fit_size(FitSize fitsize, const Vector2D &gap_x, double gap) {
     }
 }
 
+// Cycle the active window height preset.
 void Stack::cycle_size_active_window(int step, const Vector2D &gap_x, double gap) {
     reorder = Reorder::Auto;
     WindowHeight height = active->data()->get_height();
@@ -626,6 +668,8 @@ void Stack::cycle_size_active_window(int step, const Vector2D &gap_x, double gap
     recalculate_stack_geometry(gap_x, gap);
 }
 
+// Shift windows around the anchor window and then write the resulting geometry
+// back to Hyprland window/target state.
 void Stack::adjust_windows(ListNode<Window *> *win, const Vector2D &gap_x, double gap) {
     if (win) {
         auto anchorWindow = win->data()->ptr().lock();
@@ -704,6 +748,8 @@ void Stack::adjust_windows(ListNode<Window *> *win, const Vector2D &gap_x, doubl
     }
 }
 
+// Resize stack width and, optionally, active window height while keeping
+// geometry valid.
 void Stack::resize_active_window(double maxw, const Vector2D &gap_x, double gap, const Vector2D &delta) {
     auto border = active->data()->ptr().lock()->getRealBorderSize();
     auto rwidth = geom.w + delta.x - 2.0 * border - gap_x.x - gap_x.y;

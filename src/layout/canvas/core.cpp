@@ -1,3 +1,11 @@
+/**
+ * @file core.cpp
+ * @brief Canvas lifecycle, lane ownership, and Hyprland tiled-algorithm glue.
+ *
+ * This file owns the non-directional core of `CanvasLayout`: lane list
+ * management, relayout of the whole canvas, Hyprland target callbacks, and
+ * removal/creation flows that keep canvas state coherent.
+ */
 #include <algorithm>
 
 #include <hyprland/src/Compositor.hpp>
@@ -20,12 +28,14 @@ using namespace ScrollerCore;
 static Marks marks;
 
 namespace {
+// Destroy and clear all lanes owned by a canvas instance.
 void clear_lanes(List<Lane*>& lanes) {
     for (auto lane = lanes.first(); lane != nullptr; lane = lane->next())
         delete lane->data();
     lanes.clear();
 }
 
+// Return true when any lane is a temporary page-like lane.
 bool has_ephemeral_lane(const List<Lane*>& lanes) {
     for (auto lane = lanes.first(); lane != nullptr; lane = lane->next()) {
         if (lane->data() && lane->data()->is_ephemeral())
@@ -115,6 +125,7 @@ Lane *CanvasLayout::getLaneForWindow(PHLWINDOW window) {
     return nullptr;
 }
 
+// Resolve the monitor currently displaying this canvas.
 PHLMONITOR CanvasLayout::getVisibleCanvasMonitor(PHLMONITOR fallbackMonitor) const {
     const auto workspace = getCanvasWorkspace();
     if (!workspace)
@@ -124,6 +135,7 @@ PHLMONITOR CanvasLayout::getVisibleCanvasMonitor(PHLMONITOR fallbackMonitor) con
     return visibleMonitor ? visibleMonitor : fallbackMonitor;
 }
 
+// Relayout the canvas on the monitor currently showing it.
 void CanvasLayout::relayoutVisibleCanvas(PHLMONITOR fallbackMonitor) {
     const auto workspace = getCanvasWorkspace();
     const auto monitor = getVisibleCanvasMonitor(fallbackMonitor);
@@ -131,6 +143,7 @@ void CanvasLayout::relayoutVisibleCanvas(PHLMONITOR fallbackMonitor) {
         relayoutCanvas(monitor, !workspace->m_isSpecialWorkspace);
 }
 
+// Remove an empty lane and repair active-lane state around the removal point.
 bool CanvasLayout::dropEmptyLane(ListNode<Lane *> *laneNode, Lane *preferredLane, PHLMONITOR fallbackMonitor, bool ephemeralOnly) {
     if (!laneNode || !laneNode->data())
         return false;
@@ -156,10 +169,12 @@ bool CanvasLayout::dropEmptyLane(ListNode<Lane *> *laneNode, Lane *preferredLane
     return true;
 }
 
+// Compatibility wrapper for call sites that only want to drop temporary lanes.
 bool CanvasLayout::dropEmptyEphemeralLane(ListNode<Lane *> *laneNode, Lane *preferredLane, PHLMONITOR fallbackMonitor) {
     return dropEmptyLane(laneNode, preferredLane, fallbackMonitor, true);
 }
 
+// Choose the lane that should become active after a lane was removed.
 Lane *CanvasLayout::resolveActiveLaneAfterRemoval(ListNode<Lane *> *laneNode, PHLWINDOW removedWindow) {
     const auto workspaceHandle = getCanvasWorkspace();
     if (workspaceHandle) {
@@ -181,6 +196,7 @@ Lane *CanvasLayout::resolveActiveLaneAfterRemoval(ListNode<Lane *> *laneNode, PH
     return activeLane ? activeLane->data() : nullptr;
 }
 
+// Recalculate every lane inside this canvas against one visible monitor.
 void CanvasLayout::relayoutCanvas(PHLMONITOR monitor, bool honor_fullscreen) {
     const auto workspace = getCanvasWorkspace();
     if (!workspace || !monitor || lanes.empty())
@@ -225,6 +241,7 @@ void CanvasLayout::relayoutCanvas(PHLMONITOR monitor, bool honor_fullscreen) {
     }
 }
 
+// Hyprland callback: add a new tiled target into the current canvas.
 void CanvasLayout::newTarget(SP<Layout::ITarget> target) {
     if (!target)
         return;
@@ -238,6 +255,7 @@ void CanvasLayout::newTarget(SP<Layout::ITarget> target) {
     CanvasLayoutInternal::switch_to_window(window);
 }
 
+// Hyprland callback: target re-entered tiling flow and should be owned again.
 void CanvasLayout::movedTarget(SP<Layout::ITarget> target, std::optional<Vector2D>)
 {
     if (!target)
@@ -250,6 +268,7 @@ void CanvasLayout::movedTarget(SP<Layout::ITarget> target, std::optional<Vector2
     onWindowCreatedTiling(window, Math::DIRECTION_DEFAULT);
 }
 
+// Hyprland callback: remove a tiled target from canvas ownership.
 void CanvasLayout::removeTarget(SP<Layout::ITarget> target)
 {
     if (!target)
@@ -258,6 +277,7 @@ void CanvasLayout::removeTarget(SP<Layout::ITarget> target)
     onWindowRemovedTiling(target->window());
 }
 
+// Hyprland callback: resize the active window inside the owning lane.
 void CanvasLayout::resizeTarget(const Vector2D &delta, SP<Layout::ITarget> target, Layout::eRectCorner)
 {
     auto window = windowFromTarget(target);
@@ -276,6 +296,7 @@ void CanvasLayout::resizeTarget(const Vector2D &delta, SP<Layout::ITarget> targe
     s->resize_active_window(delta);
 }
 
+// Hyprland callback: relayout the whole canvas after monitor/workspace changes.
 void CanvasLayout::recalculate()
 {
     const auto workspace = getCanvasWorkspace();
@@ -289,11 +310,13 @@ void CanvasLayout::recalculate()
     relayoutCanvas(monitor, true);
 }
 
+// Placeholder for future layoutmsg support.
 std::expected<void, std::string> CanvasLayout::layoutMsg(const std::string_view&)
 {
     return {};
 }
 
+// Predict the size of a new tiled target using the active lane if present.
 std::optional<Vector2D> CanvasLayout::predictSizeForNewTarget()
 {
     auto monitor = monitorFromPointingOrCursor();
@@ -307,6 +330,7 @@ std::optional<Vector2D> CanvasLayout::predictSizeForNewTarget()
     return lane->predict_window_size();
 }
 
+// Return the next target candidate using the active window of the active lane.
 SP<Layout::ITarget> CanvasLayout::getNextCandidate(SP<Layout::ITarget> old)
 {
     auto s = getActiveLane();
@@ -320,6 +344,7 @@ SP<Layout::ITarget> CanvasLayout::getNextCandidate(SP<Layout::ITarget> old)
     return active->layoutTarget();
 }
 
+// Swap two targets when they live inside the same lane/stack context.
 void CanvasLayout::swapTargets(SP<Layout::ITarget> a, SP<Layout::ITarget> b)
 {
     auto wa = windowFromTarget(a);
@@ -332,6 +357,7 @@ void CanvasLayout::swapTargets(SP<Layout::ITarget> a, SP<Layout::ITarget> b)
     sa->swapWindows(wa, wb);
 }
 
+// Hyprland target-level move entrypoint reused by drag/move style operations.
 void CanvasLayout::moveTargetInDirection(SP<Layout::ITarget> t, Math::eDirection direction, bool)
 {
     auto window = windowFromTarget(t);
@@ -361,6 +387,7 @@ void CanvasLayout::moveTargetInDirection(SP<Layout::ITarget> t, Math::eDirection
     }
 }
 
+// Insert a newly mapped tiled window into the active lane, creating one if needed.
 void CanvasLayout::onWindowCreatedTiling(PHLWINDOW window, Math::eDirection)
 {
     auto s = getActiveLane();
@@ -372,6 +399,7 @@ void CanvasLayout::onWindowCreatedTiling(PHLWINDOW window, Math::eDirection)
     s->add_active_window(window);
 }
 
+// Remove a tiled window and delete the lane if it becomes empty.
 void CanvasLayout::onWindowRemovedTiling(PHLWINDOW window)
 {
     const auto windowPtr = static_cast<const void*>(window.get());
@@ -408,11 +436,13 @@ void CanvasLayout::onWindowRemovedTiling(PHLWINDOW window)
     relayoutVisibleCanvas();
 }
 
+// Return whether this canvas currently manages a given window.
 bool CanvasLayout::isWindowTiled(PHLWINDOW window)
 {
     return getLaneForWindow(window) != nullptr;
 }
 
+// Recalculate only the lane that owns a given window.
 void CanvasLayout::recalculateWindow(PHLWINDOW window)
 {
     auto s = getLaneForWindow(window);
