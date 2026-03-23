@@ -1,3 +1,11 @@
+/**
+ * @file commands.cpp
+ * @brief Dispatcher-facing command wrappers for canvas operations.
+ *
+ * These methods are intentionally thin. Their job is to normalize workspace
+ * focus state, resolve the active lane, and then delegate the actual layout
+ * work to `Lane` or shared canvas helpers.
+ */
 #include <string>
 
 #include <hyprland/src/Compositor.hpp>
@@ -8,6 +16,8 @@
 #include "internal.h"
 
 namespace {
+// Convert a workspace to the selector string expected by Hyprland workspace
+// dispatchers.
 std::string workspace_selector(PHLWORKSPACE workspace) {
     if (!workspace)
         return {};
@@ -20,6 +30,7 @@ std::string workspace_selector(PHLWORKSPACE workspace) {
 
 } // namespace
 
+// Cycle the active stack width or active window height by one preset step.
 void CanvasLayout::cycle_window_size(int workspace, int step)
 {
     (void)workspace;
@@ -28,6 +39,7 @@ void CanvasLayout::cycle_window_size(int workspace, int step)
     });
 }
 
+// Move the focused window or stack according to lane/mode routing rules.
 void CanvasLayout::move_window(int workspace, Direction direction) {
     (void)workspace;
     withActiveLane(ActiveLaneSyncPolicy::WorkspaceFocus, [&](Lane *lane) {
@@ -113,6 +125,7 @@ void CanvasLayout::move_window(int workspace, Direction direction) {
     });
 }
 
+// Align the active stack/window inside the current lane viewport.
 void CanvasLayout::align_window(int workspace, Direction direction) {
     (void)workspace;
     withActiveLane(ActiveLaneSyncPolicy::WorkspaceFocus, [direction](Lane *lane) {
@@ -120,6 +133,7 @@ void CanvasLayout::align_window(int workspace, Direction direction) {
     });
 }
 
+// Move the active window into the previous stack.
 void CanvasLayout::admit_window_left(int workspace) {
     (void)workspace;
     withActiveLane(ActiveLaneSyncPolicy::WorkspaceFocus, [](Lane *lane) {
@@ -127,6 +141,7 @@ void CanvasLayout::admit_window_left(int workspace) {
     });
 }
 
+// Split the active window into a new stack to the right.
 void CanvasLayout::expel_window_right(int workspace) {
     (void)workspace;
     withActiveLane(ActiveLaneSyncPolicy::WorkspaceFocus, [](Lane *lane) {
@@ -134,6 +149,7 @@ void CanvasLayout::expel_window_right(int workspace) {
     });
 }
 
+// Change the active lane traversal mode.
 void CanvasLayout::set_mode(int workspace, Mode mode) {
     (void)workspace;
     withActiveLane(ActiveLaneSyncPolicy::WorkspaceFocus, [mode](Lane *lane) {
@@ -141,6 +157,7 @@ void CanvasLayout::set_mode(int workspace, Mode mode) {
     });
 }
 
+// Resize the requested visible range so it fills the current lane viewport.
 void CanvasLayout::fit_size(int workspace, FitSize fitsize) {
     (void)workspace;
     withActiveLane(ActiveLaneSyncPolicy::WorkspaceFocus, [fitsize](Lane *lane) {
@@ -148,6 +165,7 @@ void CanvasLayout::fit_size(int workspace, FitSize fitsize) {
     });
 }
 
+// Toggle lane overview projection.
 void CanvasLayout::toggle_overview(int workspace) {
     (void)workspace;
     withActiveLane(ActiveLaneSyncPolicy::WorkspaceFocus, [](Lane *lane) {
@@ -155,6 +173,7 @@ void CanvasLayout::toggle_overview(int workspace) {
     });
 }
 
+// Toggle scroller-managed fullscreen/expanded behavior.
 void CanvasLayout::toggle_fullscreen(int workspace) {
     (void)workspace;
     withActiveLane(ActiveLaneSyncPolicy::WorkspaceFocus, [](Lane *lane) {
@@ -162,6 +181,7 @@ void CanvasLayout::toggle_fullscreen(int workspace) {
     });
 }
 
+// Move the active stack into a new persistent neighboring lane.
 void CanvasLayout::create_lane(int workspace, Direction direction) {
     (void)workspace;
     withActiveLane(ActiveLaneSyncPolicy::WorkspaceFocus, [&](Lane *lane) {
@@ -192,6 +212,7 @@ void CanvasLayout::create_lane(int workspace, Direction direction) {
     });
 }
 
+// Change the active lane without moving any window data.
 void CanvasLayout::focus_lane(int workspace, Direction direction) {
     (void)workspace;
     if (!activeLane || lanes.size() < 2)

@@ -1,3 +1,12 @@
+/**
+ * @file focus.cpp
+ * @brief Focus synchronization, directional focus movement, and monitor handoff.
+ *
+ * This file owns the "where should focus go next?" part of the canvas layer.
+ * It keeps plugin state aligned with Hyprland focus, routes directional focus
+ * requests across stacks, lanes, and monitors, and handles temporary empty-lane
+ * navigation used to emulate moving into blank space.
+ */
 #include <cstdio>
 
 #include <hyprland/src/Compositor.hpp>
@@ -12,6 +21,8 @@
 extern HANDLE PHANDLE;
 
 namespace CanvasLayoutInternal {
+// Translate a logical direction into the short argument format Hyprland
+// dispatchers expect.
 const char* direction_dispatch_arg(Direction direction) {
     switch (direction) {
         case Direction::Left:
@@ -31,6 +42,8 @@ const char* direction_dispatch_arg(Direction direction) {
     }
 }
 
+// Return true when a direction should jump between lanes instead of staying
+// inside the current lane's own focus model.
 bool direction_moves_between_lanes(Mode mode, Direction direction) {
     switch (mode) {
         case Mode::Row:
@@ -42,6 +55,8 @@ bool direction_moves_between_lanes(Mode mode, Direction direction) {
     return false;
 }
 
+// Return true when a lane created in this direction should be inserted before
+// the current lane instead of after it.
 bool direction_inserts_before_current(Mode mode, Direction direction) {
     switch (mode) {
         case Mode::Row:
@@ -53,6 +68,7 @@ bool direction_inserts_before_current(Mode mode, Direction direction) {
     return false;
 }
 
+// Resolve the adjacent lane node in the logical direction for the current mode.
 ListNode<Lane*>* adjacent_lane(ListNode<Lane*>* current, Mode mode, Direction direction) {
     if (!current)
         return nullptr;
@@ -75,6 +91,8 @@ ListNode<Lane*>* adjacent_lane(ListNode<Lane*>* current, Mode mode, Direction di
     return nullptr;
 }
 
+// Choose the edge lane that acts as the anchor for newly created temporary or
+// persistent lanes.
 ListNode<Lane*>* edge_lane_anchor(List<Lane*>& lanes, Mode mode, Direction direction) {
     if (lanes.empty())
         return nullptr;
@@ -85,6 +103,8 @@ ListNode<Lane*>* edge_lane_anchor(List<Lane*>& lanes, Mode mode, Direction direc
     return lanes.last();
 }
 
+// Workspace-focus sync should not run while the user is navigating inside an
+// empty temporary lane, otherwise that lane would immediately collapse.
 bool should_sync_workspace_focus_before_move(ListNode<Lane*>* activeLaneNode) {
     if (!activeLaneNode || !activeLaneNode->data())
         return true;
@@ -93,6 +113,8 @@ bool should_sync_workspace_focus_before_move(ListNode<Lane*>* activeLaneNode) {
     return !(lane->is_ephemeral() && lane->empty());
 }
 
+// Build the shared routing plan used by focus and movewindow when a direction
+// leaves the current lane.
 DirectionalHandoffPlan plan_directional_handoff(List<Lane*>& lanes, ListNode<Lane*>* current, PHLMONITOR sourceMonitor, Mode mode, Direction direction, bool allow_create) {
     if (!direction_moves_between_lanes(mode, direction))
         return {};
@@ -124,6 +146,7 @@ DirectionalHandoffPlan plan_directional_handoff(List<Lane*>& lanes, ListNode<Lan
     return {};
 }
 
+// Shared wrapper around Hyprland builtin directional dispatchers.
 void dispatch_directional_builtin(const char* dispatcher, Direction direction) {
     const auto arg = direction_dispatch_arg(direction);
     if (!arg)
@@ -136,10 +159,12 @@ void dispatch_directional_builtin(const char* dispatcher, Direction direction) {
     it->second(arg);
 }
 
+// Thin specialized wrapper for builtin movefocus.
 void dispatch_builtin_movefocus(Direction direction) {
     dispatch_directional_builtin("movefocus", direction);
 }
 
+// Ensure the destination monitor becomes current before focusing a window on it.
 void focus_window_monitor(PHLWINDOW window) {
     if (!window)
         return;
@@ -160,6 +185,7 @@ void focus_window_monitor(PHLWINDOW window) {
     focusMonitor->second(targetMonitor->m_name);
 }
 
+// Focus a target window and optionally warp the cursor to its center.
 void switch_to_window(PHLWINDOW window, bool warp_cursor)
 {
     if (!window)
@@ -181,6 +207,7 @@ void switch_to_window(PHLWINDOW window, bool warp_cursor)
 }
 } // namespace CanvasLayoutInternal
 
+// Synchronize the canvas active lane/window with a concrete focused window.
 void CanvasLayout::onWindowFocusChange(PHLWINDOW window)
 {
     const auto beforeLane = activeLane ? activeLane->data() : nullptr;
@@ -238,6 +265,8 @@ void CanvasLayout::onWindowFocusChange(PHLWINDOW window)
                  static_cast<const void*>(afterWindow ? afterWindow.get() : nullptr));
 }
 
+// Adopt the lane that owns Hyprland's current focused window, dropping a stale
+// empty temporary lane when necessary.
 bool CanvasLayout::adoptFocusedLane(PHLWINDOW focusedWindow, PHLMONITOR fallbackMonitor)
 {
     if (!focusedWindow)
@@ -259,6 +288,8 @@ bool CanvasLayout::adoptFocusedLane(PHLWINDOW focusedWindow, PHLMONITOR fallback
     return true;
 }
 
+// Pull remembered focus state from the canvas workspace and mirror it into the
+// plugin's active lane/window state.
 void CanvasLayout::syncActiveStateFromWorkspaceFocus()
 {
     const auto workspace = getCanvasWorkspace();
@@ -287,6 +318,7 @@ void CanvasLayout::syncActiveStateFromWorkspaceFocus()
                      static_cast<const void*>(focusedWindow.get()));
 }
 
+// Compatibility entrypoint used by older target-based move-window callbacks.
 void CanvasLayout::moveWindowTo(PHLWINDOW window, const std::string &direction, bool)
 {
     auto s = getLaneForWindow(window);
@@ -304,8 +336,11 @@ void CanvasLayout::moveWindowTo(PHLWINDOW window, const std::string &direction, 
     }
 }
 
+// Execute directional focus movement, including lane handoff, monitor handoff,
+// and temporary empty-lane creation when the user moves into blank space.
 void CanvasLayout::move_focus(int workspace, Direction direction)
 {
+    // Small logging helper so move traces show semantic result names.
     const auto focus_move_result_name = [](FocusMoveResult result) {
         switch (result) {
         case FocusMoveResult::Moved:
@@ -337,6 +372,8 @@ void CanvasLayout::move_focus(int workspace, Direction direction)
         return;
     }
 
+    // Transfer focus to another monitor while preserving target-lane state on
+    // the destination canvas.
     const auto handoffAcrossMonitor = [&](PHLMONITOR monitor) {
         const auto activeWorkspaceId = monitor ? monitor->activeWorkspaceID() : WORKSPACE_INVALID;
         const auto workspaceId = CanvasLayoutInternal::preferred_workspace_id(monitor, workspace);
@@ -418,6 +455,8 @@ void CanvasLayout::move_focus(int workspace, Direction direction)
     };
 
         const auto mode = s->get_mode();
+    // Handle focus movement that leaves the current lane: adjacent lane first,
+    // then cross-monitor, then optional blank-lane creation.
     const auto moveAcrossLanesOrCreate = [&](bool allowCreate) {
         const auto handoffPlan = CanvasLayoutInternal::plan_directional_handoff(lanes, activeLane, beforeMonitor, mode, direction, allowCreate);
         if (handoffPlan.route == CanvasLayoutInternal::DirectionalHandoffRoute::AdjacentLane) {

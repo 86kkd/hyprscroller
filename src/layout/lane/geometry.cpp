@@ -1,3 +1,11 @@
+/**
+ * @file geometry.cpp
+ * @brief Lane geometry, overview projection, and viewport relayout helpers.
+ *
+ * This file contains the geometry-heavy part of lane behavior: stack visibility
+ * checks, anchor selection, overview projection, fullscreen/maximize layout,
+ * and the final relayout pass that keeps the active stack visible.
+ */
 #include "lane.h"
 
 #include <cmath>
@@ -17,6 +25,7 @@
 
 namespace {
 namespace viewport {
+// Return true when a stack intersects the visible horizontal viewport.
 bool stack_intersects_visible_box(const Stack *stack, const ScrollerCore::Box &visible_box) {
     if (!stack)
         return false;
@@ -26,6 +35,8 @@ bool stack_intersects_visible_box(const Stack *stack, const ScrollerCore::Box &v
     return ScrollerCore::Interval::intersects(left, right, visible_box.x, visible_box.x + visible_box.w);
 }
 
+// Choose the X anchor that keeps the active stack and a useful neighbor visible
+// when possible.
 double choose_anchor_x(const ListNode<Stack *> *active, const double active_width,
                        const double fallback_x, const ScrollerCore::Box &visible_box) {
     const auto next = active->next();
@@ -50,6 +61,7 @@ double choose_anchor_x(const ListNode<Stack *> *active, const double active_widt
 } // namespace viewport
 
 namespace logging {
+// Return the currently active compositor window pointer for readable logs.
 const void* active_window_ptr(Stack *stack) {
     if (!stack)
         return nullptr;
@@ -58,6 +70,7 @@ const void* active_window_ptr(Stack *stack) {
     return static_cast<const void*>(window ? window.get() : nullptr);
 }
 
+// Summarize the stack list for row-relayout debugging logs.
 std::string summarize_stacks(List<Stack *>& stacks) {
     std::ostringstream out;
     for (auto col = stacks.first(); col != nullptr; col = col->next()) {
@@ -74,6 +87,7 @@ std::string summarize_stacks(List<Stack *>& stacks) {
 } // namespace logging
 
 namespace overview {
+// Temporary projection data used while overview mode is active.
 struct Projection {
     Vector2D min;
     Vector2D max;
@@ -83,6 +97,7 @@ struct Projection {
     Vector2D offset;
 };
 
+// Compute the scaled bounding box and offset required for overview mode.
 Projection compute_projection(List<Stack *>& stacks, const ScrollerCore::Box &visible_box) {
     Vector2D bmin(visible_box.x + visible_box.w, visible_box.y + visible_box.h);
     Vector2D bmax(visible_box.x, visible_box.y);
@@ -107,6 +122,7 @@ Projection compute_projection(List<Stack *>& stacks, const ScrollerCore::Box &vi
     return Projection{bmin, bmax, width, height, scale, offset};
 }
 
+// Apply overview projection to every stack in the lane.
 void apply_projection(List<Stack *>& stacks, const Projection &projection, double gap, const ScrollerCore::Box &visible_box) {
     for (auto stack = stacks.first(); stack != nullptr; stack = stack->next()) {
         Stack *column = stack->data();
@@ -120,6 +136,7 @@ void apply_projection(List<Stack *>& stacks, const Projection &projection, doubl
     }
 }
 
+// Restore normal geometry after overview mode ends.
 void restore_projection(List<Stack *>& stacks, ListNode<Stack *> *active, const ScrollerCore::Box &visible_box) {
     for (auto stack = stacks.first(); stack != nullptr; stack = stack->next())
         stack->data()->pop_geom();
@@ -134,6 +151,7 @@ void restore_projection(List<Stack *>& stacks, ListNode<Stack *> *active, const 
 } // namespace overview
 
 namespace recalc {
+// Initialize active-stack geometry when a stack is placed for the first time.
 double initialize_active_stack_geometry(ListNode<Stack *> *active, const ScrollerCore::Box &visible_box, double active_width) {
     if (active->data()->get_init())
         return active->data()->get_geom_x();
@@ -154,12 +172,14 @@ double initialize_active_stack_geometry(ListNode<Stack *> *active, const Scrolle
 } // namespace recalc
 } // namespace
 
+// Compute the left/right gap pair a stack should use based on its neighbors.
 Vector2D Lane::calculate_gap_x(const ListNode<Stack *> *stack) const {
     auto gap0 = stack == stacks.first() ? 0.0 : gap;
     auto gap1 = stack == stacks.last() ? 0.0 : gap;
     return Vector2D(gap0, gap1);
 }
 
+// Center the active stack inside the lane according to its width mode.
 void Lane::center_active_stack() {
     if (!active)
         return;
@@ -186,6 +206,7 @@ void Lane::center_active_stack() {
     }
 }
 
+// Predict the initial size for a new window inserted into this lane.
 Vector2D Lane::predict_window_size() const {
     if (mode == Mode::Column)
         return Vector2D(max.w, 0.5 * max.h);
@@ -193,6 +214,7 @@ Vector2D Lane::predict_window_size() const {
     return Vector2D(0.5 * max.w, max.h);
 }
 
+// Refresh lane bounds from the monitor workarea and gap configuration.
 void Lane::update_sizes(PHLMONITOR monitor) {
     if (!monitor)
         return;
@@ -203,6 +225,7 @@ void Lane::update_sizes(PHLMONITOR monitor) {
     gap = bounds.gap;
 }
 
+// Force the active stack into fullscreen geometry used for special fullscreen paths.
 void Lane::set_fullscreen_active_window() {
     if (!active)
         return;
@@ -211,6 +234,7 @@ void Lane::set_fullscreen_active_window() {
     active->data()->recalculate_stack_geometry(calculate_gap_x(active), gap);
 }
 
+// Toggle scroller-managed fullscreen on the active stack and relayout.
 void Lane::toggle_fullscreen_active_window() {
     if (!active)
         return;
@@ -220,6 +244,7 @@ void Lane::toggle_fullscreen_active_window() {
     recalculate_lane_geometry();
 }
 
+// Toggle maximized width/height behavior for the active stack.
 void Lane::toggle_maximize_active_stack() {
     if (!active)
         return;
@@ -230,6 +255,7 @@ void Lane::toggle_maximize_active_stack() {
     recalculate_lane_geometry();
 }
 
+// Toggle overview mode for the whole lane.
 void Lane::toggle_overview() {
     if (stacks.empty() || !active)
         return;
@@ -246,6 +272,8 @@ void Lane::toggle_overview() {
     adjust_stacks(active);
 }
 
+// Main geometry pass for a lane: keep the active stack visible and reposition
+// neighbors around it.
 void Lane::recalculate_lane_geometry() {
     if (active == nullptr)
         return;
