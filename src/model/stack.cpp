@@ -17,6 +17,34 @@ extern HANDLE PHANDLE;
 
 namespace ScrollerModel {
 namespace {
+struct StackWidthPreset {
+    StackWidth width;
+    double     maxw;
+};
+
+StackWidthPreset parse_stack_width_preset(PHLWINDOW window, double fallback_maxw) {
+    static auto const *column_default_width =
+        (Hyprlang::STRING const *)HyprlandAPI::getConfigValue(PHANDLE, "plugin:scroller:column_default_width")->getDataStaticPtr();
+
+    const std::string preset = *column_default_width;
+    if (preset == "onehalf")
+        return {StackWidth::OneHalf, fallback_maxw};
+    if (preset == "onethird")
+        return {StackWidth::OneThird, fallback_maxw};
+    if (preset == "twothirds")
+        return {StackWidth::TwoThirds, fallback_maxw};
+    if (preset == "maximized")
+        return {StackWidth::Free, fallback_maxw};
+    if (preset != "floating")
+        return {StackWidth::OneHalf, fallback_maxw};
+
+    auto target = window ? window->layoutTarget() : nullptr;
+    if (target && target->lastFloatingSize().y > 0)
+        return {StackWidth::Free, target->lastFloatingSize().x};
+
+    return {StackWidth::OneHalf, fallback_maxw};
+}
+
 static bool is_window_fully_visible(Window *window, double gap, const ScrollerCore::Box &geom) {
     if (!window)
         return false;
@@ -72,27 +100,9 @@ static void sync_window_target_geometry(PHLWINDOW window) {
 
 Stack::Stack(PHLWINDOW cwindow, double maxw, double maxh)
     : height(WindowHeight::One), reorder(Reorder::Auto), initialized(false), maxdim(false) {
-    static auto const *column_default_width = (Hyprlang::STRING const *)HyprlandAPI::getConfigValue(PHANDLE, "plugin:scroller:column_default_width")->getDataStaticPtr();
-    std::string column_width = *column_default_width;
-    if (column_width == "onehalf") {
-        width = StackWidth::OneHalf;
-    } else if (column_width == "onethird") {
-        width = StackWidth::OneThird;
-    } else if (column_width == "twothirds") {
-        width = StackWidth::TwoThirds;
-    } else if (column_width == "maximized") {
-        width = StackWidth::Free;
-    } else if (column_width == "floating") {
-        auto target = cwindow->layoutTarget();
-        if (target && target->lastFloatingSize().y > 0) {
-            width = StackWidth::Free;
-            maxw = target->lastFloatingSize().x;
-        } else {
-            width = StackWidth::OneHalf;
-        }
-    } else {
-        width = StackWidth::OneHalf;
-    }
+    const auto preset = parse_stack_width_preset(cwindow, maxw);
+    width = preset.width;
+    maxw = preset.maxw;
 
     Window *window = new Window(cwindow, maxh);
     update_width(width, maxw, maxh);

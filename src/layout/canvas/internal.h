@@ -6,7 +6,14 @@
 #include "layout.h"
 
 namespace CanvasLayoutInternal {
+struct CanvasBounds {
+    ScrollerCore::Box full;
+    ScrollerCore::Box max;
+    int               gap;
+};
+
 const char*                     direction_name(Direction direction);
+CanvasBounds                    compute_canvas_bounds(PHLMONITOR monitor);
 void                            recalculate_workspace_lane(Lane* lane, PHLMONITOR monitor, PHLWORKSPACE workspace, bool honor_fullscreen);
 WORKSPACEID                     preferred_workspace_id(PHLMONITOR monitor, WORKSPACEID source_workspace_id);
 PHLMONITOR                      visible_monitor_for_workspace(PHLWORKSPACE workspace);

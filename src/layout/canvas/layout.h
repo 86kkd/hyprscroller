@@ -12,6 +12,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 
 #include <hyprland/src/layout/algorithm/TiledAlgorithm.hpp>
 #include <hyprland/src/layout/target/Target.hpp>
@@ -22,6 +23,7 @@
 enum class Direction { Left, Right, Up, Down, Begin, End, Center };
 enum class FitSize { Active, Visible, All, ToEnd, ToBeg };
 enum class Mode { Row, Column };
+enum class ActiveLaneSyncPolicy { None, WorkspaceFocus };
 
 class Lane;
 
@@ -91,8 +93,25 @@ private:
     Lane *getActiveLane();
     void setActiveLane(Lane *lane);
     Lane *getLaneForWindow(PHLWINDOW window);
+    ListNode<Lane *> *getLaneNode(Lane *lane) const;
+    int laneIndexOf(Lane *lane) const;
+    size_t laneCount() const;
+    PHLMONITOR getVisibleCanvasMonitor(PHLMONITOR fallbackMonitor = nullptr) const;
+    void relayoutVisibleCanvas(PHLMONITOR fallbackMonitor = nullptr);
     void relayoutCanvas(PHLMONITOR monitor, bool honor_fullscreen);
     void syncActiveStateFromWorkspaceFocus();
+    bool adoptFocusedLane(PHLWINDOW focusedWindow, PHLMONITOR fallbackMonitor = nullptr);
+    bool dropEmptyEphemeralLane(ListNode<Lane *> *laneNode, Lane *preferredLane = nullptr, PHLMONITOR fallbackMonitor = nullptr);
+    Lane *resolveActiveLaneAfterRemoval(ListNode<Lane *> *laneNode, PHLWINDOW removedWindow);
+
+    template <typename Fn>
+    void withActiveLane(ActiveLaneSyncPolicy syncPolicy, Fn&& fn) {
+        if (syncPolicy == ActiveLaneSyncPolicy::WorkspaceFocus)
+            syncActiveStateFromWorkspaceFocus();
+
+        if (auto *lane = getActiveLane())
+            std::forward<Fn>(fn)(lane);
+    }
 
     CHyprSignalListener m_focusCallback;
     ListNode<Lane *> *activeLane = nullptr;

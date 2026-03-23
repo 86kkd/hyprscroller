@@ -12,6 +12,8 @@
 #include <hyprland/src/managers/EventManager.hpp>
 #endif
 
+#include "../canvas/internal.h"
+
 namespace {
 namespace viewport {
 bool stack_intersects_visible_box(const Stack *stack, const ScrollerCore::Box &visible_box) {
@@ -67,10 +69,90 @@ std::string summarize_stacks(List<Stack *>& stacks) {
         out << active_window_ptr(data)
             << "@x=" << (data ? data->get_geom_x() : 0.0)
             << ",w=" << (data ? data->get_geom_w() : 0.0);
-    }
-    return out.str();
+	}
+	return out.str();
 }
 } // namespace logging
+
+namespace overview {
+struct Projection {
+    Vector2D min;
+    Vector2D max;
+    double   width;
+    double   height;
+    double   scale;
+    Vector2D offset;
+};
+
+Projection compute_projection(List<Stack *>& stacks, const ScrollerCore::Box &visible_box) {
+    Vector2D bmin(visible_box.x + visible_box.w, visible_box.y + visible_box.h);
+    Vector2D bmax(visible_box.x, visible_box.y);
+    for (auto stack = stacks.first(); stack != nullptr; stack = stack->next()) {
+        auto x0 = stack->data()->get_geom_x();
+        auto x1 = x0 + stack->data()->get_geom_w();
+        Vector2D height = stack->data()->get_height();
+        if (x0 < bmin.x)
+            bmin.x = x0;
+        if (x1 > bmax.x)
+            bmax.x = x1;
+        if (height.x < bmin.y)
+            bmin.y = height.x;
+        if (height.y > bmax.y)
+            bmax.y = height.y;
+    }
+
+    const auto width = bmax.x - bmin.x;
+    const auto height = bmax.y - bmin.y;
+    const auto scale = std::min(visible_box.w / width, visible_box.h / height);
+    const auto offset = Vector2D(0.5 * (visible_box.w - width * scale), 0.5 * (visible_box.h - height * scale));
+    return Projection{bmin, bmax, width, height, scale, offset};
+}
+
+void apply_projection(List<Stack *>& stacks, const Projection &projection, double gap, const ScrollerCore::Box &visible_box) {
+    for (auto stack = stacks.first(); stack != nullptr; stack = stack->next()) {
+        Stack *column = stack->data();
+        column->push_geom();
+        Vector2D height = column->get_height();
+        Vector2D start(projection.offset.x + visible_box.x, projection.offset.y + visible_box.y);
+        column->set_geom_pos(start.x + (column->get_geom_x() - projection.min.x) * projection.scale,
+                             start.y + (height.x - projection.min.y) * projection.scale);
+        column->set_geom_w(column->get_geom_w() * projection.scale);
+        column->scale(projection.min, start, projection.scale, gap);
+    }
+}
+
+void restore_projection(List<Stack *>& stacks, ListNode<Stack *> *active, const ScrollerCore::Box &visible_box) {
+    for (auto stack = stacks.first(); stack != nullptr; stack = stack->next())
+        stack->data()->pop_geom();
+
+    Stack *activeStack = active->data();
+    if (activeStack->get_geom_x() < visible_box.x) {
+        activeStack->set_geom_pos(visible_box.x, visible_box.y);
+    } else if (activeStack->get_geom_x() + activeStack->get_geom_w() > visible_box.x + visible_box.w) {
+        activeStack->set_geom_pos(visible_box.x + visible_box.w - activeStack->get_geom_w(), visible_box.y);
+    }
+}
+} // namespace overview
+
+namespace recalc {
+double initialize_active_stack_geometry(ListNode<Stack *> *active, const ScrollerCore::Box &visible_box, double active_width) {
+    if (active->data()->get_init())
+        return active->data()->get_geom_x();
+
+    double active_x;
+    if (active->prev()) {
+        Stack *prev = active->prev()->data();
+        active_x = prev->get_geom_x() + prev->get_geom_w();
+    } else if (active->next()) {
+        active_x = active->data()->get_geom_x();
+    } else {
+        active_x = visible_box.x + 0.5 * (visible_box.w - active_width);
+    }
+
+    active->data()->set_init();
+    return active_x;
+}
+} // namespace recalc
 } // namespace
 
 Vector2D Lane::calculate_gap_x(const ListNode<Stack *> *stack) const {
@@ -113,25 +195,13 @@ Vector2D Lane::predict_window_size() const {
 }
 
 void Lane::update_sizes(PHLMONITOR monitor) {
-    static auto PGAPSINDATA = CConfigValue<Hyprlang::CUSTOMTYPE>("general:gaps_in");
-    static auto PGAPSOUTDATA = CConfigValue<Hyprlang::CUSTOMTYPE>("general:gaps_out");
-    auto *const PGAPSIN = (CCssGapData *)(PGAPSINDATA.ptr())->getData();
-    auto *const PGAPSOUT = (CCssGapData *)(PGAPSOUTDATA.ptr())->getData();
-    auto gaps_in = PGAPSIN->m_top;
-    auto gaps_out = PGAPSOUT->m_top;
+    if (!monitor)
+        return;
 
-    const auto reserved = monitor->m_reservedArea;
-    const auto gapOutTopLeft = Vector2D(reserved.left(), reserved.top());
-    const auto gapOutBottomRight = Vector2D(reserved.right(), reserved.bottom());
-    const auto size = Vector2D(monitor->m_size.x, monitor->m_size.y);
-    const auto pos = Vector2D(monitor->m_position.x, monitor->m_position.y);
-
-    full = Box(pos, size);
-    max = Box(pos.x + gapOutTopLeft.x + gaps_out,
-              pos.y + gapOutTopLeft.y + gaps_out,
-              size.x - gapOutTopLeft.x - gapOutBottomRight.x - 2 * gaps_out,
-              size.y - gapOutTopLeft.y - gapOutBottomRight.y - 2 * gaps_out);
-    gap = gaps_in;
+    const auto bounds = CanvasLayoutInternal::compute_canvas_bounds(monitor);
+    full = bounds.full;
+    max = bounds.max;
+    gap = bounds.gap;
 }
 
 void Lane::set_fullscreen_active_window() {
@@ -167,48 +237,14 @@ void Lane::toggle_overview() {
 
     overview = !overview;
     if (overview) {
-        Vector2D bmin(max.x + max.w, max.y + max.h);
-        Vector2D bmax(max.x, max.y);
-        for (auto c = stacks.first(); c != nullptr; c = c->next()) {
-            auto cx0 = c->data()->get_geom_x();
-            auto cx1 = cx0 + c->data()->get_geom_w();
-            Vector2D cheight = c->data()->get_height();
-            if (cx0 < bmin.x)
-                bmin.x = cx0;
-            if (cx1 > bmax.x)
-                bmax.x = cx1;
-            if (cheight.x < bmin.y)
-                bmin.y = cheight.x;
-            if (cheight.y > bmax.y)
-                bmax.y = cheight.y;
-        }
-        double w = bmax.x - bmin.x;
-        double h = bmax.y - bmin.y;
-        double scale = std::min(max.w / w, max.h / h);
-        for (auto c = stacks.first(); c != nullptr; c = c->next()) {
-            Stack *col = c->data();
-            col->push_geom();
-            Vector2D cheight = col->get_height();
-            Vector2D offset(0.5 * (max.w - w * scale), 0.5 * (max.h - h * scale));
-            col->set_geom_pos(offset.x + max.x + (col->get_geom_x() - bmin.x) * scale, offset.y + max.y + (cheight.x - bmin.y) * scale);
-            col->set_geom_w(col->get_geom_w() * scale);
-            Vector2D start(offset.x + max.x, offset.y + max.y);
-            col->scale(bmin, start, scale, gap);
-        }
+        const auto projection = overview::compute_projection(stacks, max);
+        overview::apply_projection(stacks, projection, gap, max);
         adjust_stacks(stacks.first());
-    } else {
-        for (auto c = stacks.first(); c != nullptr; c = c->next()) {
-            Stack *col = c->data();
-            col->pop_geom();
-        }
-        Stack *acolumn = active->data();
-        if (acolumn->get_geom_x() < max.x) {
-            acolumn->set_geom_pos(max.x, max.y);
-        } else if (acolumn->get_geom_x() + acolumn->get_geom_w() > max.x + max.w) {
-            acolumn->set_geom_pos(max.x + max.w - acolumn->get_geom_w(), max.y);
-        }
-        adjust_stacks(active);
+        return;
     }
+
+    overview::restore_projection(stacks, active, max);
+    adjust_stacks(active);
 }
 
 void Lane::recalculate_lane_geometry() {
@@ -240,20 +276,7 @@ void Lane::recalculate_lane_geometry() {
     }
 
     auto a_w = active->data()->get_geom_w();
-    double a_x;
-    if (active->data()->get_init()) {
-        a_x = active->data()->get_geom_x();
-    } else {
-        if (active->prev()) {
-            Stack *prev = active->prev()->data();
-            a_x = prev->get_geom_x() + prev->get_geom_w();
-        } else if (active->next()) {
-            a_x = active->data()->get_geom_x();
-        } else {
-            a_x = max.x + 0.5 * (max.w - a_w);
-        }
-        active->data()->set_init();
-    }
+    auto a_x = recalc::initialize_active_stack_geometry(active, max, a_w);
     spdlog::debug("lane_recalc_input: active_window={} active_x={} active_w={} max=({}, {}, {}, {}) stacks_before={}",
                   logging::active_window_ptr(active->data()),
                   a_x,

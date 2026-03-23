@@ -19,14 +19,6 @@ using namespace ScrollerCore;
 static Marks marks;
 
 namespace {
-ListNode<Lane*>* find_lane_node(List<Lane*>& lanes, Lane* target) {
-    for (auto lane = lanes.first(); lane != nullptr; lane = lane->next()) {
-        if (lane->data() == target)
-            return lane;
-    }
-    return nullptr;
-}
-
 void clear_lanes(List<Lane*>& lanes) {
     for (auto lane = lanes.first(); lane != nullptr; lane = lane->next())
         delete lane->data();
@@ -40,16 +32,31 @@ bool has_ephemeral_lane(const List<Lane*>& lanes) {
     }
     return false;
 }
-
-size_t lane_index(const List<Lane*>& lanes, const ListNode<Lane*>* target) {
-    size_t index = 0;
-    for (auto lane = lanes.first(); lane != nullptr; lane = lane->next(), ++index) {
-        if (lane == target)
-            return index;
-    }
-    return 0;
-}
 } // namespace
+
+CanvasLayoutInternal::CanvasBounds CanvasLayoutInternal::compute_canvas_bounds(PHLMONITOR monitor) {
+    static auto PGAPSINDATA = CConfigValue<Hyprlang::CUSTOMTYPE>("general:gaps_in");
+    static auto PGAPSOUTDATA = CConfigValue<Hyprlang::CUSTOMTYPE>("general:gaps_out");
+    auto *const PGAPSIN = (CCssGapData *)(PGAPSINDATA.ptr())->getData();
+    auto *const PGAPSOUT = (CCssGapData *)(PGAPSOUTDATA.ptr())->getData();
+
+    const auto gaps_in = PGAPSIN->m_top;
+    const auto gaps_out = PGAPSOUT->m_top;
+    const auto reserved = monitor->m_reservedArea;
+    const auto gapOutTopLeft = Vector2D(reserved.left(), reserved.top());
+    const auto gapOutBottomRight = Vector2D(reserved.right(), reserved.bottom());
+    const auto size = Vector2D(monitor->m_size.x, monitor->m_size.y);
+    const auto pos = Vector2D(monitor->m_position.x, monitor->m_position.y);
+
+    return {
+        .full = Box(pos, size),
+        .max = Box(pos.x + gapOutTopLeft.x + gaps_out,
+                   pos.y + gapOutTopLeft.y + gaps_out,
+                   size.x - gapOutTopLeft.x - gapOutBottomRight.x - 2 * gaps_out,
+                   size.y - gapOutTopLeft.y - gapOutBottomRight.y - 2 * gaps_out),
+        .gap = gaps_in,
+    };
+}
 
 PHLWORKSPACE CanvasLayout::getCanvasWorkspace() const {
     const auto algorithm = m_parent.lock();
@@ -67,8 +74,36 @@ Lane *CanvasLayout::getActiveLane() {
     return nullptr;
 }
 
+ListNode<Lane *> *CanvasLayout::getLaneNode(Lane *lane) const {
+    if (!lane)
+        return nullptr;
+
+    for (auto node = lanes.first(); node != nullptr; node = node->next()) {
+        if (node->data() == lane)
+            return node;
+    }
+
+    return nullptr;
+}
+
+int CanvasLayout::laneIndexOf(Lane *lane) const {
+    auto index = 0;
+    for (auto node = lanes.first(); node != nullptr; node = node->next(), ++index) {
+        if (node->data() == lane)
+            return index;
+    }
+
+    return -1;
+}
+
+size_t CanvasLayout::laneCount() const {
+    size_t count = 0;
+    for (auto node = lanes.first(); node != nullptr; node = node->next(), ++count) { }
+    return count;
+}
+
 void CanvasLayout::setActiveLane(Lane *lane) {
-    activeLane = lane ? find_lane_node(lanes, lane) : nullptr;
+    activeLane = getLaneNode(lane);
 }
 
 Lane *CanvasLayout::getLaneForWindow(PHLWINDOW window) {
@@ -77,6 +112,66 @@ Lane *CanvasLayout::getLaneForWindow(PHLWINDOW window) {
             return lane->data();
     }
     return nullptr;
+}
+
+PHLMONITOR CanvasLayout::getVisibleCanvasMonitor(PHLMONITOR fallbackMonitor) const {
+    const auto workspace = getCanvasWorkspace();
+    if (!workspace)
+        return fallbackMonitor;
+
+    const auto visibleMonitor = CanvasLayoutInternal::visible_monitor_for_workspace(workspace);
+    return visibleMonitor ? visibleMonitor : fallbackMonitor;
+}
+
+void CanvasLayout::relayoutVisibleCanvas(PHLMONITOR fallbackMonitor) {
+    const auto workspace = getCanvasWorkspace();
+    const auto monitor = getVisibleCanvasMonitor(fallbackMonitor);
+    if (workspace && monitor)
+        relayoutCanvas(monitor, !workspace->m_isSpecialWorkspace);
+}
+
+bool CanvasLayout::dropEmptyEphemeralLane(ListNode<Lane *> *laneNode, Lane *preferredLane, PHLMONITOR fallbackMonitor) {
+    if (!laneNode || !laneNode->data())
+        return false;
+
+    auto *lane = laneNode->data();
+    if (!lane->is_ephemeral() || !lane->empty())
+        return false;
+
+    Lane *fallbackLane = preferredLane;
+    if (!fallbackLane && activeLane == laneNode) {
+        if (laneNode->next())
+            fallbackLane = laneNode->next()->data();
+        else if (laneNode->prev())
+            fallbackLane = laneNode->prev()->data();
+    }
+
+    lanes.erase(laneNode);
+    delete lane;
+    setActiveLane(fallbackLane);
+    relayoutVisibleCanvas(fallbackMonitor);
+    return true;
+}
+
+Lane *CanvasLayout::resolveActiveLaneAfterRemoval(ListNode<Lane *> *laneNode, PHLWINDOW removedWindow) {
+    const auto workspaceHandle = getCanvasWorkspace();
+    if (workspaceHandle) {
+        const auto focusedWindow = workspaceHandle->getLastFocusedWindow();
+        if (focusedWindow && focusedWindow != removedWindow) {
+            if (auto *preferredLane = getLaneForWindow(focusedWindow))
+                return preferredLane;
+        }
+    }
+
+    if (activeLane == laneNode) {
+        if (laneNode->next())
+            return laneNode->next()->data();
+        if (laneNode->prev())
+            return laneNode->prev()->data();
+        return nullptr;
+    }
+
+    return activeLane ? activeLane->data() : nullptr;
 }
 
 void CanvasLayout::relayoutCanvas(PHLMONITOR monitor, bool honor_fullscreen) {
@@ -89,27 +184,14 @@ void CanvasLayout::relayoutCanvas(PHLMONITOR monitor, bool honor_fullscreen) {
         return;
     }
 
-    static auto PGAPSINDATA = CConfigValue<Hyprlang::CUSTOMTYPE>("general:gaps_in");
-    static auto PGAPSOUTDATA = CConfigValue<Hyprlang::CUSTOMTYPE>("general:gaps_out");
-    auto *const PGAPSIN = (CCssGapData *)(PGAPSINDATA.ptr())->getData();
-    auto *const PGAPSOUT = (CCssGapData *)(PGAPSOUTDATA.ptr())->getData();
-    const auto gaps_in = PGAPSIN->m_top;
-    const auto gaps_out = PGAPSOUT->m_top;
-    const auto reserved = monitor->m_reservedArea;
-    const auto gapOutTopLeft = Vector2D(reserved.left(), reserved.top());
-    const auto gapOutBottomRight = Vector2D(reserved.right(), reserved.bottom());
-    const auto size = Vector2D(monitor->m_size.x, monitor->m_size.y);
-    const auto pos = Vector2D(monitor->m_position.x, monitor->m_position.y);
-    const auto full = Box(pos, size);
-    const auto max = Box(pos.x + gapOutTopLeft.x + gaps_out,
-                         pos.y + gapOutTopLeft.y + gaps_out,
-                         size.x - gapOutTopLeft.x - gapOutBottomRight.x - 2 * gaps_out,
-                         size.y - gapOutTopLeft.y - gapOutBottomRight.y - 2 * gaps_out);
+    const auto bounds = CanvasLayoutInternal::compute_canvas_bounds(monitor);
+    const auto& full = bounds.full;
+    const auto& max = bounds.max;
 
     const auto mode = getActiveLane() ? getActiveLane()->get_mode() : Mode::Row;
     const auto paged = has_ephemeral_lane(lanes);
     const auto count = static_cast<double>(lanes.size());
-    const auto activeIndex = lane_index(lanes, activeLane ? activeLane : lanes.first());
+    const auto activeIndex = static_cast<size_t>(std::max(0, laneIndexOf(activeLane ? activeLane->data() : lanes.first()->data())));
     size_t index = 0;
     for (auto lane = lanes.first(); lane != nullptr; lane = lane->next(), ++index) {
         Box laneBox = max;
@@ -131,7 +213,7 @@ void CanvasLayout::relayoutCanvas(PHLMONITOR monitor, bool honor_fullscreen) {
             laneBox = Box(x, max.y, w, max.h);
         }
 
-        lane->data()->set_canvas_geometry(full, laneBox, gaps_in);
+        lane->data()->set_canvas_geometry(full, laneBox, bounds.gap);
         lane->data()->recalculate_lane_geometry();
     }
 }
@@ -193,7 +275,7 @@ void CanvasLayout::recalculate()
     if (!workspace)
         return;
 
-    const auto monitor = CanvasLayoutInternal::visible_monitor_for_workspace(workspace);
+    const auto monitor = getVisibleCanvasMonitor();
     if (!monitor)
         return;
 
@@ -297,28 +379,14 @@ void CanvasLayout::onWindowRemovedTiling(PHLWINDOW window)
     if (s->remove_window(window))
         return;
 
-    auto lane = find_lane_node(lanes, s);
+    auto lane = getLaneNode(s);
     if (!lane) {
         spdlog::warn("onWindowRemovedTiling: empty lane missing from list lane={} workspace={}",
                      static_cast<const void*>(s), workspace);
         return;
     }
 
-    const auto workspaceHandle = getCanvasWorkspace();
-    Lane* preferredLane = nullptr;
-    if (workspaceHandle) {
-        const auto focusedWindow = workspaceHandle->getLastFocusedWindow();
-        if (focusedWindow && focusedWindow != window)
-            preferredLane = getLaneForWindow(focusedWindow);
-    }
-
-    Lane* fallbackLane = nullptr;
-    if (activeLane == lane) {
-        if (lane->next())
-            fallbackLane = lane->next()->data();
-        else if (lane->prev())
-            fallbackLane = lane->prev()->data();
-    }
+    auto *nextActiveLane = resolveActiveLaneAfterRemoval(lane, window);
 
     auto doomed = lane->data();
     spdlog::info("onWindowRemovedTiling: deleting empty lane={} workspace={}",
@@ -326,10 +394,8 @@ void CanvasLayout::onWindowRemovedTiling(PHLWINDOW window)
     lanes.erase(lane);
     delete doomed;
 
-    setActiveLane(preferredLane ? preferredLane : fallbackLane);
-
-    if (const auto monitor = workspaceHandle ? CanvasLayoutInternal::visible_monitor_for_workspace(workspaceHandle) : nullptr)
-        relayoutCanvas(monitor, !workspaceHandle->m_isSpecialWorkspace);
+    setActiveLane(nextActiveLane);
+    relayoutVisibleCanvas();
 }
 
 bool CanvasLayout::isWindowTiled(PHLWINDOW window)
