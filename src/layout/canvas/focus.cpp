@@ -12,6 +12,25 @@
 extern HANDLE PHANDLE;
 
 namespace CanvasLayoutInternal {
+const char* direction_dispatch_arg(Direction direction) {
+    switch (direction) {
+        case Direction::Left:
+            return "l";
+        case Direction::Right:
+            return "r";
+        case Direction::Up:
+            return "u";
+        case Direction::Down:
+            return "d";
+        case Direction::Begin:
+            return "b";
+        case Direction::End:
+            return "e";
+        default:
+            return nullptr;
+    }
+}
+
 bool direction_moves_between_lanes(Mode mode, Direction direction) {
     switch (mode) {
         case Mode::Row:
@@ -74,23 +93,51 @@ bool should_sync_workspace_focus_before_move(ListNode<Lane*>* activeLaneNode) {
     return !(lane->is_ephemeral() && lane->empty());
 }
 
-void dispatch_builtin_movefocus(Direction direction) {
-    switch (direction) {
-        case Direction::Left:
-            g_pKeybindManager->m_dispatchers["movefocus"]("l");
-            return;
-        case Direction::Right:
-            g_pKeybindManager->m_dispatchers["movefocus"]("r");
-            return;
-        case Direction::Up:
-            g_pKeybindManager->m_dispatchers["movefocus"]("u");
-            return;
-        case Direction::Down:
-            g_pKeybindManager->m_dispatchers["movefocus"]("d");
-            return;
-        default:
-            return;
+DirectionalHandoffPlan plan_directional_handoff(List<Lane*>& lanes, ListNode<Lane*>* current, PHLMONITOR sourceMonitor, Mode mode, Direction direction, bool allow_create) {
+    if (!direction_moves_between_lanes(mode, direction))
+        return {};
+
+    if (auto targetLaneNode = adjacent_lane(current, mode, direction)) {
+        return {
+            .route = DirectionalHandoffRoute::AdjacentLane,
+            .targetLaneNode = targetLaneNode,
+        };
     }
+
+    const auto monitorDirection = direction_to_math(direction);
+    if (sourceMonitor && monitorDirection) {
+        if (auto targetMonitor = g_pCompositor->getMonitorInDirection(sourceMonitor, *monitorDirection)) {
+            return {
+                .route = DirectionalHandoffRoute::CrossMonitor,
+                .targetMonitor = targetMonitor,
+            };
+        }
+    }
+
+    if (allow_create) {
+        return {
+            .route = DirectionalHandoffRoute::CreateLane,
+            .targetLaneNode = edge_lane_anchor(lanes, mode, direction),
+        };
+    }
+
+    return {};
+}
+
+void dispatch_directional_builtin(const char* dispatcher, Direction direction) {
+    const auto arg = direction_dispatch_arg(direction);
+    if (!arg)
+        return;
+
+    const auto it = g_pKeybindManager->m_dispatchers.find(dispatcher);
+    if (it == g_pKeybindManager->m_dispatchers.end())
+        return;
+
+    it->second(arg);
+}
+
+void dispatch_builtin_movefocus(Direction direction) {
+    dispatch_directional_builtin("movefocus", direction);
 }
 
 void focus_window_monitor(PHLWINDOW window) {
@@ -203,7 +250,7 @@ bool CanvasLayout::adoptFocusedLane(PHLWINDOW focusedWindow, PHLMONITOR fallback
         return false;
 
     if (activeLane && currentLane && currentLane->is_ephemeral() && currentLane->empty() && targetLane != currentLane)
-        dropEmptyEphemeralLane(activeLane, targetLane, fallbackMonitor);
+        dropEmptyLane(activeLane, targetLane, fallbackMonitor, true);
 
     if (currentWindow == focusedWindow)
         return true;
@@ -246,11 +293,13 @@ void CanvasLayout::moveWindowTo(PHLWINDOW window, const std::string &direction, 
     if (s == nullptr || !s->is_active(window))
         return;
 
+    onWindowFocusChange(window);
+
     switch (direction.at(0)) {
-        case 'l': s->move_active_stack(Direction::Left); break;
-        case 'r': s->move_active_stack(Direction::Right); break;
-        case 'u': s->move_active_stack(Direction::Up); break;
-        case 'd': s->move_active_stack(Direction::Down); break;
+        case 'l': move_window(window->workspaceID(), Direction::Left); break;
+        case 'r': move_window(window->workspaceID(), Direction::Right); break;
+        case 'u': move_window(window->workspaceID(), Direction::Up); break;
+        case 'd': move_window(window->workspaceID(), Direction::Down); break;
         default: break;
     }
 }
@@ -340,7 +389,7 @@ void CanvasLayout::move_focus(int workspace, Direction direction)
             crossMonitorTarget ? crossMonitorTarget->m_size.x : 0.0,
             crossMonitorTarget ? crossMonitorTarget->m_size.y : 0.0);
 
-        if (dropEmptyEphemeralLane(sourceLaneNode, nullptr, beforeMonitor)) {
+        if (dropEmptyLane(sourceLaneNode, nullptr, beforeMonitor, true)) {
             spdlog::info("move_focus: dropped empty lane after leaving workspace={} direction={}",
                          workspace, CanvasLayoutInternal::direction_name(direction));
         }
@@ -369,10 +418,12 @@ void CanvasLayout::move_focus(int workspace, Direction direction)
     };
 
         const auto mode = s->get_mode();
-    const auto moveAcrossLanesOrCreate = [&]() {
-        if (auto targetLaneNode = CanvasLayoutInternal::adjacent_lane(activeLane, mode, direction)) {
+    const auto moveAcrossLanesOrCreate = [&](bool allowCreate) {
+        const auto handoffPlan = CanvasLayoutInternal::plan_directional_handoff(lanes, activeLane, beforeMonitor, mode, direction, allowCreate);
+        if (handoffPlan.route == CanvasLayoutInternal::DirectionalHandoffRoute::AdjacentLane) {
+            auto targetLaneNode = handoffPlan.targetLaneNode;
             activeLane = targetLaneNode;
-            if (dropEmptyEphemeralLane(sourceLaneNode, activeLane ? activeLane->data() : nullptr, beforeMonitor)) {
+            if (dropEmptyLane(sourceLaneNode, activeLane ? activeLane->data() : nullptr, beforeMonitor, true)) {
                 spdlog::info("move_focus: dropped empty lane after leaving workspace={} direction={}",
                              workspace, CanvasLayoutInternal::direction_name(direction));
             } else {
@@ -390,21 +441,19 @@ void CanvasLayout::move_focus(int workspace, Direction direction)
             return;
         }
 
-        const auto monitorDirection = CanvasLayoutInternal::direction_to_math(direction);
-        auto monitor = beforeMonitor && monitorDirection ? g_pCompositor->getMonitorInDirection(beforeMonitor, *monitorDirection) : nullptr;
-        if (monitor) {
-            handoffAcrossMonitor(monitor);
+        if (handoffPlan.route == CanvasLayoutInternal::DirectionalHandoffRoute::CrossMonitor) {
+            handoffAcrossMonitor(handoffPlan.targetMonitor);
             return;
         }
 
-        if (s->empty())
+        if (handoffPlan.route != CanvasLayoutInternal::DirectionalHandoffRoute::CreateLane)
             return;
 
         auto newLane = new Lane(beforeMonitor, mode);
         newLane->set_ephemeral(true);
         lanes.push_back(newLane);
         auto newLaneNode = lanes.last();
-        const auto edgeAnchor = CanvasLayoutInternal::edge_lane_anchor(lanes, mode, direction);
+        const auto edgeAnchor = handoffPlan.targetLaneNode;
         if (edgeAnchor && edgeAnchor != newLaneNode) {
             if (CanvasLayoutInternal::direction_inserts_before_current(mode, direction))
                 lanes.move_before(edgeAnchor, newLaneNode);
@@ -423,13 +472,13 @@ void CanvasLayout::move_focus(int workspace, Direction direction)
 
     if (s->empty()) {
         if (CanvasLayoutInternal::direction_moves_between_lanes(mode, direction))
-            moveAcrossLanesOrCreate();
+            moveAcrossLanesOrCreate(false);
         return;
     }
 
     const auto moveResult = s->move_focus(direction, **focus_wrap != 0);
     if (moveResult != FocusMoveResult::Moved && CanvasLayoutInternal::direction_moves_between_lanes(mode, direction)) {
-        moveAcrossLanesOrCreate();
+        moveAcrossLanesOrCreate(true);
         return;
     }
 
@@ -442,7 +491,7 @@ void CanvasLayout::move_focus(int workspace, Direction direction)
 
     if (moveResult == FocusMoveResult::NoOp) {
         if (CanvasLayoutInternal::direction_moves_between_lanes(mode, direction))
-            moveAcrossLanesOrCreate();
+            moveAcrossLanesOrCreate(true);
         return;
     }
 

@@ -87,24 +87,25 @@ Stack *Lane::extract_active_stack() {
     return stack;
 }
 
-Window *Lane::extract_active_window(StackWidth *width, double *maxw) {
+ActiveWindowPayload Lane::extract_active_window_payload() {
     if (!active)
-        return nullptr;
+        return {};
 
     auto *stack = active->data();
-    if (width)
-        *width = stack->get_width();
-    if (maxw)
-        *maxw = stack->get_width() == StackWidth::Free ? stack->get_geom_w() : max.w;
+    ActiveWindowPayload payload = {
+        .window = nullptr,
+        .width = stack->get_width(),
+        .maxw = stack->get_width() == StackWidth::Free ? stack->get_geom_w() : max.w,
+    };
 
-    auto *window = stack->expel_active(gap);
-    if (!window)
-        return nullptr;
+    payload.window = stack->expel_active(gap);
+    if (!payload.window)
+        return {};
 
     if (stack->size() != 0) {
         reorder = Reorder::Auto;
         stack->recalculate_stack_geometry(calculate_gap_x(active), gap);
-        return window;
+        return payload;
     }
 
     auto emptyNode = active;
@@ -112,23 +113,23 @@ Window *Lane::extract_active_window(StackWidth *width, double *maxw) {
     delete stack;
     stacks.erase(emptyNode);
     reorder = Reorder::Auto;
-    return window;
+    return payload;
 }
 
-void Lane::insert_window(Window *window, StackWidth width, double maxw, Direction direction) {
-    if (!window)
+void Lane::insert_window_payload(const ActiveWindowPayload& payload, Direction direction) {
+    if (!payload)
         return;
 
     reorder = Reorder::Auto;
     if (mode == Mode::Column && active) {
-        active->data()->admit_window(window);
+        active->data()->admit_window(payload.window);
         recalculate_lane_geometry();
         return;
     }
 
-    window->set_geom_h(max.h);
-    window->set_geom_y(max.y);
-    auto *stack = new Stack(window, width, maxw, max.h);
+    payload.window->set_geom_h(max.h);
+    payload.window->set_geom_y(max.y);
+    auto *stack = new Stack(payload.window, payload.width, payload.maxw, max.h);
     stack->set_geom_pos(max.x, max.y);
     if (!active) {
         stacks.push_back(stack);

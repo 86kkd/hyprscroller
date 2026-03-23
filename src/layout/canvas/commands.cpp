@@ -18,34 +18,6 @@ std::string workspace_selector(PHLWORKSPACE workspace) {
     return std::to_string(workspace->m_id);
 }
 
-void dispatch_builtin_movewindow(Direction direction) {
-    const auto it = g_pKeybindManager->m_dispatchers.find("movewindow");
-    if (it == g_pKeybindManager->m_dispatchers.end())
-        return;
-
-    switch (direction) {
-    case Direction::Left:
-        it->second("l");
-        return;
-    case Direction::Right:
-        it->second("r");
-        return;
-    case Direction::Up:
-        it->second("u");
-        return;
-    case Direction::Down:
-        it->second("d");
-        return;
-    case Direction::Begin:
-        it->second("b");
-        return;
-    case Direction::End:
-        it->second("e");
-        return;
-    default:
-        return;
-    }
-}
 } // namespace
 
 void CanvasLayout::cycle_window_size(int workspace, int step)
@@ -69,41 +41,34 @@ void CanvasLayout::move_window(int workspace, Direction direction) {
         const auto currentWindow = lane->get_active_window();
         const auto sourceMonitor = currentWindow ? g_pCompositor->getMonitorFromID(currentWindow->monitorID()) : getVisibleCanvasMonitor();
         if (!currentWindow || !sourceMonitor) {
-            dispatch_builtin_movewindow(direction);
+            CanvasLayoutInternal::dispatch_directional_builtin("movewindow", direction);
             return;
         }
 
-        if (auto targetLaneNode = CanvasLayoutInternal::adjacent_lane(activeLane, mode, direction)) {
-            StackWidth width = StackWidth::OneHalf;
-            double maxw = 0.0;
-            auto *window = lane->extract_active_window(&width, &maxw);
-            if (!window)
+        const auto handoffPlan = CanvasLayoutInternal::plan_directional_handoff(lanes, activeLane, sourceMonitor, mode, direction, true);
+        if (handoffPlan.route == CanvasLayoutInternal::DirectionalHandoffRoute::AdjacentLane) {
+            const auto payload = lane->extract_active_window_payload();
+            if (!payload)
                 return;
 
-            targetLaneNode->data()->insert_window(window, width, maxw, direction);
+            auto targetLaneNode = handoffPlan.targetLaneNode;
+            targetLaneNode->data()->insert_window_payload(payload, direction);
             activeLane = targetLaneNode;
 
-            if (lane->empty()) {
-                auto *doomedNode = getLaneNode(lane);
-                if (doomedNode && doomedNode != activeLane) {
-                    lanes.erase(doomedNode);
-                    delete lane;
-                }
-            }
-
-            relayoutVisibleCanvas(sourceMonitor);
+            if (!dropEmptyLane(getLaneNode(lane), activeLane ? activeLane->data() : nullptr, sourceMonitor))
+                relayoutVisibleCanvas(sourceMonitor);
             CanvasLayoutInternal::switch_to_window(activeLane->data()->get_active_window(), true);
             return;
         }
 
-        const auto monitorDirection = CanvasLayoutInternal::direction_to_math(direction);
-        if (const auto targetMonitor = monitorDirection ? g_pCompositor->getMonitorInDirection(sourceMonitor, *monitorDirection) : nullptr) {
+        if (handoffPlan.route == CanvasLayoutInternal::DirectionalHandoffRoute::CrossMonitor) {
+            const auto targetMonitor = handoffPlan.targetMonitor;
             const auto workspaceId = CanvasLayoutInternal::preferred_workspace_id(targetMonitor, workspace);
             const auto targetWorkspace = g_pCompositor->getWorkspaceByID(workspaceId);
             const auto selector = workspace_selector(targetWorkspace);
             const auto moveDispatcher = g_pKeybindManager->m_dispatchers.find("movetoworkspacesilent");
             if (selector.empty() || moveDispatcher == g_pKeybindManager->m_dispatchers.end()) {
-                dispatch_builtin_movewindow(direction);
+                CanvasLayoutInternal::dispatch_directional_builtin("movewindow", direction);
                 return;
             }
 
@@ -121,10 +86,11 @@ void CanvasLayout::move_window(int workspace, Direction direction) {
             return;
         }
 
-        StackWidth width = StackWidth::OneHalf;
-        double maxw = 0.0;
-        auto *window = lane->extract_active_window(&width, &maxw);
-        if (!window)
+        if (handoffPlan.route != CanvasLayoutInternal::DirectionalHandoffRoute::CreateLane)
+            return;
+
+        const auto payload = lane->extract_active_window_payload();
+        if (!payload)
             return;
 
         auto sourceLaneNode = activeLane;
@@ -138,18 +104,11 @@ void CanvasLayout::move_window(int workspace, Direction direction) {
                 lanes.move_after(sourceLaneNode, newLaneNode);
         }
 
-        newLane->insert_window(window, width, maxw, direction);
+        newLane->insert_window_payload(payload, direction);
         activeLane = newLaneNode;
 
-        if (lane->empty()) {
-            auto *doomedNode = getLaneNode(lane);
-            if (doomedNode && doomedNode != activeLane) {
-                lanes.erase(doomedNode);
-                delete lane;
-            }
-        }
-
-        relayoutVisibleCanvas(sourceMonitor);
+        if (!dropEmptyLane(sourceLaneNode, activeLane ? activeLane->data() : nullptr, sourceMonitor))
+            relayoutVisibleCanvas(sourceMonitor);
         CanvasLayoutInternal::switch_to_window(activeLane->data()->get_active_window(), true);
     });
 }
@@ -225,12 +184,8 @@ void CanvasLayout::create_lane(int workspace, Direction direction) {
 
         activeLane = newLaneNode;
 
-        if (lane->empty()) {
-            lanes.erase(currentLaneNode);
-            delete lane;
-        }
-
-        relayoutVisibleCanvas();
+        if (!dropEmptyLane(currentLaneNode, newLane))
+            relayoutVisibleCanvas();
 
         if (const auto window = newLane->get_active_window())
             CanvasLayoutInternal::switch_to_window(window, true);

@@ -130,12 +130,14 @@ void CanvasLayout::relayoutVisibleCanvas(PHLMONITOR fallbackMonitor) {
         relayoutCanvas(monitor, !workspace->m_isSpecialWorkspace);
 }
 
-bool CanvasLayout::dropEmptyEphemeralLane(ListNode<Lane *> *laneNode, Lane *preferredLane, PHLMONITOR fallbackMonitor) {
+bool CanvasLayout::dropEmptyLane(ListNode<Lane *> *laneNode, Lane *preferredLane, PHLMONITOR fallbackMonitor, bool ephemeralOnly) {
     if (!laneNode || !laneNode->data())
         return false;
 
     auto *lane = laneNode->data();
-    if (!lane->is_ephemeral() || !lane->empty())
+    if (ephemeralOnly && !lane->is_ephemeral())
+        return false;
+    if (!lane->empty())
         return false;
 
     Lane *fallbackLane = preferredLane;
@@ -151,6 +153,10 @@ bool CanvasLayout::dropEmptyEphemeralLane(ListNode<Lane *> *laneNode, Lane *pref
     setActiveLane(fallbackLane);
     relayoutVisibleCanvas(fallbackMonitor);
     return true;
+}
+
+bool CanvasLayout::dropEmptyEphemeralLane(ListNode<Lane *> *laneNode, Lane *preferredLane, PHLMONITOR fallbackMonitor) {
+    return dropEmptyLane(laneNode, preferredLane, fallbackMonitor, true);
 }
 
 Lane *CanvasLayout::resolveActiveLaneAfterRemoval(ListNode<Lane *> *laneNode, PHLWINDOW removedWindow) {

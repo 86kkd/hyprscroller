@@ -15,6 +15,16 @@
 using namespace ScrollerCore;
 using namespace ScrollerModel;
 
+struct ActiveWindowPayload {
+    Window*    window = nullptr;
+    StackWidth width = StackWidth::OneHalf;
+    double     maxw = 0.0;
+
+    explicit operator bool() const {
+        return window != nullptr;
+    }
+};
+
 class Lane {
     // A lane contains all stacks for one workspace and owns horizontal navigation.
 public:
@@ -32,8 +42,8 @@ public:
     bool is_active(PHLWINDOW window) const;
     void add_active_window(PHLWINDOW window);
     Stack *extract_active_stack();
-    Window *extract_active_window(StackWidth *width, double *maxw);
-    void insert_window(Window *window, StackWidth width, double maxw, Direction direction);
+    ActiveWindowPayload extract_active_window_payload();
+    void insert_window_payload(const ActiveWindowPayload& payload, Direction direction);
     void set_canvas_geometry(const Box &full_box, const Box &max_box, int gap_size);
 
     // Remove a window and re-adapt lanes and stacks, returning true on success.
