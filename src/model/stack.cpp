@@ -448,6 +448,19 @@ FocusMoveResult Stack::move_focus_down(bool focus_wrap) {
 
 void Stack::admit_window(Window *window) {
     reorder = Reorder::Auto;
+    if (!window) {
+        return;
+    }
+
+    if (active) {
+        const auto activeWindow = active->data();
+        window->set_geom_h(activeWindow->get_geom_h());
+        window->set_geom_y(activeWindow->get_geom_y() + activeWindow->get_geom_h());
+    } else {
+        window->set_geom_h(geom.h);
+        window->set_geom_y(geom.y);
+    }
+
     active = windows.emplace_after(active, window);
 }
 

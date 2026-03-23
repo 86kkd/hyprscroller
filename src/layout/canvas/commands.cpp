@@ -1,6 +1,52 @@
+#include <string>
+
+#include <hyprland/src/Compositor.hpp>
+#include <hyprland/src/managers/KeybindManager.hpp>
+
 #include "../lane/lane.h"
 #include "layout.h"
 #include "internal.h"
+
+namespace {
+std::string workspace_selector(PHLWORKSPACE workspace) {
+    if (!workspace)
+        return {};
+
+    if (!workspace->m_name.empty())
+        return workspace->m_name;
+
+    return std::to_string(workspace->m_id);
+}
+
+void dispatch_builtin_movewindow(Direction direction) {
+    const auto it = g_pKeybindManager->m_dispatchers.find("movewindow");
+    if (it == g_pKeybindManager->m_dispatchers.end())
+        return;
+
+    switch (direction) {
+    case Direction::Left:
+        it->second("l");
+        return;
+    case Direction::Right:
+        it->second("r");
+        return;
+    case Direction::Up:
+        it->second("u");
+        return;
+    case Direction::Down:
+        it->second("d");
+        return;
+    case Direction::Begin:
+        it->second("b");
+        return;
+    case Direction::End:
+        it->second("e");
+        return;
+    default:
+        return;
+    }
+}
+} // namespace
 
 void CanvasLayout::cycle_window_size(int workspace, int step)
 {
@@ -12,9 +58,99 @@ void CanvasLayout::cycle_window_size(int workspace, int step)
 
 void CanvasLayout::move_window(int workspace, Direction direction) {
     (void)workspace;
-    withActiveLane(ActiveLaneSyncPolicy::WorkspaceFocus, [direction](Lane *lane) {
-        lane->move_active_stack(direction);
-        CanvasLayoutInternal::switch_to_window(lane->get_active_window());
+    withActiveLane(ActiveLaneSyncPolicy::WorkspaceFocus, [&](Lane *lane) {
+        const auto mode = lane->get_mode();
+        if (!CanvasLayoutInternal::direction_moves_between_lanes(mode, direction)) {
+            lane->move_active_stack(direction);
+            CanvasLayoutInternal::switch_to_window(lane->get_active_window());
+            return;
+        }
+
+        const auto currentWindow = lane->get_active_window();
+        const auto sourceMonitor = currentWindow ? g_pCompositor->getMonitorFromID(currentWindow->monitorID()) : getVisibleCanvasMonitor();
+        if (!currentWindow || !sourceMonitor) {
+            dispatch_builtin_movewindow(direction);
+            return;
+        }
+
+        if (auto targetLaneNode = CanvasLayoutInternal::adjacent_lane(activeLane, mode, direction)) {
+            StackWidth width = StackWidth::OneHalf;
+            double maxw = 0.0;
+            auto *window = lane->extract_active_window(&width, &maxw);
+            if (!window)
+                return;
+
+            targetLaneNode->data()->insert_window(window, width, maxw, direction);
+            activeLane = targetLaneNode;
+
+            if (lane->empty()) {
+                auto *doomedNode = getLaneNode(lane);
+                if (doomedNode && doomedNode != activeLane) {
+                    lanes.erase(doomedNode);
+                    delete lane;
+                }
+            }
+
+            relayoutVisibleCanvas(sourceMonitor);
+            CanvasLayoutInternal::switch_to_window(activeLane->data()->get_active_window(), true);
+            return;
+        }
+
+        const auto monitorDirection = CanvasLayoutInternal::direction_to_math(direction);
+        if (const auto targetMonitor = monitorDirection ? g_pCompositor->getMonitorInDirection(sourceMonitor, *monitorDirection) : nullptr) {
+            const auto workspaceId = CanvasLayoutInternal::preferred_workspace_id(targetMonitor, workspace);
+            const auto targetWorkspace = g_pCompositor->getWorkspaceByID(workspaceId);
+            const auto selector = workspace_selector(targetWorkspace);
+            const auto moveDispatcher = g_pKeybindManager->m_dispatchers.find("movetoworkspacesilent");
+            if (selector.empty() || moveDispatcher == g_pKeybindManager->m_dispatchers.end()) {
+                dispatch_builtin_movewindow(direction);
+                return;
+            }
+
+            if (auto *targetLayout = CanvasLayoutInternal::get_canvas_for_workspace(workspaceId)) {
+                targetLayout->syncActiveStateFromWorkspaceFocus();
+                if (!targetLayout->getActiveLane()) {
+                    auto *newLane = new Lane(targetMonitor, mode);
+                    targetLayout->lanes.push_back(newLane);
+                    targetLayout->activeLane = targetLayout->lanes.last();
+                }
+            }
+
+            moveDispatcher->second(selector);
+            CanvasLayoutInternal::switch_to_window(currentWindow, true);
+            return;
+        }
+
+        StackWidth width = StackWidth::OneHalf;
+        double maxw = 0.0;
+        auto *window = lane->extract_active_window(&width, &maxw);
+        if (!window)
+            return;
+
+        auto sourceLaneNode = activeLane;
+        auto *newLane = new Lane(sourceMonitor, mode);
+        lanes.push_back(newLane);
+        auto newLaneNode = lanes.last();
+        if (sourceLaneNode && sourceLaneNode != newLaneNode) {
+            if (CanvasLayoutInternal::direction_inserts_before_current(mode, direction))
+                lanes.move_before(sourceLaneNode, newLaneNode);
+            else
+                lanes.move_after(sourceLaneNode, newLaneNode);
+        }
+
+        newLane->insert_window(window, width, maxw, direction);
+        activeLane = newLaneNode;
+
+        if (lane->empty()) {
+            auto *doomedNode = getLaneNode(lane);
+            if (doomedNode && doomedNode != activeLane) {
+                lanes.erase(doomedNode);
+                delete lane;
+            }
+        }
+
+        relayoutVisibleCanvas(sourceMonitor);
+        CanvasLayoutInternal::switch_to_window(activeLane->data()->get_active_window(), true);
     });
 }
 

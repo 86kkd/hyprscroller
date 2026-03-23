@@ -87,6 +87,64 @@ Stack *Lane::extract_active_stack() {
     return stack;
 }
 
+Window *Lane::extract_active_window(StackWidth *width, double *maxw) {
+    if (!active)
+        return nullptr;
+
+    auto *stack = active->data();
+    if (width)
+        *width = stack->get_width();
+    if (maxw)
+        *maxw = stack->get_width() == StackWidth::Free ? stack->get_geom_w() : max.w;
+
+    auto *window = stack->expel_active(gap);
+    if (!window)
+        return nullptr;
+
+    if (stack->size() != 0) {
+        reorder = Reorder::Auto;
+        stack->recalculate_stack_geometry(calculate_gap_x(active), gap);
+        return window;
+    }
+
+    auto emptyNode = active;
+    active = emptyNode == stacks.last() ? emptyNode->prev() : emptyNode->next();
+    delete stack;
+    stacks.erase(emptyNode);
+    reorder = Reorder::Auto;
+    return window;
+}
+
+void Lane::insert_window(Window *window, StackWidth width, double maxw, Direction direction) {
+    if (!window)
+        return;
+
+    reorder = Reorder::Auto;
+    if (mode == Mode::Column && active) {
+        active->data()->admit_window(window);
+        recalculate_lane_geometry();
+        return;
+    }
+
+    window->set_geom_h(max.h);
+    window->set_geom_y(max.y);
+    auto *stack = new Stack(window, width, maxw, max.h);
+    stack->set_geom_pos(max.x, max.y);
+    if (!active) {
+        stacks.push_back(stack);
+        active = stacks.last();
+        recalculate_lane_geometry();
+        return;
+    }
+
+    auto current = active;
+    auto inserted = stacks.emplace_after(current, stack);
+    if (direction == Direction::Left || direction == Direction::Up || direction == Direction::Begin)
+        stacks.move_before(current, inserted);
+    active = inserted;
+    recalculate_lane_geometry();
+}
+
 void Lane::set_canvas_geometry(const Box &full_box, const Box &max_box, int gap_size) {
     full = full_box;
     max = max_box;

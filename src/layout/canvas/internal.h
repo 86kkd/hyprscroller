@@ -13,6 +13,9 @@ struct CanvasBounds {
 };
 
 const char*                     direction_name(Direction direction);
+bool                            direction_moves_between_lanes(Mode mode, Direction direction);
+bool                            direction_inserts_before_current(Mode mode, Direction direction);
+ListNode<Lane*>*                adjacent_lane(ListNode<Lane*>* current, Mode mode, Direction direction);
 CanvasBounds                    compute_canvas_bounds(PHLMONITOR monitor);
 void                            recalculate_workspace_lane(Lane* lane, PHLMONITOR monitor, PHLWORKSPACE workspace, bool honor_fullscreen);
 WORKSPACEID                     preferred_workspace_id(PHLMONITOR monitor, WORKSPACEID source_workspace_id);
