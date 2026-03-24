@@ -8,9 +8,12 @@
  */
 #pragma once
 
-#include "../../core/core.h"
+#include <cstdint>
+#include <unordered_map>
+#include <utility>
+
+#include "../../core/types.h"
 #include "../../model/stack.h"
-#include "../canvas/layout.h"
 
 using namespace ScrollerCore;
 using namespace ScrollerModel;
@@ -26,6 +29,26 @@ struct ActiveWindowPayload {
     Window*    window = nullptr;
     StackWidth width = StackWidth::OneHalf;
     double     maxw = 0.0;
+
+    ActiveWindowPayload() = default;
+    ActiveWindowPayload(const ActiveWindowPayload &) = delete;
+    ActiveWindowPayload &operator=(const ActiveWindowPayload &) = delete;
+    ActiveWindowPayload(ActiveWindowPayload &&other) noexcept
+        : window(std::exchange(other.window, nullptr)), width(other.width), maxw(other.maxw) {}
+    ActiveWindowPayload &operator=(ActiveWindowPayload &&other) noexcept {
+        if (this == &other)
+            return *this;
+
+        window = std::exchange(other.window, nullptr);
+        width = other.width;
+        maxw = other.maxw;
+        return *this;
+    }
+
+    // Release ownership of the moved model window to the destination consumer.
+    Window *release_window() {
+        return std::exchange(window, nullptr);
+    }
 
     explicit operator bool() const {
         return window != nullptr;
@@ -47,16 +70,21 @@ public:
     bool is_ephemeral() const;
     void set_ephemeral(bool value);
     bool has_window(PHLWINDOW window) const;
+    template <typename Fn>
+    void for_each_window(Fn&& fn) const {
+        for (auto col = stacks.first(); col != nullptr; col = col->next())
+            col->data()->for_each_window(std::forward<Fn>(fn));
+    }
     PHLWINDOW get_active_window() const;
     bool is_active(PHLWINDOW window) const;
 
     // Window/stack membership changes.
     void add_active_window(PHLWINDOW window);
     Stack *extract_active_stack();
-    // Remove the active window and return the payload needed to insert it elsewhere.
+    // Remove the active window and transfer ownership of its model payload to the caller.
     ActiveWindowPayload extract_active_window_payload();
-    // Insert a previously extracted window payload into this lane.
-    void insert_window_payload(const ActiveWindowPayload& payload, Direction direction);
+    // Consume a previously extracted payload and transfer ownership into this lane.
+    void insert_window_payload(ActiveWindowPayload payload, Direction direction);
     void set_canvas_geometry(const Box &full_box, const Box &max_box, int gap_size);
 
     // Remove a window and re-adapt lanes and stacks, returning true on success.
@@ -84,6 +112,16 @@ public:
     void recalculate_lane_geometry();
 
 private:
+    static uintptr_t windowKey(PHLWINDOW window) {
+        return reinterpret_cast<uintptr_t>(window.get());
+    }
+    Stack *getStackForWindow(PHLWINDOW window) const;
+    ListNode<Stack *> *getStackNode(Stack *stack) const;
+    void rememberWindowStack(PHLWINDOW window, Stack *stack);
+    void forgetWindowStack(PHLWINDOW window);
+    void rememberStackWindows(Stack *stack);
+    void forgetStackWindows(Stack *stack);
+
     // Calculate lateral gaps for a stack based on neighbor presence.
     Vector2D calculate_gap_x(const ListNode<Stack *> *stack) const;
 
@@ -113,4 +151,6 @@ private:
     ListNode<Stack *> *active;
     // Ordered stacks owned by this lane.
     List<Stack *> stacks;
+    // Cached window -> stack index used to avoid repeated whole-lane scans.
+    mutable std::unordered_map<uintptr_t, Stack *> stackByWindow;
 };

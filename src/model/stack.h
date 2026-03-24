@@ -15,6 +15,7 @@
 #pragma once
 
 #include <string>
+#include <utility>
 
 #include <hyprutils/math/Vector2D.hpp>
 
@@ -80,7 +81,7 @@ public:
     // Construct model wrapper for a backend window and its initial logical geometry.
     Window(PHLWINDOW window, double box_h);
     // Access original compositor window handle.
-    PHLWINDOWREF ptr();
+    PHLWINDOWREF ptr() const;
     // Return logical geometry height used by scroller model.
     double get_geom_h() const;
     // Return logical geometry top position used by scroller model.
@@ -151,6 +152,13 @@ public:
     // Window membership / reorder helpers.
     bool has_window(PHLWINDOW window) const;
     bool swap_windows(PHLWINDOW a, PHLWINDOW b);
+    template <typename Fn>
+    void for_each_window(Fn&& fn) const {
+        for (auto win = windows.first(); win != nullptr; win = win->next()) {
+            if (auto window = win->data()->ptr().lock())
+                std::forward<Fn>(fn)(window);
+        }
+    }
     // Insert a new window and make it active.
     void add_active_window(PHLWINDOW window, double maxh);
     // Remove a window and keep active pointer coherent.
@@ -198,8 +206,9 @@ public:
     FocusMoveResult move_focus_up(bool focus_wrap);
     FocusMoveResult move_focus_down(bool focus_wrap);
 
-    // Insert/remove window while keeping active tracking consistent.
+    // Insert a model window whose ownership has been transferred to this stack.
     void admit_window(Window *window);
+    // Remove the active model window and transfer ownership to the caller.
     Window *expel_active(double gap);
     // Move active window toward viewport edges/center inside the current stack.
     void align_window(Direction direction, double gap);

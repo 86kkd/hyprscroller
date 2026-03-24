@@ -38,68 +38,59 @@ void Lane::add_active_window(PHLWINDOW window) {
 // Remove a window from this lane and keep stack/lane state coherent.
 bool Lane::remove_window(PHLWINDOW window) {
     reorder = Reorder::Auto;
-    for (auto c = stacks.first(); c != nullptr; c = c->next()) {
-        Stack *col = c->data();
-        if (!col->has_window(window))
-            continue;
-
-        col->remove_window(window);
-        if (col->size() == 0) {
-            if (c == active)
-                active = active != stacks.last() ? active->next() : active->prev();
-
-            auto *doomed = col;
-            stacks.erase(c);
-            delete doomed;
-            if (stacks.empty())
-                return false;
-
-            recalculate_lane_geometry();
-            return true;
-        }
-
-        if (mode == Mode::Column) {
-            if (c->data()->size() <= 2)
-                c->data()->fit_size(FitSize::All, calculate_gap_x(c), gap);
-            else
-                c->data()->recalculate_stack_geometry(calculate_gap_x(c), gap);
-        } else {
-            c->data()->recalculate_stack_geometry(calculate_gap_x(c), gap);
-        }
+    auto *col = getStackForWindow(window);
+    auto *c = getStackNode(col);
+    if (!col || !c)
         return true;
+
+    forgetWindowStack(window);
+    col->remove_window(window);
+    if (col->size() == 0) {
+        if (c == active)
+            active = active != stacks.last() ? active->next() : active->prev();
+
+        forgetStackWindows(col);
+        auto *doomed = col;
+        stacks.erase(c);
+        delete doomed;
+        if (stacks.empty())
+            return false;
+
+        recalculate_lane_geometry();
+        return true;
+    }
+
+    if (mode == Mode::Column) {
+        if (col->size() <= 2)
+            col->fit_size(FitSize::All, calculate_gap_x(c), gap);
+        else
+            col->recalculate_stack_geometry(calculate_gap_x(c), gap);
+    } else {
+        col->recalculate_stack_geometry(calculate_gap_x(c), gap);
     }
     return true;
 }
 
 // Swap two windows when they both belong to the same stack in this lane.
 bool Lane::swapWindows(PHLWINDOW a, PHLWINDOW b) {
-    ListNode<Stack *> *ca = nullptr;
-    ListNode<Stack *> *cb = nullptr;
-
-    for (auto c = stacks.first(); c != nullptr; c = c->next()) {
-        if (!ca && c->data()->has_window(a))
-            ca = c;
-        if (!cb && c->data()->has_window(b))
-            cb = c;
-    }
-
-    if (!ca || !cb || ca != cb)
+    auto *stackA = getStackForWindow(a);
+    auto *stackB = getStackForWindow(b);
+    if (!stackA || !stackB || stackA != stackB)
         return false;
 
-    return ca->data()->swap_windows(a, b);
+    return stackA->swap_windows(a, b);
 }
 
 // Focus the stack and window that owns the given compositor window.
 void Lane::focus_window(PHLWINDOW window) {
-    for (auto c = stacks.first(); c != nullptr; c = c->next()) {
-        if (!c->data()->has_window(window))
-            continue;
-
-        c->data()->focus_window(window);
-        active = c;
-        recalculate_lane_geometry();
+    auto *stack = getStackForWindow(window);
+    auto *stackNode = getStackNode(stack);
+    if (!stack || !stackNode)
         return;
-    }
+
+    stack->focus_window(window);
+    active = stackNode;
+    recalculate_lane_geometry();
 }
 
 // Report whether the active stack/window is already at the requested edge.
@@ -338,15 +329,19 @@ void Lane::admit_window_left() {
         return;
 
     auto w = active->data()->expel_active(gap);
+    const auto movedWindow = w ? w->ptr().lock() : nullptr;
+    forgetWindowStack(movedWindow);
     auto prev = active->prev();
     if (active->data()->size() == 0) {
         auto *doomed = active->data();
         auto *emptyNode = active;
         stacks.erase(emptyNode);
+        forgetStackWindows(doomed);
         delete doomed;
     }
     active = prev;
     active->data()->admit_window(w);
+    rememberWindowStack(movedWindow, active->data());
 
     reorder = Reorder::Auto;
     recalculate_lane_geometry();
@@ -361,9 +356,12 @@ void Lane::expel_window_right() {
         return;
 
     auto w = active->data()->expel_active(gap);
+    const auto movedWindow = w ? w->ptr().lock() : nullptr;
+    forgetWindowStack(movedWindow);
     StackWidth width = active->data()->get_width();
     double maxw = width == StackWidth::Free ? active->data()->get_geom_w() : max.w;
     active = stacks.emplace_after(active, new Stack(w, width, maxw, max.h));
+    rememberWindowStack(movedWindow, active->data());
     active->data()->set_geom_pos(active->prev()->data()->get_geom_x() + active->prev()->data()->get_geom_w(), max.y);
 
     reorder = Reorder::Auto;

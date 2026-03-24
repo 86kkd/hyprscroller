@@ -7,6 +7,7 @@
  * work to `Lane` or shared canvas helpers.
  */
 #include <string>
+#include <utility>
 
 #include <hyprland/src/Compositor.hpp>
 
@@ -80,7 +81,9 @@ bool CanvasLayout::handoffMoveWindowAcrossMonitor(int workspace, Direction direc
 
     if (targetAnchorWindow && targetLane->has_window(targetAnchorWindow) && !targetLane->is_active(targetAnchorWindow))
         targetLane->focus_window(targetAnchorWindow);
-    targetLane->insert_window_payload(payload, insertDirection);
+    targetLane->insert_window_payload(std::move(payload), insertDirection);
+    forgetWindowLane(currentWindow);
+    targetLayout->rememberWindowLane(currentWindow, targetLane);
     targetLayout->forgetManualCrossMonitorInsertion(currentWindow);
     targetLayout->setActiveLane(targetLane);
 
@@ -103,7 +106,8 @@ void CanvasLayout::transferMoveWindowToAdjacentLane(Lane *sourceLane, PHLWINDOW 
     if (!payload)
         return;
 
-    targetLaneNode->data()->insert_window_payload(payload, direction);
+    targetLaneNode->data()->insert_window_payload(std::move(payload), direction);
+    rememberWindowLane(currentWindow, targetLaneNode->data());
     activeLane = targetLaneNode;
     finishLaneTransfer(getLaneNode(sourceLane), sourceMonitor, false, true);
 }
@@ -124,7 +128,8 @@ void CanvasLayout::transferMoveWindowToNewLane(Lane *sourceLane, PHLWINDOW curre
     auto *newLane = new Lane(sourceMonitor, mode);
     auto newLaneNode = insertLaneNode(newLane, direction, sourceLaneNode);
 
-    newLane->insert_window_payload(payload, direction);
+    newLane->insert_window_payload(std::move(payload), direction);
+    rememberWindowLane(currentWindow, newLane);
     activeLane = newLaneNode;
     finishLaneTransfer(sourceLaneNode, sourceMonitor, false, true);
 }
@@ -274,6 +279,7 @@ void CanvasLayout::create_lane(int workspace, Direction direction) {
         auto newLane = new Lane(stack);
         auto newLaneNode = insertLaneNode(newLane, direction, currentLaneNode);
 
+        rememberLaneWindows(newLane);
         activeLane = newLaneNode;
         finishLaneTransfer(currentLaneNode, nullptr, false, true);
     });

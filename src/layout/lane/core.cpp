@@ -34,6 +34,7 @@ Lane::Lane(Stack *stack)
 
     stacks.push_back(stack);
     active = stacks.first();
+    rememberStackWindows(stack);
 }
 
 Lane::~Lane() {
@@ -41,6 +42,81 @@ Lane::~Lane() {
         delete col->data();
     }
     stacks.clear();
+}
+
+Stack *Lane::getStackForWindow(PHLWINDOW window) const {
+    if (!window)
+        return nullptr;
+
+    const auto key = windowKey(window);
+    if (const auto it = stackByWindow.find(key); it != stackByWindow.end()) {
+        auto *cachedStack = it->second;
+        if (cachedStack && getStackNode(cachedStack) && cachedStack->has_window(window))
+            return cachedStack;
+
+        stackByWindow.erase(it);
+    }
+
+    for (auto col = stacks.first(); col != nullptr; col = col->next()) {
+        if (col->data()->has_window(window)) {
+            stackByWindow[key] = col->data();
+            return col->data();
+        }
+    }
+
+    return nullptr;
+}
+
+ListNode<Stack *> *Lane::getStackNode(Stack *stack) const {
+    if (!stack)
+        return nullptr;
+
+    for (auto node = stacks.first(); node != nullptr; node = node->next()) {
+        if (node->data() == stack)
+            return node;
+    }
+
+    return nullptr;
+}
+
+void Lane::rememberWindowStack(PHLWINDOW window, Stack *stack) {
+    if (!window)
+        return;
+
+    if (!stack) {
+        forgetWindowStack(window);
+        return;
+    }
+
+    stackByWindow[windowKey(window)] = stack;
+}
+
+void Lane::forgetWindowStack(PHLWINDOW window) {
+    if (!window)
+        return;
+
+    stackByWindow.erase(windowKey(window));
+}
+
+void Lane::rememberStackWindows(Stack *stack) {
+    if (!stack)
+        return;
+
+    stack->for_each_window([&](PHLWINDOW window) {
+        rememberWindowStack(window, stack);
+    });
+}
+
+void Lane::forgetStackWindows(Stack *stack) {
+    if (!stack)
+        return;
+
+    for (auto it = stackByWindow.begin(); it != stackByWindow.end();) {
+        if (it->second == stack)
+            it = stackByWindow.erase(it);
+        else
+            ++it;
+    }
 }
 
 bool Lane::empty() const {
@@ -64,11 +140,7 @@ void Lane::set_ephemeral(bool value) {
 }
 
 bool Lane::has_window(PHLWINDOW window) const {
-    for (auto col = stacks.first(); col != nullptr; col = col->next()) {
-        if (col->data()->has_window(window))
-            return true;
-    }
-    return false;
+    return getStackForWindow(window) != nullptr;
 }
 
 PHLWINDOW Lane::get_active_window() const {
@@ -88,6 +160,7 @@ Stack *Lane::extract_active_stack() {
 
     auto node = active;
     auto stack = node->data();
+    forgetStackWindows(stack);
     active = node != stacks.last() ? node->next() : node->prev();
     stacks.erase(node);
     return stack;
@@ -98,15 +171,16 @@ ActiveWindowPayload Lane::extract_active_window_payload() {
         return {};
 
     auto *stack = active->data();
-    ActiveWindowPayload payload = {
-        .window = nullptr,
-        .width = stack->get_width(),
-        .maxw = stack->get_width() == StackWidth::Free ? stack->get_geom_w() : max.w,
-    };
+    ActiveWindowPayload payload;
+    payload.width = stack->get_width();
+    payload.maxw = stack->get_width() == StackWidth::Free ? stack->get_geom_w() : max.w;
+    const auto payloadWindow = stack->get_active_window();
 
     payload.window = stack->expel_active(gap);
     if (!payload.window)
         return {};
+
+    forgetWindowStack(payloadWindow);
 
     if (stack->size() != 0) {
         reorder = Reorder::Auto;
@@ -117,19 +191,23 @@ ActiveWindowPayload Lane::extract_active_window_payload() {
     auto emptyNode = active;
     active = emptyNode == stacks.last() ? emptyNode->prev() : emptyNode->next();
     stacks.erase(emptyNode);
+    forgetStackWindows(stack);
     delete stack;
     reorder = Reorder::Auto;
     return payload;
 }
 
-void Lane::insert_window_payload(const ActiveWindowPayload& payload, Direction direction) {
+void Lane::insert_window_payload(ActiveWindowPayload payload, Direction direction) {
     if (!payload)
         return;
 
     reorder = Reorder::Auto;
     if (mode == Mode::Column && active) {
+        auto *window = payload.release_window();
+        const auto compositorWindow = window ? window->ptr().lock() : nullptr;
         const auto windowCountBefore = active->data()->size();
-        active->data()->admit_window(payload.window);
+        active->data()->admit_window(window);
+        rememberWindowStack(compositorWindow, active->data());
         if (windowCountBefore == 1) {
             active->data()->fit_size(FitSize::All, calculate_gap_x(active), gap);
         } else {
@@ -142,19 +220,25 @@ void Lane::insert_window_payload(const ActiveWindowPayload& payload, Direction d
     if (singleWindowLane)
         stacks.first()->data()->update_width(StackWidth::OneHalf, max.w, max.h);
 
-    payload.window->set_geom_h(max.h);
-    payload.window->set_geom_y(max.y);
+    auto *window = payload.release_window();
+    if (!window)
+        return;
+    const auto compositorWindow = window->ptr().lock();
+
+    window->set_geom_h(max.h);
+    window->set_geom_y(max.y);
     const auto targetMaxWidth =
         payload.width == StackWidth::Free && payload.maxw > 0.0
             ? std::min(payload.maxw, max.w)
             : max.w;
-    auto *stack = new Stack(payload.window, payload.width, targetMaxWidth, max.h);
+    auto *stack = new Stack(window, payload.width, targetMaxWidth, max.h);
     if (singleWindowLane)
         stack->update_width(StackWidth::OneHalf, max.w, max.h);
     stack->set_geom_pos(max.x, max.y);
     if (!active) {
         stacks.push_back(stack);
         active = stacks.last();
+        rememberWindowStack(compositorWindow, stack);
         recalculate_lane_geometry();
         return;
     }
@@ -182,6 +266,7 @@ void Lane::insert_window_payload(const ActiveWindowPayload& payload, Direction d
     }
 
     active = inserted;
+    rememberWindowStack(compositorWindow, stack);
     recalculate_lane_geometry();
 }
 

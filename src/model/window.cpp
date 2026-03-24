@@ -16,7 +16,7 @@ Window::Window(PHLWINDOW window, double box_h)
       box_y(window ? window->m_position.y - window->getRealBorderSize() : 0.0),
       box_h(box_h) {}
 
-PHLWINDOWREF Window::ptr() {
+PHLWINDOWREF Window::ptr() const {
     return window;
 }
 

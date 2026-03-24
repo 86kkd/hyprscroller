@@ -13,6 +13,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 
@@ -105,6 +106,14 @@ private:
     void setActiveLane(Lane *lane);
     // Find the lane that currently owns a window.
     Lane *getLaneForWindow(PHLWINDOW window);
+    // Remember or update the cached lane owner for one window.
+    void rememberWindowLane(PHLWINDOW window, Lane *lane);
+    // Remove one window from the cached lane-owner index.
+    void forgetWindowLane(PHLWINDOW window);
+    // Refresh cached ownership for every window currently in the given lane.
+    void rememberLaneWindows(Lane *lane);
+    // Drop every cached entry that still points at the given lane pointer.
+    void forgetLaneWindows(Lane *lane);
     // Return the list node for a lane inside this canvas.
     ListNode<Lane *> *getLaneNode(Lane *lane) const;
     // Return the zero-based index of a lane for logs and paging math.
@@ -188,6 +197,8 @@ private:
     ListNode<Lane *> *activeLane = nullptr;
     // Ordered lanes that make up the current canvas.
     List<Lane *> lanes;
+    // Cached window -> lane index used to avoid repeated whole-canvas scans.
+    std::unordered_map<uintptr_t, Lane *> laneByWindow;
     // Concentrated one-shot focus and cross-monitor handoff state.
     struct HandoffState {
         bool suppressWorkspaceFocusSync = false;

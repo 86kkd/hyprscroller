@@ -110,6 +110,47 @@ void CanvasLayout::setActiveLane(Lane *lane) {
     activeLane = getLaneNode(lane);
 }
 
+void CanvasLayout::rememberWindowLane(PHLWINDOW window, Lane *lane) {
+    if (!window) {
+        return;
+    }
+
+    if (!lane) {
+        forgetWindowLane(window);
+        return;
+    }
+
+    laneByWindow[reinterpret_cast<uintptr_t>(window.get())] = lane;
+}
+
+void CanvasLayout::forgetWindowLane(PHLWINDOW window) {
+    if (!window)
+        return;
+
+    laneByWindow.erase(reinterpret_cast<uintptr_t>(window.get()));
+}
+
+void CanvasLayout::rememberLaneWindows(Lane *lane) {
+    if (!lane)
+        return;
+
+    lane->for_each_window([&](PHLWINDOW window) {
+        rememberWindowLane(window, lane);
+    });
+}
+
+void CanvasLayout::forgetLaneWindows(Lane *lane) {
+    if (!lane)
+        return;
+
+    for (auto it = laneByWindow.begin(); it != laneByWindow.end();) {
+        if (it->second == lane)
+            it = laneByWindow.erase(it);
+        else
+            ++it;
+    }
+}
+
 ListNode<Lane *> *CanvasLayout::insertLaneNode(Lane *lane, Direction direction, ListNode<Lane *> *anchor) {
     if (!lane)
         return nullptr;
@@ -171,9 +212,23 @@ void CanvasLayout::finishLaneTransfer(ListNode<Lane *> *sourceLaneNode, PHLMONIT
 }
 
 Lane *CanvasLayout::getLaneForWindow(PHLWINDOW window) {
+    if (!window)
+        return nullptr;
+
+    const auto key = reinterpret_cast<uintptr_t>(window.get());
+    if (const auto it = laneByWindow.find(key); it != laneByWindow.end()) {
+        auto *cachedLane = it->second;
+        if (cachedLane && getLaneNode(cachedLane) && cachedLane->has_window(window))
+            return cachedLane;
+
+        laneByWindow.erase(it);
+    }
+
     for (auto lane = lanes.first(); lane != nullptr; lane = lane->next()) {
-        if (lane->data()->has_window(window))
+        if (lane->data()->has_window(window)) {
+            rememberWindowLane(window, lane->data());
             return lane->data();
+        }
     }
     return nullptr;
 }
@@ -216,6 +271,7 @@ bool CanvasLayout::dropEmptyLane(ListNode<Lane *> *laneNode, Lane *preferredLane
     }
 
     lanes.erase(laneNode);
+    forgetLaneWindows(lane);
     delete lane;
     setActiveLane(fallbackLane);
     relayoutVisibleCanvas(fallbackMonitor);
@@ -457,6 +513,26 @@ void CanvasLayout::moveTargetInDirection(SP<Layout::ITarget> t, Math::eDirection
     }
 }
 
+void CanvasLayout::switchWindows(PHLWINDOW a, PHLWINDOW b)
+{
+    auto *laneA = getLaneForWindow(a);
+    auto *laneB = getLaneForWindow(b);
+
+    if (a) {
+        if (laneB)
+            rememberWindowLane(a, laneB);
+        else
+            forgetWindowLane(a);
+    }
+
+    if (b) {
+        if (laneA)
+            rememberWindowLane(b, laneA);
+        else
+            forgetWindowLane(b);
+    }
+}
+
 // Insert a newly mapped tiled window into the active lane, creating one if needed.
 void CanvasLayout::onWindowCreatedTiling(PHLWINDOW window, Math::eDirection)
 {
@@ -476,6 +552,7 @@ void CanvasLayout::onWindowCreatedTiling(PHLWINDOW window, Math::eDirection)
         activeLane = insertLaneNode(s, Direction::End);
     }
     s->add_active_window(window);
+    rememberWindowLane(window, s);
 }
 
 // Remove a tiled window and delete the lane if it becomes empty.
@@ -493,6 +570,7 @@ void CanvasLayout::onWindowRemovedTiling(PHLWINDOW window)
         return;
     }
 
+    forgetWindowLane(window);
     if (s->remove_window(window))
         return;
 
@@ -509,6 +587,7 @@ void CanvasLayout::onWindowRemovedTiling(PHLWINDOW window)
     spdlog::info("onWindowRemovedTiling: deleting empty lane={} workspace={}",
                  static_cast<const void*>(doomed), workspace);
     lanes.erase(lane);
+    forgetLaneWindows(doomed);
     delete doomed;
 
     setActiveLane(nextActiveLane);
@@ -556,6 +635,7 @@ void CanvasLayout::alterSplitRatio(PHLWINDOW, float, bool)
 void CanvasLayout::onEnable() {
     clear_lanes(lanes);
     activeLane = nullptr;
+    laneByWindow.clear();
     marks.reset();
     resetHandoffState();
     m_focusCallback = Event::bus()->m_events.window.active.listen([this](PHLWINDOW window, Desktop::eFocusReason) {
@@ -601,6 +681,7 @@ void CanvasLayout::onDisable() {
     m_focusCallback = nullptr;
     clear_lanes(lanes);
     activeLane = nullptr;
+    laneByWindow.clear();
     marks.reset();
     resetHandoffState();
 }
@@ -617,8 +698,17 @@ Vector2D CanvasLayout::predictSizeForNewWindowTiled() {
     return s->predict_window_size();
 }
 
-void CanvasLayout::replaceWindowDataWith(PHLWINDOW, PHLWINDOW)
+void CanvasLayout::replaceWindowDataWith(PHLWINDOW from, PHLWINDOW to)
 {
+    if (!from || !to)
+        return;
+
+    auto *lane = getLaneForWindow(from);
+    if (!lane)
+        return;
+
+    forgetWindowLane(from);
+    rememberWindowLane(to, lane);
 }
 
 void CanvasLayout::marks_add(const std::string &name) {
