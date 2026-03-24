@@ -110,6 +110,42 @@ void CanvasLayout::setActiveLane(Lane *lane) {
     activeLane = getLaneNode(lane);
 }
 
+ListNode<Lane *> *CanvasLayout::insertLaneNode(Lane *lane, Direction direction, ListNode<Lane *> *anchor) {
+    if (!lane)
+        return nullptr;
+
+    lanes.push_back(lane);
+    auto node = lanes.last();
+    if (!anchor || anchor == node)
+        return node;
+
+    if (CanvasLayoutInternal::direction_inserts_before_current(lane->get_mode(), direction))
+        lanes.move_before(anchor, node);
+    else
+        lanes.move_after(anchor, node);
+
+    return node;
+}
+
+Lane *CanvasLayout::ensureActiveLane(PHLMONITOR monitor, Mode mode) {
+    if (auto *lane = getActiveLane())
+        return lane;
+
+    auto *lane = new Lane(monitor, mode);
+    activeLane = insertLaneNode(lane, Direction::End);
+    return lane;
+}
+
+void CanvasLayout::finishLaneTransfer(ListNode<Lane *> *sourceLaneNode, PHLMONITOR sourceMonitor, bool ephemeralOnly, bool warpCursor) {
+    if (!dropEmptyLane(sourceLaneNode, activeLane ? activeLane->data() : nullptr, sourceMonitor, ephemeralOnly))
+        relayoutVisibleCanvas(sourceMonitor);
+
+    if (const auto lane = getActiveLane()) {
+        if (const auto window = lane->get_active_window())
+            CanvasLayoutInternal::switch_to_window(window, warpCursor);
+    }
+}
+
 Lane *CanvasLayout::getLaneForWindow(PHLWINDOW window) {
     for (auto lane = lanes.first(); lane != nullptr; lane = lane->next()) {
         if (lane->data()->has_window(window))
@@ -389,8 +425,7 @@ void CanvasLayout::onWindowCreatedTiling(PHLWINDOW window, Math::eDirection)
     auto s = getActiveLane();
     if (s == nullptr) {
         s = new Lane(window);
-        lanes.push_back(s);
-        activeLane = lanes.last();
+        activeLane = insertLaneNode(s, Direction::End);
     }
     s->add_active_window(window);
 }

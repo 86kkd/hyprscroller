@@ -318,6 +318,118 @@ void CanvasLayout::syncActiveStateFromWorkspaceFocus()
                      static_cast<const void*>(focusedWindow.get()));
 }
 
+// Resolve the window and lane that should receive focus after a cross-monitor
+// handoff, preferring the destination canvas's active lane before geometry fallback.
+PHLWINDOW CanvasLayout::resolveCrossMonitorFocusTarget(CanvasLayout *targetLayout, PHLMONITOR monitor, WORKSPACEID workspaceId, Direction direction, PHLWINDOW sourceWindow, Lane **targetLane, const char **selection)
+{
+    auto *resolvedLane = targetLayout ? targetLayout->getActiveLane() : nullptr;
+    const char *resolvedSelection = "geometry";
+
+    if (targetLayout)
+        targetLayout->syncActiveStateFromWorkspaceFocus();
+
+    resolvedLane = targetLayout ? targetLayout->getActiveLane() : nullptr;
+    auto targetWindow = resolvedLane ? resolvedLane->get_active_window() : nullptr;
+    if (targetWindow) {
+        resolvedSelection = "active";
+    } else {
+        targetWindow = CanvasLayoutInternal::pick_cross_monitor_target_window(monitor, workspaceId, direction, sourceWindow);
+    }
+
+    if (targetLayout && targetWindow && (!resolvedLane || !resolvedLane->has_window(targetWindow)))
+        resolvedLane = targetLayout->getLaneForWindow(targetWindow);
+
+    if (targetLane)
+        *targetLane = resolvedLane;
+    if (selection)
+        *selection = resolvedSelection;
+
+    return targetWindow;
+}
+
+// Apply destination-canvas state once a cross-monitor target has been chosen.
+void CanvasLayout::activateCrossMonitorFocusTarget(CanvasLayout *targetLayout, Lane *targetLane, PHLWINDOW targetWindow, PHLMONITOR fallbackMonitor)
+{
+    if (!targetLayout || !targetLane || !targetWindow)
+        return;
+
+    targetLayout->setActiveLane(targetLane);
+    targetLane->focus_window(targetWindow);
+
+    const auto targetWorkspace = targetLayout->getCanvasWorkspace();
+    auto targetMonitor = targetWorkspace ? CanvasLayoutInternal::visible_monitor_for_workspace(targetWorkspace) : fallbackMonitor;
+    if (targetMonitor)
+        targetLayout->relayoutCanvas(targetMonitor, targetWorkspace && !targetWorkspace->m_isSpecialWorkspace);
+}
+
+// Execute the whole cross-monitor focus handoff and keep the destination canvas
+// state coherent before Hyprland focus is switched.
+void CanvasLayout::handoffFocusAcrossMonitor(int workspace, Direction direction, PHLWINDOW sourceWindow, PHLMONITOR sourceMonitor, WORKSPACEID sourceActiveWorkspaceId, WORKSPACEID sourceSpecialWorkspaceId, ListNode<Lane *> *sourceLaneNode, PHLMONITOR targetMonitor)
+{
+    const auto activeWorkspaceId = targetMonitor ? targetMonitor->activeWorkspaceID() : WORKSPACE_INVALID;
+    const auto workspaceId = CanvasLayoutInternal::preferred_workspace_id(targetMonitor, workspace);
+    const auto specialWorkspaceId = targetMonitor ? targetMonitor->activeSpecialWorkspaceID() : WORKSPACE_INVALID;
+    spdlog::info(
+        "move_focus_cross_monitor: source_workspace={} direction={} source_window={} "
+        "source_active_ws={} source_special_ws={} dest_active_ws={} dest_special_ws={} selected_ws={}",
+        workspace,
+        CanvasLayoutInternal::direction_name(direction),
+        static_cast<const void*>(sourceWindow ? sourceWindow.get() : nullptr),
+        sourceActiveWorkspaceId,
+        sourceSpecialWorkspaceId,
+        activeWorkspaceId,
+        specialWorkspaceId,
+        workspaceId);
+    if (!targetMonitor) {
+        spdlog::warn("move_focus: no monitor in direction={} from workspace={}",
+                     CanvasLayoutInternal::direction_name(direction), workspace);
+        return;
+    }
+
+    const char *targetSelection = "geometry";
+    auto *targetLayout = CanvasLayoutInternal::get_canvas_for_workspace(workspaceId);
+    auto *targetLane = static_cast<Lane *>(nullptr);
+    auto crossMonitorTarget = resolveCrossMonitorFocusTarget(targetLayout, targetMonitor, workspaceId, direction, sourceWindow, &targetLane, &targetSelection);
+    if (!crossMonitorTarget) {
+        spdlog::warn("move_focus: no target window for crossed monitor workspace={}", workspaceId);
+        return;
+    }
+
+    spdlog::info(
+        "move_focus_cross_monitor_target: selected_ws={} target_window={} target_workspace={} "
+        "target_layout_found={} target_lane_found={} selection={} target_pos=({}, {}) target_size=({}, {})",
+        workspaceId,
+        static_cast<const void*>(crossMonitorTarget ? crossMonitorTarget.get() : nullptr),
+        crossMonitorTarget ? crossMonitorTarget->workspaceID() : WORKSPACE_INVALID,
+        targetLayout != nullptr,
+        targetLane != nullptr,
+        targetSelection,
+        crossMonitorTarget ? crossMonitorTarget->m_position.x : 0.0,
+        crossMonitorTarget ? crossMonitorTarget->m_position.y : 0.0,
+        crossMonitorTarget ? crossMonitorTarget->m_size.x : 0.0,
+        crossMonitorTarget ? crossMonitorTarget->m_size.y : 0.0);
+
+    if (dropEmptyLane(sourceLaneNode, nullptr, sourceMonitor, true)) {
+        spdlog::info("move_focus: dropped empty lane after leaving workspace={} direction={}",
+                     workspace, CanvasLayoutInternal::direction_name(direction));
+    }
+
+    if (targetLane == nullptr) {
+        spdlog::warn("move_focus: no lane for crossed monitor target window={} workspace={}",
+                     static_cast<const void*>(crossMonitorTarget.get()), workspaceId);
+    } else {
+        activateCrossMonitorFocusTarget(targetLayout, targetLane, crossMonitorTarget, targetMonitor);
+    }
+
+    spdlog::info("move_focus: workspace={} direction={} after={} result={}",
+                 workspace,
+                 CanvasLayoutInternal::direction_name(direction),
+                 static_cast<const void*>(crossMonitorTarget.get()),
+                 "cross_monitor");
+    suppressNextWorkspaceFocusSync = true;
+    CanvasLayoutInternal::switch_to_window(crossMonitorTarget, true);
+}
+
 // Compatibility entrypoint used by older target-based move-window callbacks.
 void CanvasLayout::moveWindowTo(PHLWINDOW window, const std::string &direction, bool)
 {
@@ -372,90 +484,7 @@ void CanvasLayout::move_focus(int workspace, Direction direction)
         return;
     }
 
-    // Transfer focus to another monitor while preserving target-lane state on
-    // the destination canvas.
-    const auto handoffAcrossMonitor = [&](PHLMONITOR monitor) {
-        const auto activeWorkspaceId = monitor ? monitor->activeWorkspaceID() : WORKSPACE_INVALID;
-        const auto workspaceId = CanvasLayoutInternal::preferred_workspace_id(monitor, workspace);
-        const auto specialWorkspaceId = monitor ? monitor->activeSpecialWorkspaceID() : WORKSPACE_INVALID;
-        spdlog::info(
-            "move_focus_cross_monitor: source_workspace={} direction={} source_window={} "
-            "source_active_ws={} source_special_ws={} dest_active_ws={} dest_special_ws={} selected_ws={}",
-            workspace,
-            CanvasLayoutInternal::direction_name(direction),
-            static_cast<const void*>(before ? before.get() : nullptr),
-            beforeActiveWorkspaceId,
-            beforeSpecialWorkspaceId,
-            activeWorkspaceId,
-            specialWorkspaceId,
-            workspaceId);
-        if (!monitor) {
-            spdlog::warn("move_focus: no monitor in direction={} from workspace={}",
-                         CanvasLayoutInternal::direction_name(direction), workspace);
-            return;
-        }
-
-        const char* targetSelection = "geometry";
-        auto targetLayout = CanvasLayoutInternal::get_canvas_for_workspace(workspaceId);
-        if (targetLayout)
-            targetLayout->syncActiveStateFromWorkspaceFocus();
-        auto targetLane = targetLayout ? targetLayout->getActiveLane() : nullptr;
-        auto crossMonitorTarget = targetLane ? targetLane->get_active_window() : nullptr;
-        if (crossMonitorTarget)
-            targetSelection = "active";
-        else
-            crossMonitorTarget = CanvasLayoutInternal::pick_cross_monitor_target_window(monitor, workspaceId, direction, before);
-        if (!crossMonitorTarget) {
-            spdlog::warn("move_focus: no target window for crossed monitor workspace={}", workspaceId);
-            return;
-        }
-
-        if (!targetLane || !targetLane->has_window(crossMonitorTarget))
-            targetLane = targetLayout ? targetLayout->getLaneForWindow(crossMonitorTarget) : nullptr;
-        spdlog::info(
-            "move_focus_cross_monitor_target: selected_ws={} target_window={} target_workspace={} "
-            "target_layout_found={} target_lane_found={} selection={} target_pos=({}, {}) target_size=({}, {})",
-            workspaceId,
-            static_cast<const void*>(crossMonitorTarget ? crossMonitorTarget.get() : nullptr),
-            crossMonitorTarget ? crossMonitorTarget->workspaceID() : WORKSPACE_INVALID,
-            targetLayout != nullptr,
-            targetLane != nullptr,
-            targetSelection,
-            crossMonitorTarget ? crossMonitorTarget->m_position.x : 0.0,
-            crossMonitorTarget ? crossMonitorTarget->m_position.y : 0.0,
-            crossMonitorTarget ? crossMonitorTarget->m_size.x : 0.0,
-            crossMonitorTarget ? crossMonitorTarget->m_size.y : 0.0);
-
-        if (dropEmptyLane(sourceLaneNode, nullptr, beforeMonitor, true)) {
-            spdlog::info("move_focus: dropped empty lane after leaving workspace={} direction={}",
-                         workspace, CanvasLayoutInternal::direction_name(direction));
-        }
-
-        if (targetLane != nullptr)
-            targetLayout->setActiveLane(targetLane);
-        if (targetLane != nullptr)
-            targetLane->focus_window(crossMonitorTarget);
-        else
-            spdlog::warn("move_focus: no lane for crossed monitor target window={} workspace={}",
-                         static_cast<const void*>(crossMonitorTarget.get()), workspaceId);
-
-        if (targetLayout != nullptr && targetLane != nullptr) {
-            const auto targetWorkspace = targetLayout->getCanvasWorkspace();
-            auto targetMonitor = targetWorkspace ? CanvasLayoutInternal::visible_monitor_for_workspace(targetWorkspace) : monitor;
-            if (targetMonitor)
-                targetLayout->relayoutCanvas(targetMonitor, targetWorkspace && !targetWorkspace->m_isSpecialWorkspace);
-        }
-
-        spdlog::info("move_focus: workspace={} direction={} after={} result={}",
-                     workspace,
-                     CanvasLayoutInternal::direction_name(direction),
-                     static_cast<const void*>(crossMonitorTarget.get()),
-                     focus_move_result_name(FocusMoveResult::CrossMonitor));
-        suppressNextWorkspaceFocusSync = true;
-        CanvasLayoutInternal::switch_to_window(crossMonitorTarget, true);
-    };
-
-        const auto mode = s->get_mode();
+    const auto mode = s->get_mode();
     // Handle focus movement that leaves the current lane: adjacent lane first,
     // then cross-monitor, then optional blank-lane creation.
     const auto moveAcrossLanesOrCreate = [&](bool allowCreate) {
@@ -484,7 +513,7 @@ void CanvasLayout::move_focus(int workspace, Direction direction)
         }
 
         if (handoffPlan.route == CanvasLayoutInternal::DirectionalHandoffRoute::CrossMonitor) {
-            handoffAcrossMonitor(handoffPlan.targetMonitor);
+            handoffFocusAcrossMonitor(workspace, direction, before, beforeMonitor, beforeActiveWorkspaceId, beforeSpecialWorkspaceId, sourceLaneNode, handoffPlan.targetMonitor);
             return;
         }
 
@@ -493,15 +522,7 @@ void CanvasLayout::move_focus(int workspace, Direction direction)
 
         auto newLane = new Lane(beforeMonitor, mode);
         newLane->set_ephemeral(true);
-        lanes.push_back(newLane);
-        auto newLaneNode = lanes.last();
-        const auto edgeAnchor = handoffPlan.targetLaneNode;
-        if (edgeAnchor && edgeAnchor != newLaneNode) {
-            if (CanvasLayoutInternal::direction_inserts_before_current(mode, direction))
-                lanes.move_before(edgeAnchor, newLaneNode);
-            else
-                lanes.move_after(edgeAnchor, newLaneNode);
-        }
+        auto newLaneNode = insertLaneNode(newLane, direction, handoffPlan.targetLaneNode);
 
         activeLane = newLaneNode;
         relayoutVisibleCanvas(beforeMonitor);
@@ -527,7 +548,7 @@ void CanvasLayout::move_focus(int workspace, Direction direction)
     if (moveResult == FocusMoveResult::CrossMonitor) {
         const auto monitorDirection = CanvasLayoutInternal::direction_to_math(direction);
         auto monitor = beforeMonitor && monitorDirection ? g_pCompositor->getMonitorInDirection(beforeMonitor, *monitorDirection) : nullptr;
-        handoffAcrossMonitor(monitor);
+        handoffFocusAcrossMonitor(workspace, direction, before, beforeMonitor, beforeActiveWorkspaceId, beforeSpecialWorkspaceId, sourceLaneNode, monitor);
         return;
     }
 

@@ -121,12 +121,24 @@ private:
     void syncActiveStateFromWorkspaceFocus();
     // Adopt the lane containing a newly focused window.
     bool adoptFocusedLane(PHLWINDOW focusedWindow, PHLMONITOR fallbackMonitor = nullptr);
+    // Resolve the target window/lane selected for a cross-monitor focus handoff.
+    PHLWINDOW resolveCrossMonitorFocusTarget(CanvasLayout *targetLayout, PHLMONITOR monitor, WORKSPACEID workspaceId, Direction direction, PHLWINDOW sourceWindow, Lane **targetLane, const char **selection);
+    // Apply active-lane state and relayout on the destination canvas after cross-monitor focus selection.
+    void activateCrossMonitorFocusTarget(CanvasLayout *targetLayout, Lane *targetLane, PHLWINDOW targetWindow, PHLMONITOR fallbackMonitor);
+    // Execute the full cross-monitor focus handoff for directional navigation.
+    void handoffFocusAcrossMonitor(int workspace, Direction direction, PHLWINDOW sourceWindow, PHLMONITOR sourceMonitor, WORKSPACEID sourceActiveWorkspaceId, WORKSPACEID sourceSpecialWorkspaceId, ListNode<Lane *> *sourceLaneNode, PHLMONITOR targetMonitor);
     // Drop an empty lane and resolve a valid replacement active lane.
     bool dropEmptyLane(ListNode<Lane *> *laneNode, Lane *preferredLane = nullptr, PHLMONITOR fallbackMonitor = nullptr, bool ephemeralOnly = false);
     // Compatibility wrapper used by older ephemeral-lane call sites.
     bool dropEmptyEphemeralLane(ListNode<Lane *> *laneNode, Lane *preferredLane = nullptr, PHLMONITOR fallbackMonitor = nullptr);
     // Choose the active lane that should survive after lane removal.
     Lane *resolveActiveLaneAfterRemoval(ListNode<Lane *> *laneNode, PHLWINDOW removedWindow);
+    // Insert a lane into canvas ordering according to directional semantics.
+    ListNode<Lane *> *insertLaneNode(Lane *lane, Direction direction, ListNode<Lane *> *anchor = nullptr);
+    // Return the active lane, creating one if this canvas is still empty.
+    Lane *ensureActiveLane(PHLMONITOR monitor, Mode mode);
+    // Finish a lane transfer by pruning the source lane, relayouting, and focusing the active lane.
+    void finishLaneTransfer(ListNode<Lane *> *sourceLaneNode, PHLMONITOR sourceMonitor = nullptr, bool ephemeralOnly = false, bool warpCursor = true);
 
     template <typename Fn>
     // Execute a command against the current active lane with optional focus sync.

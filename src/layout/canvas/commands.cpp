@@ -66,10 +66,7 @@ void CanvasLayout::move_window(int workspace, Direction direction) {
             auto targetLaneNode = handoffPlan.targetLaneNode;
             targetLaneNode->data()->insert_window_payload(payload, direction);
             activeLane = targetLaneNode;
-
-            if (!dropEmptyLane(getLaneNode(lane), activeLane ? activeLane->data() : nullptr, sourceMonitor))
-                relayoutVisibleCanvas(sourceMonitor);
-            CanvasLayoutInternal::switch_to_window(activeLane->data()->get_active_window(), true);
+            finishLaneTransfer(getLaneNode(lane), sourceMonitor, false, true);
             return;
         }
 
@@ -95,12 +92,7 @@ void CanvasLayout::move_window(int workspace, Direction direction) {
                 return;
 
             targetLayout->syncActiveStateFromWorkspaceFocus();
-            auto *targetLane = targetLayout->getActiveLane();
-            if (!targetLane) {
-                targetLane = new Lane(targetMonitor, mode);
-                targetLayout->lanes.push_back(targetLane);
-                targetLayout->activeLane = targetLayout->lanes.last();
-            }
+            auto *targetLane = targetLayout->ensureActiveLane(targetMonitor, mode);
 
             moveDispatcher->second(selector);
             targetLane->insert_window_payload(payload, direction);
@@ -124,21 +116,12 @@ void CanvasLayout::move_window(int workspace, Direction direction) {
 
         auto sourceLaneNode = activeLane;
         auto *newLane = new Lane(sourceMonitor, mode);
-        lanes.push_back(newLane);
-        auto newLaneNode = lanes.last();
-        if (sourceLaneNode && sourceLaneNode != newLaneNode) {
-            if (CanvasLayoutInternal::direction_inserts_before_current(mode, direction))
-                lanes.move_before(sourceLaneNode, newLaneNode);
-            else
-                lanes.move_after(sourceLaneNode, newLaneNode);
-        }
+        auto newLaneNode = insertLaneNode(newLane, direction, sourceLaneNode);
 
         newLane->insert_window_payload(payload, direction);
         activeLane = newLaneNode;
-
-        if (!dropEmptyLane(sourceLaneNode, activeLane ? activeLane->data() : nullptr, sourceMonitor))
-            relayoutVisibleCanvas(sourceMonitor);
-        CanvasLayoutInternal::switch_to_window(activeLane->data()->get_active_window(), true);
+        finishLaneTransfer(sourceLaneNode, sourceMonitor, false, true);
+        return;
     });
 }
 
@@ -213,21 +196,10 @@ void CanvasLayout::create_lane(int workspace, Direction direction) {
 
         auto currentLaneNode = activeLane;
         auto newLane = new Lane(stack);
-        lanes.push_back(newLane);
-        auto newLaneNode = lanes.last();
-
-        if (direction == Direction::Left || direction == Direction::Up || direction == Direction::Begin)
-            lanes.move_before(currentLaneNode, newLaneNode);
-        else if (currentLaneNode != newLaneNode)
-            lanes.move_after(currentLaneNode, newLaneNode);
+        auto newLaneNode = insertLaneNode(newLane, direction, currentLaneNode);
 
         activeLane = newLaneNode;
-
-        if (!dropEmptyLane(currentLaneNode, newLane))
-            relayoutVisibleCanvas();
-
-        if (const auto window = newLane->get_active_window())
-            CanvasLayoutInternal::switch_to_window(window, true);
+        finishLaneTransfer(currentLaneNode, nullptr, false, true);
     });
 }
 
