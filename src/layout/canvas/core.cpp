@@ -58,7 +58,7 @@ CanvasLayoutInternal::CanvasBounds CanvasLayoutInternal::compute_canvas_bounds(P
                    pos.y + gapOutTopLeft.y + gaps_out,
                    size.x - gapOutTopLeft.x - gapOutBottomRight.x - 2 * gaps_out,
                    size.y - gapOutTopLeft.y - gapOutBottomRight.y - 2 * gaps_out),
-        .gap = gaps_in,
+        .gap = static_cast<int>(gaps_in),
     };
 }
 
