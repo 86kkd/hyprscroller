@@ -43,7 +43,16 @@ make all
 make install
 ```
 
-A more automated mode is to use `hyprpm`.
+If you are hacking on the plugin, you can also run the pure logic tests without
+starting Hyprland:
+
+``` sh
+cmake -S . -B Debug -DCMAKE_BUILD_TYPE=Debug
+cmake --build ./Debug -j
+ctest --test-dir ./Debug --output-on-failure
+```
+
+A more automated option is to use `hyprpm`.
 
 ``` sh
 hyprpm add https://github.com/86kkd/hyprscroller
@@ -120,7 +129,7 @@ The plugin adds the following dispatchers:
 
 ## Modes
 
-*Hyprscroller* works in any of two modes that can be changed at any moment.
+*Hyprscroller* works in one of two modes that can be changed at any moment.
 
 1. *row* mode: it is the default. It creates new windows in a new column.
    `cyclesize` affects the width of the active column. `alignwindow` aligns

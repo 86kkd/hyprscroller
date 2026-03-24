@@ -158,26 +158,26 @@ void CanvasLayout::onWindowFocusChange(PHLWINDOW window)
         return;
     }
 
-    auto s = getLaneForWindow(window);
-    const auto targetWindow = s ? s->get_active_window() : nullptr;
-    const auto targetLaneIndex = laneIndexOf(s);
+    auto lane = getLaneForWindow(window);
+    const auto targetWindow = lane ? lane->get_active_window() : nullptr;
+    const auto targetLaneIndex = laneIndexOf(lane);
     spdlog::info(
         "onWindowFocusChange: window={} workspace={} monitor={} canvas_ws={} lane_found={} lanes={} before_lane={} before_lane_index={} before_window={} target_lane={} target_lane_index={} target_window={} same_lane={}",
         static_cast<const void*>(window.get()),
         window->workspaceID(),
         window->monitorID(),
         CanvasLayoutInternal::get_workspace_id(),
-        s != nullptr,
+        lane != nullptr,
         totalLanes,
         static_cast<const void*>(beforeLane),
         beforeLaneIndex,
         static_cast<const void*>(beforeWindow ? beforeWindow.get() : nullptr),
-        static_cast<const void*>(s),
+        static_cast<const void*>(lane),
         targetLaneIndex,
         static_cast<const void*>(targetWindow ? targetWindow.get() : nullptr),
-        beforeLane == s);
+        beforeLane == lane);
 
-    if (s == nullptr) {
+    if (lane == nullptr) {
         spdlog::warn("onWindowFocusChange: window={} not managed by current canvas canvas_ws={} lanes={}",
                      static_cast<const void*>(window.get()),
                      CanvasLayoutInternal::get_workspace_id(),
@@ -185,8 +185,8 @@ void CanvasLayout::onWindowFocusChange(PHLWINDOW window)
         return;
     }
 
-    setActiveLane(s);
-    s->focus_window(window);
+    setActiveLane(lane);
+    lane->focus_window(window);
 
     const auto afterLane = activeLane ? activeLane->data() : nullptr;
     const auto afterWindow = afterLane ? afterLane->get_active_window() : nullptr;
@@ -475,24 +475,24 @@ void CanvasLayout::move_focus(int workspace, Direction direction)
     static auto* const *focus_wrap = (Hyprlang::INT* const *)HyprlandAPI::getConfigValue(PHANDLE, "plugin:scroller:focus_wrap")->getDataStaticPtr();
     if (CanvasLayoutInternal::should_sync_workspace_focus_before_move(activeLane))
         syncActiveStateFromWorkspaceFocus();
-    auto s = getActiveLane();
-    const auto before = s ? s->get_active_window() : nullptr;
+    auto lane = getActiveLane();
+    const auto before = lane ? lane->get_active_window() : nullptr;
     const auto beforeMonitor = before ? g_pCompositor->getMonitorFromID(before->monitorID()) : monitorFromPointingOrCursor();
     const auto beforeActiveWorkspaceId = beforeMonitor ? beforeMonitor->activeWorkspaceID() : WORKSPACE_INVALID;
     const auto beforeSpecialWorkspaceId = beforeMonitor ? beforeMonitor->activeSpecialWorkspaceID() : WORKSPACE_INVALID;
     auto sourceLaneNode = activeLane;
     spdlog::info("move_focus: workspace={} direction={} lane_found={} before={}",
-                 workspace, ScrollerCore::direction_name(direction), s != nullptr,
+                 workspace, ScrollerCore::direction_name(direction), lane != nullptr,
                  static_cast<const void*>(before ? before.get() : nullptr));
-    if (s == nullptr) {
+    if (lane == nullptr) {
         CanvasLayoutInternal::dispatch_builtin_movefocus(direction);
         return;
     }
 
-    const auto mode = s->get_mode();
+    const auto mode = lane->get_mode();
     const auto betweenLanes = CanvasLayoutInternal::direction_moves_between_lanes(mode, direction);
 
-    if (s->empty()) {
+    if (lane->empty()) {
         if (betweenLanes)
             routeMoveFocusAcrossLanesOrCreate(workspace, direction, before, beforeMonitor,
                                               beforeActiveWorkspaceId, beforeSpecialWorkspaceId,
@@ -500,7 +500,7 @@ void CanvasLayout::move_focus(int workspace, Direction direction)
         return;
     }
 
-    const auto moveResult = s->move_focus(direction, **focus_wrap != 0);
+    const auto moveResult = lane->move_focus(direction, **focus_wrap != 0);
     if (moveResult != FocusMoveResult::Moved && betweenLanes) {
         routeMoveFocusAcrossLanesOrCreate(workspace, direction, before, beforeMonitor,
                                           beforeActiveWorkspaceId, beforeSpecialWorkspaceId,
@@ -518,5 +518,5 @@ void CanvasLayout::move_focus(int workspace, Direction direction)
     if (moveResult != FocusMoveResult::Moved)
         return;
 
-    finalizeLocalFocusMove(workspace, direction, s, focus_move_result_name(moveResult));
+    finalizeLocalFocusMove(workspace, direction, lane, focus_move_result_name(moveResult));
 }

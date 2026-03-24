@@ -410,16 +410,16 @@ void CanvasLayout::resizeTarget(const Vector2D &delta, SP<Layout::ITarget> targe
     if (!window)
         return;
 
-    auto s = getLaneForWindow(window);
-    if (s == nullptr) {
+    auto lane = getLaneForWindow(window);
+    if (lane == nullptr) {
         if (window->m_realSize)
             *window->m_realSize = Vector2D(std::max((window->m_realSize->goal() + delta).x, 20.0), std::max((window->m_realSize->goal() + delta).y, 20.0));
         window->updateWindowDecos();
         return;
     }
 
-    s->focus_window(window);
-    s->resize_active_window(delta);
+    lane->focus_window(window);
+    lane->resize_active_window(delta);
 }
 
 // Hyprland callback: relayout the whole canvas after monitor/workspace changes.
@@ -459,11 +459,11 @@ std::optional<Vector2D> CanvasLayout::predictSizeForNewTarget()
 // Return the next target candidate using the active window of the active lane.
 SP<Layout::ITarget> CanvasLayout::getNextCandidate(SP<Layout::ITarget> /*old*/)
 {
-    auto s = getActiveLane();
-    if (!s)
+    auto lane = getActiveLane();
+    if (!lane)
         return {};
 
-    const auto active = s->get_active_window();
+    const auto active = lane->get_active_window();
     if (!active)
         return {};
 
@@ -546,13 +546,13 @@ void CanvasLayout::onWindowCreatedTiling(PHLWINDOW window, Math::eDirection)
         return;
     }
 
-    auto s = getActiveLane();
-    if (s == nullptr) {
-        s = new Lane(window);
-        activeLane = insertLaneNode(s, Direction::End);
+    auto lane = getActiveLane();
+    if (lane == nullptr) {
+        lane = new Lane(window);
+        activeLane = insertLaneNode(lane, Direction::End);
     }
-    s->add_active_window(window);
-    rememberWindowLane(window, s);
+    lane->add_active_window(window);
+    rememberWindowLane(window, lane);
 }
 
 // Remove a tiled window and delete the lane if it becomes empty.
@@ -603,11 +603,11 @@ bool CanvasLayout::isWindowTiled(PHLWINDOW window)
 // Recalculate only the lane that owns a given window.
 void CanvasLayout::recalculateWindow(PHLWINDOW window)
 {
-    auto s = getLaneForWindow(window);
-    if (s == nullptr)
+    auto lane = getLaneForWindow(window);
+    if (lane == nullptr)
         return;
 
-    s->recalculate_lane_geometry();
+    lane->recalculate_lane_geometry();
 }
 
 void CanvasLayout::resizeActiveWindow(PHLWINDOW window, const Vector2D &delta,
@@ -617,15 +617,15 @@ void CanvasLayout::resizeActiveWindow(PHLWINDOW window, const Vector2D &delta,
     if (!PWINDOW)
         return;
 
-    auto s = getLaneForWindow(PWINDOW);
-    if (s == nullptr) {
+    auto lane = getLaneForWindow(PWINDOW);
+    if (lane == nullptr) {
         if (PWINDOW->m_realSize)
             *PWINDOW->m_realSize = Vector2D(std::max((PWINDOW->m_realSize->goal() + delta).x, 20.0), std::max((PWINDOW->m_realSize->goal() + delta).y, 20.0));
         PWINDOW->updateWindowDecos();
         return;
     }
 
-    s->resize_active_window(delta);
+    lane->resize_active_window(delta);
 }
 
 void CanvasLayout::alterSplitRatio(PHLWINDOW, float, bool)
@@ -691,11 +691,11 @@ Vector2D CanvasLayout::predictSizeForNewWindowTiled() {
     if (!monitor)
         return {};
 
-    auto s = getActiveLane();
-    if (s == nullptr)
+    auto lane = getActiveLane();
+    if (lane == nullptr)
         return monitor->m_size;
 
-    return s->predict_window_size();
+    return lane->predict_window_size();
 }
 
 void CanvasLayout::replaceWindowDataWith(PHLWINDOW from, PHLWINDOW to)
