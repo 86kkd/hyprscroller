@@ -4,6 +4,7 @@ project("hyprscroller"
     DESCRIPTION "Hyprland layout similar to PaperWM and niri")
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+include(CTest)
 
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
@@ -26,6 +27,8 @@ add_library(hyprscroller SHARED
             src/dispatchers.h
             src/dispatchers.cpp
             src/core/core.cpp
+            src/core/direction.cpp
+            src/core/layout_math.cpp
             src/list.h
             src/model/window.cpp
             src/model/stack.cpp
@@ -58,3 +61,12 @@ target_include_directories(hyprscroller PRIVATE ${DEPS_INCLUDE_DIRS}
 )
 target_link_libraries(hyprscroller PRIVATE spdlog::spdlog_header_only)
 set_target_properties(hyprscroller PROPERTIES PREFIX "")
+
+if(BUILD_TESTING)
+    add_executable(hyprscroller_logic_tests
+                   tests/logic_tests.cpp
+                   src/core/direction.cpp
+                   src/core/layout_math.cpp)
+    target_include_directories(hyprscroller_logic_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    add_test(NAME hyprscroller.logic COMMAND hyprscroller_logic_tests)
+endif()

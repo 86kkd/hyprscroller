@@ -10,6 +10,7 @@
 
 #include <cmath>
 #include <sstream>
+#include <vector>
 
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/config/ConfigManager.hpp>
@@ -21,6 +22,7 @@
 #endif
 
 #include "../../core/interval.h"
+#include "../../core/layout_math.h"
 #include "../canvas/internal.h"
 
 namespace {
@@ -35,29 +37,6 @@ bool projected_stack_intersects_visible_box(const Stack *stack, const double pro
     return ScrollerCore::Interval::intersects(projected_x, right, visible_box.x, visible_box.x + visible_box.w);
 }
 
-// Choose the X anchor that keeps the active stack and a useful neighbor visible
-// when possible.
-double choose_anchor_x(const ListNode<Stack *> *active, const double active_width,
-                       const double fallback_x, const ScrollerCore::Box &visible_box) {
-    const auto next = active->next();
-    const auto prev = active->prev();
-    if (next) {
-        const auto next_width = next->data()->get_geom_w();
-        if (active_width + next_width <= visible_box.w)
-            return visible_box.x + visible_box.w - active_width - next_width;
-        if (prev && prev->data()->get_geom_w() + active_width <= visible_box.w)
-            return visible_box.x + prev->data()->get_geom_w();
-        if (!prev)
-            return visible_box.x;
-        return fallback_x;
-    }
-    if (prev) {
-        if (prev->data()->get_geom_w() + active_width <= visible_box.w)
-            return visible_box.x + prev->data()->get_geom_w();
-        return visible_box.x + visible_box.w - active_width;
-    }
-    return fallback_x;
-}
 } // namespace viewport
 
 namespace logging {
@@ -87,55 +66,38 @@ std::string summarize_stacks(List<Stack *>& stacks) {
 } // namespace logging
 
 namespace overview {
-// Temporary projection data used while overview mode is active.
-struct Projection {
-    Vector2D min;
-    Vector2D max;
-    double   width;
-    double   height;
-    double   scale;
-    Vector2D offset;
-};
-
 // Compute the scaled bounding box and offset required for overview mode.
-Projection compute_projection(List<Stack *>& stacks, const ScrollerCore::Box &visible_box) {
-    Vector2D bmin(visible_box.x + visible_box.w, visible_box.y + visible_box.h);
-    Vector2D bmax(visible_box.x, visible_box.y);
+ScrollerCore::OverviewProjection compute_projection(List<Stack *>& stacks, const ScrollerCore::Box &visible_box) {
+    std::vector<ScrollerCore::OverviewRect> items;
+    items.reserve(stacks.size());
     for (auto stack = stacks.first(); stack != nullptr; stack = stack->next()) {
         auto x0 = stack->data()->get_geom_x();
         auto x1 = x0 + stack->data()->get_geom_w();
         Vector2D height = stack->data()->get_height();
-        if (x0 < bmin.x)
-            bmin.x = x0;
-        if (x1 > bmax.x)
-            bmax.x = x1;
-        if (height.x < bmin.y)
-            bmin.y = height.x;
-        if (height.y > bmax.y)
-            bmax.y = height.y;
+        items.push_back(ScrollerCore::OverviewRect{
+            .x0 = x0,
+            .x1 = x1,
+            .y0 = height.x,
+            .y1 = height.y,
+        });
     }
 
-    const auto width = bmax.x - bmin.x;
-    const auto height = bmax.y - bmin.y;
-    if (width <= 0.0 || height <= 0.0) {
+    const auto projection = ScrollerCore::compute_overview_projection(items, visible_box);
+    if (projection.width <= 0.0 || projection.height <= 0.0) {
         spdlog::debug("overview_projection_degenerate: width={} height={} visible_box=({}, {}, {}, {})",
-                      width,
-                      height,
+                      projection.width,
+                      projection.height,
                       visible_box.x,
                       visible_box.y,
                       visible_box.w,
                       visible_box.h);
-        const auto offset = Vector2D(bmin.x - visible_box.x, bmin.y - visible_box.y);
-        return Projection{bmin, bmax, width, height, 1.0, offset};
     }
-
-    const auto scale = std::min(visible_box.w / width, visible_box.h / height);
-    const auto offset = Vector2D(0.5 * (visible_box.w - width * scale), 0.5 * (visible_box.h - height * scale));
-    return Projection{bmin, bmax, width, height, scale, offset};
+    return projection;
 }
 
 // Apply overview projection to every stack in the lane.
-void apply_projection(List<Stack *>& stacks, const Projection &projection, double gap, const ScrollerCore::Box &visible_box) {
+void apply_projection(List<Stack *>& stacks, const ScrollerCore::OverviewProjection &projection,
+                      double gap, const ScrollerCore::Box &visible_box) {
     for (auto stack = stacks.first(); stack != nullptr; stack = stack->next()) {
         Stack *column = stack->data();
         column->push_geom();
@@ -368,7 +330,11 @@ void Lane::recalculate_lane_geometry() {
     const bool prev_inside = viewport::projected_stack_intersects_visible_box(prev, prev_x, active_window);
     const bool next_inside = viewport::projected_stack_intersects_visible_box(next, next_x, active_window);
     const bool keep_current = prev_inside || next_inside;
-    const double new_x = keep_current ? a_x : viewport::choose_anchor_x(active, a_w, a_x, max);
+    const auto prev_width = prev ? prev->get_geom_w() : 0.0;
+    const auto next_width = next ? next->get_geom_w() : 0.0;
+    const double new_x = keep_current
+        ? a_x
+        : ScrollerCore::choose_anchor_x(next != nullptr, prev != nullptr, a_w, next_width, prev_width, a_x, max);
     active->data()->set_geom_pos(new_x, max.y);
     adjust_stacks(active);
     spdlog::debug("lane_recalc_auto: active_window={} keep_current={} prev_inside={} next_inside={} new_x={} stacks_after={}",

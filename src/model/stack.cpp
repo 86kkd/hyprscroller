@@ -23,6 +23,7 @@
 #include <hyprland/src/layout/target/Target.hpp>
 
 #include "../core/interval.h"
+#include "../core/layout_math.h"
 
 extern HANDLE PHANDLE;
 
@@ -79,26 +80,6 @@ static bool is_window_intersect_viewport(Window *window, const ScrollerCore::Box
 // Compute the real X coordinate where stacked windows should render.
 static double window_active_x(const ScrollerCore::Box &geom, double border_x, double gap_x) {
     return geom.x + border_x + gap_x;
-}
-
-// Choose the Y anchor that keeps the active window and a useful neighbor visible.
-static double choose_anchor_y(bool has_next, bool has_prev, double active_h, double next_h, double prev_h,
-                             const ScrollerCore::Box &geom) {
-    const auto base_y = geom.y;
-    const auto stack_to_bottom = geom.y + geom.h - active_h;
-    if (has_next && active_h + next_h <= geom.h) {
-        return geom.y + geom.h - active_h - next_h;
-    }
-    if (has_next && has_prev && prev_h + active_h <= geom.h) {
-        return geom.y + prev_h;
-    }
-    if (!has_next && has_prev && prev_h + active_h <= geom.h) {
-        return geom.y + prev_h;
-    }
-    if (!has_next && has_prev) {
-        return stack_to_bottom;
-    }
-    return base_y;
 }
 
 // Keep Hyprland's layout target geometry synchronized with plugin-side geometry.
@@ -426,7 +407,7 @@ void Stack::recalculate_stack_geometry(const Vector2D &gap_x, double gap) {
     const auto next_h = next ? next->get_geom_h() : 0.0;
     const auto prev_h = prev ? prev->get_geom_h() : 0.0;
     const auto active_h = wactive->get_geom_h();
-    const double new_y = choose_anchor_y(next != nullptr, prev != nullptr, active_h, next_h, prev_h, geom);
+    const double new_y = ScrollerCore::choose_anchor_y(next != nullptr, prev != nullptr, active_h, next_h, prev_h, geom);
     wactive->set_geom_y(new_y);
     adjust_windows(active, gap_x, gap);
     spdlog::debug("stack_recalc_auto: active_window={} keep_current={} prev_visible={} next_visible={} new_y={}",

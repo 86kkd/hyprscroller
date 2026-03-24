@@ -18,6 +18,7 @@
 #include <spdlog/spdlog.h>
 #include <optional>
 
+#include "core/direction.h"
 #include "dispatchers.h"
 #include "layout/canvas/layout.h"
 
@@ -95,40 +96,6 @@ namespace {
         return getCanvasForWorkspace(workspace_id);
     }
 
-    // Parse direction-like arguments used by directional dispatchers.
-    std::optional<Direction> parse_move_arg(std::string arg) {
-        if (arg == "l" || arg == "left")
-            return Direction::Left;
-        if (arg == "r" || arg == "right")
-            return Direction::Right;
-        if (arg == "u" || arg == "up")
-            return Direction::Up;
-        if (arg == "d" || arg == "dn" || arg == "down")
-            return Direction::Down;
-        if (arg == "b" || arg == "begin" || arg == "beginning")
-            return Direction::Begin;
-        if (arg == "e" || arg == "end")
-            return Direction::End;
-        if (arg == "c" || arg == "center" || arg == "centre")
-            return Direction::Center;
-        return {};
-    }
-
-    // Parse fit mode arguments for the fitsize dispatcher.
-    std::optional<FitSize> parse_fit_size(std::string arg) {
-        if (arg == "active")
-            return FitSize::Active;
-        if (arg == "visible")
-            return FitSize::Visible;
-        if (arg == "all")
-            return FitSize::All;
-        if (arg == "toend")
-            return FitSize::ToEnd;
-        if (arg == "tobeg" || arg == "tobeginning")
-            return FitSize::ToBeg;
-        return {};
-    }
-
     // cyclesize(+1|-1): change active stack width/height step.
     void dispatch_cyclesize(std::string arg) {
         int workspace;
@@ -158,7 +125,7 @@ namespace {
         }
 
         auto args = CVarList(arg);
-        if (auto direction = parse_move_arg(args[0])) {
+        if (auto direction = ScrollerCore::parse_direction_arg(args[0])) {
             spdlog::info("dispatch_movefocus: arg='{}' workspace={}", arg, workspace);
             layout->move_focus(workspace, *direction);
         } else {
@@ -174,7 +141,7 @@ namespace {
             return;
 
         auto args = CVarList(arg);
-        if (auto direction = parse_move_arg(args[0])) {
+        if (auto direction = ScrollerCore::parse_direction_arg(args[0])) {
             layout->move_window(workspace, *direction);
         }
     }
@@ -187,7 +154,7 @@ namespace {
             return;
 
         auto args = CVarList(arg);
-        if (auto direction = parse_move_arg(args[0])) {
+        if (auto direction = ScrollerCore::parse_direction_arg(args[0])) {
             layout->align_window(workspace, *direction);
         }
     }
@@ -238,7 +205,7 @@ namespace {
             return;
 
         auto args = CVarList(arg);
-        if (auto fitsize = parse_fit_size(args[0])) {
+        if (auto fitsize = ScrollerCore::parse_fit_size_arg(args[0])) {
             layout->fit_size(workspace, *fitsize);
         }
     }
@@ -271,7 +238,7 @@ namespace {
             return;
 
         auto args = CVarList(arg);
-        if (auto direction = parse_move_arg(args[0])) {
+        if (auto direction = ScrollerCore::parse_direction_arg(args[0])) {
             layout->create_lane(workspace, *direction);
         }
     }
@@ -284,7 +251,7 @@ namespace {
             return;
 
         auto args = CVarList(arg);
-        if (auto direction = parse_move_arg(args[0])) {
+        if (auto direction = ScrollerCore::parse_direction_arg(args[0])) {
             layout->focus_lane(workspace, *direction);
         }
     }

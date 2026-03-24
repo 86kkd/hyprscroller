@@ -19,8 +19,8 @@
 #include <hyprutils/math/Vector2D.hpp>
 
 #include "../list.h"
+#include "../core/types.h"
 #include "../core/core.h"
-#include "../layout/canvas/layout.h"
 
 namespace ScrollerModel {
 

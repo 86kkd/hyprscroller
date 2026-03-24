@@ -20,11 +20,9 @@
 #include <hyprland/src/layout/target/Target.hpp>
 #include <hyprland/src/helpers/signal/Signal.hpp>
 
+#include "../../core/types.h"
 #include "../../list.h"
 
-enum class Direction { Left, Right, Up, Down, Begin, End, Center };
-enum class FitSize { Active, Visible, All, ToEnd, ToBeg };
-enum class Mode { Row, Column };
 enum class ActiveLaneSyncPolicy { None, WorkspaceFocus };
 
 class Lane;
