@@ -90,20 +90,6 @@ double secondary_cross_monitor_score(PHLWINDOW window, PHLWINDOW source_window, 
 } // namespace
 
 namespace CanvasLayoutInternal {
-// Human-readable labels used by logs and diagnostics.
-const char* direction_name(Direction direction) {
-    switch (direction) {
-        case Direction::Left: return "left";
-        case Direction::Right: return "right";
-        case Direction::Up: return "up";
-        case Direction::Down: return "down";
-        case Direction::Begin: return "begin";
-        case Direction::End: return "end";
-        case Direction::Center: return "center";
-        default: return "unknown";
-    }
-}
-
 // Recalculate a single lane against a workspace/monitor pairing.
 void recalculate_workspace_lane(Lane* lane, PHLMONITOR monitor, PHLWORKSPACE workspace, bool honor_fullscreen) {
     if (!lane || !monitor || !workspace)

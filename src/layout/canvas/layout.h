@@ -127,6 +127,26 @@ private:
     void activateCrossMonitorFocusTarget(CanvasLayout *targetLayout, Lane *targetLane, PHLWINDOW targetWindow, PHLMONITOR fallbackMonitor);
     // Execute the full cross-monitor focus handoff for directional navigation.
     void handoffFocusAcrossMonitor(int workspace, Direction direction, PHLWINDOW sourceWindow, PHLMONITOR sourceMonitor, WORKSPACEID sourceActiveWorkspaceId, WORKSPACEID sourceSpecialWorkspaceId, ListNode<Lane *> *sourceLaneNode, PHLMONITOR targetMonitor);
+    // Resolve the next monitor in a logical direction from a source monitor.
+    PHLMONITOR directionalMoveTargetMonitor(PHLMONITOR sourceMonitor, Direction direction) const;
+    // Execute the full cross-monitor movewindow handoff and relayout/focus updates.
+    bool handoffMoveWindowAcrossMonitor(int workspace, Direction direction, Lane *sourceLane, PHLWINDOW currentWindow, PHLMONITOR sourceMonitor, PHLMONITOR targetMonitor);
+    // Move the active window payload into an adjacent lane and finish source cleanup.
+    void transferMoveWindowToAdjacentLane(Lane *sourceLane, PHLWINDOW currentWindow, ListNode<Lane *> *targetLaneNode, Direction direction, PHLMONITOR sourceMonitor);
+    // Move the active window payload into a newly created lane and finish source cleanup.
+    void transferMoveWindowToNewLane(Lane *sourceLane, PHLWINDOW currentWindow, PHLMONITOR sourceMonitor, Mode mode, Direction direction);
+    // Handle movement that stays on the lane's primary axis unless it crosses monitors.
+    void handleMoveWindowWithinLane(int workspace, Direction direction, Lane *lane, PHLWINDOW currentWindow, PHLMONITOR sourceMonitor);
+    // Handle movement that routes through adjacent lanes, monitor handoff, or lane creation.
+    void handleMoveWindowAcrossLanes(int workspace, Direction direction, Lane *lane, PHLWINDOW currentWindow, PHLMONITOR sourceMonitor, Mode mode);
+    // Focus the adjacent lane chosen by directional routing and clean up the source lane if needed.
+    void focusAdjacentLane(int workspace, Direction direction, ListNode<Lane *> *sourceLaneNode, PHLMONITOR sourceMonitor, ListNode<Lane *> *targetLaneNode);
+    // Create a temporary empty lane used when focus moves into blank space.
+    void createEphemeralLaneForFocus(int workspace, Direction direction, PHLMONITOR sourceMonitor, Mode mode, ListNode<Lane *> *anchor);
+    // Route focus movement that leaves the current lane into adjacent lanes, monitors, or a new empty lane.
+    void routeMoveFocusAcrossLanesOrCreate(int workspace, Direction direction, PHLWINDOW sourceWindow, PHLMONITOR sourceMonitor, WORKSPACEID sourceActiveWorkspaceId, WORKSPACEID sourceSpecialWorkspaceId, ListNode<Lane *> *sourceLaneNode, Mode mode, bool allowCreate);
+    // Finish a successful local focus movement by logging and switching focus.
+    void finalizeLocalFocusMove(int workspace, Direction direction, Lane *lane, const char *moveResultName);
     // Drop an empty lane and resolve a valid replacement active lane.
     bool dropEmptyLane(ListNode<Lane *> *laneNode, Lane *preferredLane = nullptr, PHLMONITOR fallbackMonitor = nullptr, bool ephemeralOnly = false);
     // Compatibility wrapper used by older ephemeral-lane call sites.
@@ -143,6 +163,12 @@ private:
     void forgetManualCrossMonitorInsertion(PHLWINDOW window);
     // Return true when target callbacks should skip auto-registering this window.
     bool hasPendingManualCrossMonitorInsertion(PHLWINDOW window) const;
+    // Request one-shot suppression of workspace-focus sync on the next command.
+    void requestWorkspaceFocusSyncSuppression();
+    // Return the next active-lane sync policy and consume any one-shot suppression.
+    ActiveLaneSyncPolicy consumeActiveLaneSyncPolicy();
+    // Clear transient focus/cross-monitor handoff state.
+    void resetHandoffState();
     // Finish a lane transfer by pruning the source lane, relayouting, and focusing the active lane.
     void finishLaneTransfer(ListNode<Lane *> *sourceLaneNode, PHLMONITOR sourceMonitor = nullptr, bool ephemeralOnly = false, bool warpCursor = true);
 
@@ -162,10 +188,46 @@ private:
     ListNode<Lane *> *activeLane = nullptr;
     // Ordered lanes that make up the current canvas.
     List<Lane *> lanes;
-    // One-shot guard used to avoid immediately re-syncing stale workspace focus
-    // after the plugin itself has just moved focus.
-    bool suppressNextWorkspaceFocusSync = false;
-    // Windows explicitly inserted by cross-monitor movewindow should not also be
-    // auto-registered by Hyprland target callbacks.
-    std::unordered_set<uintptr_t> pendingManualCrossMonitorInsertions;
+    // Concentrated one-shot focus and cross-monitor handoff state.
+    struct HandoffState {
+        bool suppressWorkspaceFocusSync = false;
+        std::unordered_set<uintptr_t> pendingManualCrossMonitorInsertions;
+
+        static uintptr_t windowKey(PHLWINDOW window) {
+            return reinterpret_cast<uintptr_t>(window.get());
+        }
+
+        void requestWorkspaceFocusSyncSuppression() {
+            suppressWorkspaceFocusSync = true;
+        }
+
+        ActiveLaneSyncPolicy consumeActiveLaneSyncPolicy() {
+            return std::exchange(suppressWorkspaceFocusSync, false)
+                ? ActiveLaneSyncPolicy::None
+                : ActiveLaneSyncPolicy::WorkspaceFocus;
+        }
+
+        void rememberManualCrossMonitorInsertion(PHLWINDOW window) {
+            if (!window)
+                return;
+
+            pendingManualCrossMonitorInsertions.insert(windowKey(window));
+        }
+
+        void forgetManualCrossMonitorInsertion(PHLWINDOW window) {
+            if (!window)
+                return;
+
+            pendingManualCrossMonitorInsertions.erase(windowKey(window));
+        }
+
+        bool hasPendingManualCrossMonitorInsertion(PHLWINDOW window) const {
+            return window && pendingManualCrossMonitorInsertions.contains(windowKey(window));
+        }
+
+        void reset() {
+            suppressWorkspaceFocusSync = false;
+            pendingManualCrossMonitorInsertions.clear();
+        }
+    } handoffState;
 };

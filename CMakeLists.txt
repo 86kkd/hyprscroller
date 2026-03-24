@@ -33,6 +33,7 @@ add_library(hyprscroller SHARED
             src/model/window.cpp
             src/model/stack.cpp
             src/layout/canvas/core.cpp
+            src/layout/canvas/dispatch.cpp
             src/layout/canvas/workspace.cpp
             src/layout/canvas/focus.cpp
             src/layout/canvas/commands.cpp

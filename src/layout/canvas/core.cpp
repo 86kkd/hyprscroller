@@ -137,24 +137,27 @@ Lane *CanvasLayout::ensureActiveLane(PHLMONITOR monitor, Mode mode) {
 }
 
 void CanvasLayout::rememberManualCrossMonitorInsertion(PHLWINDOW window) {
-    if (!window)
-        return;
-
-    pendingManualCrossMonitorInsertions.insert(reinterpret_cast<uintptr_t>(window.get()));
+    handoffState.rememberManualCrossMonitorInsertion(window);
 }
 
 void CanvasLayout::forgetManualCrossMonitorInsertion(PHLWINDOW window) {
-    if (!window)
-        return;
-
-    pendingManualCrossMonitorInsertions.erase(reinterpret_cast<uintptr_t>(window.get()));
+    handoffState.forgetManualCrossMonitorInsertion(window);
 }
 
 bool CanvasLayout::hasPendingManualCrossMonitorInsertion(PHLWINDOW window) const {
-    if (!window)
-        return false;
+    return handoffState.hasPendingManualCrossMonitorInsertion(window);
+}
 
-    return pendingManualCrossMonitorInsertions.contains(reinterpret_cast<uintptr_t>(window.get()));
+void CanvasLayout::requestWorkspaceFocusSyncSuppression() {
+    handoffState.requestWorkspaceFocusSyncSuppression();
+}
+
+ActiveLaneSyncPolicy CanvasLayout::consumeActiveLaneSyncPolicy() {
+    return handoffState.consumeActiveLaneSyncPolicy();
+}
+
+void CanvasLayout::resetHandoffState() {
+    handoffState.reset();
 }
 
 void CanvasLayout::finishLaneTransfer(ListNode<Lane *> *sourceLaneNode, PHLMONITOR sourceMonitor, bool ephemeralOnly, bool warpCursor) {
@@ -554,7 +557,7 @@ void CanvasLayout::onEnable() {
     clear_lanes(lanes);
     activeLane = nullptr;
     marks.reset();
-    pendingManualCrossMonitorInsertions.clear();
+    resetHandoffState();
     m_focusCallback = Event::bus()->m_events.window.active.listen([this](PHLWINDOW window, Desktop::eFocusReason) {
         onWindowFocusChange(window);
     });
@@ -599,7 +602,7 @@ void CanvasLayout::onDisable() {
     clear_lanes(lanes);
     activeLane = nullptr;
     marks.reset();
-    pendingManualCrossMonitorInsertions.clear();
+    resetHandoffState();
 }
 
 Vector2D CanvasLayout::predictSizeForNewWindowTiled() {

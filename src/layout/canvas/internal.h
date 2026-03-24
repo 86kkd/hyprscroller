@@ -1,6 +1,7 @@
 #pragma once
 
 #include <optional>
+#include <string_view>
 
 #include "../lane/lane.h"
 #include "layout.h"
@@ -41,10 +42,6 @@ struct DirectionalHandoffPlan {
     PHLMONITOR              targetMonitor = nullptr;
 };
 
-// Human-readable direction label for logs.
-const char*                     direction_name(Direction direction);
-// Dispatcher argument used by Hyprland directional commands such as movefocus.
-const char*                     direction_dispatch_arg(Direction direction);
 // Return true when a direction should move between lanes for the current mode.
 bool                            direction_moves_between_lanes(Mode mode, Direction direction);
 // Return true when inserting or creating in this direction should happen before the current lane.
@@ -67,6 +64,10 @@ CanvasLayout*                   get_canvas_for_workspace(WORKSPACEID workspace_i
 std::optional<Math::eDirection> direction_to_math(Direction direction);
 // Pick the best target window on another monitor when crossing focus.
 PHLWINDOW                       pick_cross_monitor_target_window(PHLMONITOR monitor, WORKSPACEID workspace_id, Direction direction, PHLWINDOW source_window);
+// Return true when a dispatcher call is well-formed and the target dispatcher exists.
+bool                            can_invoke_dispatcher(const char* dispatcher, std::string_view arg, const char* context = nullptr);
+// Call a Hyprland dispatcher through the shared checked invocation path.
+bool                            invoke_dispatcher(const char* dispatcher, std::string_view arg, const char* context = nullptr);
 // Dispatch a Hyprland builtin directional command with shared direction mapping.
 void                            dispatch_directional_builtin(const char* dispatcher, Direction direction);
 // Thin wrapper for builtin movefocus dispatch.
