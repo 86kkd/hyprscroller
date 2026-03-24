@@ -8,10 +8,12 @@
  */
 #pragma once
 
+#include <cstdint>
 #include <expected>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <utility>
 
 #include <hyprland/src/layout/algorithm/TiledAlgorithm.hpp>
@@ -137,6 +139,12 @@ private:
     ListNode<Lane *> *insertLaneNode(Lane *lane, Direction direction, ListNode<Lane *> *anchor = nullptr);
     // Return the active lane, creating one if this canvas is still empty.
     Lane *ensureActiveLane(PHLMONITOR monitor, Mode mode);
+    // Mark a window so target callbacks defer to explicit cross-monitor insertion.
+    void rememberManualCrossMonitorInsertion(PHLWINDOW window);
+    // Clear the explicit cross-monitor insertion handoff marker.
+    void forgetManualCrossMonitorInsertion(PHLWINDOW window);
+    // Return true when target callbacks should skip auto-registering this window.
+    bool hasPendingManualCrossMonitorInsertion(PHLWINDOW window) const;
     // Finish a lane transfer by pruning the source lane, relayouting, and focusing the active lane.
     void finishLaneTransfer(ListNode<Lane *> *sourceLaneNode, PHLMONITOR sourceMonitor = nullptr, bool ephemeralOnly = false, bool warpCursor = true);
 
@@ -159,4 +167,7 @@ private:
     // One-shot guard used to avoid immediately re-syncing stale workspace focus
     // after the plugin itself has just moved focus.
     bool suppressNextWorkspaceFocusSync = false;
+    // Windows explicitly inserted by cross-monitor movewindow should not also be
+    // auto-registered by Hyprland target callbacks.
+    std::unordered_set<uintptr_t> pendingManualCrossMonitorInsertions;
 };

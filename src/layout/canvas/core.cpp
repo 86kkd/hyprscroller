@@ -136,6 +136,27 @@ Lane *CanvasLayout::ensureActiveLane(PHLMONITOR monitor, Mode mode) {
     return lane;
 }
 
+void CanvasLayout::rememberManualCrossMonitorInsertion(PHLWINDOW window) {
+    if (!window)
+        return;
+
+    pendingManualCrossMonitorInsertions.insert(reinterpret_cast<uintptr_t>(window.get()));
+}
+
+void CanvasLayout::forgetManualCrossMonitorInsertion(PHLWINDOW window) {
+    if (!window)
+        return;
+
+    pendingManualCrossMonitorInsertions.erase(reinterpret_cast<uintptr_t>(window.get()));
+}
+
+bool CanvasLayout::hasPendingManualCrossMonitorInsertion(PHLWINDOW window) const {
+    if (!window)
+        return false;
+
+    return pendingManualCrossMonitorInsertions.contains(reinterpret_cast<uintptr_t>(window.get()));
+}
+
 void CanvasLayout::finishLaneTransfer(ListNode<Lane *> *sourceLaneNode, PHLMONITOR sourceMonitor, bool ephemeralOnly, bool warpCursor) {
     if (!dropEmptyLane(sourceLaneNode, activeLane ? activeLane->data() : nullptr, sourceMonitor, ephemeralOnly))
         relayoutVisibleCanvas(sourceMonitor);
@@ -282,6 +303,13 @@ void CanvasLayout::newTarget(SP<Layout::ITarget> target) {
     if (!window)
         return;
 
+    if (hasPendingManualCrossMonitorInsertion(window)) {
+        spdlog::debug("newTarget: deferring manual cross-monitor registration window={} workspace={}",
+                      static_cast<const void*>(window.get()),
+                      window->workspaceID());
+        return;
+    }
+
     spdlog::info("newTarget: window={} workspace={}", static_cast<const void*>(window.get()), window->workspaceID());
     onWindowCreatedTiling(window, Math::DIRECTION_DEFAULT);
     CanvasLayoutInternal::switch_to_window(window);
@@ -296,6 +324,13 @@ void CanvasLayout::movedTarget(SP<Layout::ITarget> target, std::optional<Vector2
     auto window = target->window();
     if (!window)
         return;
+
+    if (hasPendingManualCrossMonitorInsertion(window)) {
+        spdlog::debug("movedTarget: deferring manual cross-monitor registration window={} workspace={}",
+                      static_cast<const void*>(window.get()),
+                      window->workspaceID());
+        return;
+    }
 
     onWindowCreatedTiling(window, Math::DIRECTION_DEFAULT);
 }
@@ -519,6 +554,7 @@ void CanvasLayout::onEnable() {
     clear_lanes(lanes);
     activeLane = nullptr;
     marks.reset();
+    pendingManualCrossMonitorInsertions.clear();
     m_focusCallback = Event::bus()->m_events.window.active.listen([this](PHLWINDOW window, Desktop::eFocusReason) {
         onWindowFocusChange(window);
     });
@@ -563,6 +599,7 @@ void CanvasLayout::onDisable() {
     clear_lanes(lanes);
     activeLane = nullptr;
     marks.reset();
+    pendingManualCrossMonitorInsertions.clear();
 }
 
 Vector2D CanvasLayout::predictSizeForNewWindowTiled() {

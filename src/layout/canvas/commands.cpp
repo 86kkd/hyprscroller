@@ -61,29 +61,36 @@ void CanvasLayout::move_window(int workspace, Direction direction) {
             if (!targetLayout)
                 return false;
 
+            auto *targetLane = static_cast<Lane *>(nullptr);
+            const auto targetAnchorWindow = resolveCrossMonitorFocusTarget(
+                targetLayout,
+                targetMonitor,
+                workspaceId,
+                direction,
+                currentWindow,
+                &targetLane,
+                nullptr);
+
             const auto payload = lane->extract_active_window_payload();
             if (!payload)
                 return true;
 
-            targetLayout->syncActiveStateFromWorkspaceFocus();
-            const auto targetMode = [&]() {
-                if (auto *existingLane = targetLayout->getActiveLane())
-                    return existingLane->get_mode();
-                return targetMonitor && targetMonitor->m_size.x >= targetMonitor->m_size.y
-                    ? Mode::Row
-                    : Mode::Column;
-            }();
-            auto *targetLane = targetLayout->ensureActiveLane(targetMonitor, targetMode);
+            targetLayout->rememberManualCrossMonitorInsertion(currentWindow);
 
             moveDispatcher->second(selector);
+            targetLane = targetAnchorWindow ? targetLayout->getLaneForWindow(targetAnchorWindow) : nullptr;
+            if (!targetLane)
+                targetLane = targetLayout->getActiveLane();
+            if (!targetLane) {
+                const auto targetMode =
+                    targetMonitor && targetMonitor->m_size.x >= targetMonitor->m_size.y ? Mode::Row : Mode::Column;
+                targetLane = targetLayout->ensureActiveLane(targetMonitor, targetMode);
+            }
 
-            // Hyprland may temporarily auto-register the moved window in the
-            // destination canvas before we restore the extracted payload model.
-            if (targetLayout->getLaneForWindow(currentWindow))
-                targetLayout->onWindowRemovedTiling(currentWindow);
-
-            targetLane = targetLayout->ensureActiveLane(targetMonitor, targetMode);
+            if (targetAnchorWindow && targetLane->has_window(targetAnchorWindow) && !targetLane->is_active(targetAnchorWindow))
+                targetLane->focus_window(targetAnchorWindow);
             targetLane->insert_window_payload(payload, direction);
+            targetLayout->forgetManualCrossMonitorInsertion(currentWindow);
             targetLayout->setActiveLane(targetLane);
 
             if (!dropEmptyLane(getLaneNode(lane), nullptr, sourceMonitor))
