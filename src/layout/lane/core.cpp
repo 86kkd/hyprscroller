@@ -160,9 +160,27 @@ void Lane::insert_window_payload(const ActiveWindowPayload& payload, Direction d
     }
 
     auto current = active;
+    if (mode == Mode::Row && current->data()->expanded())
+        (void)current->data()->toggle_fullscreen(max, mode);
+
     auto inserted = stacks.emplace_after(current, stack);
     if (direction == Direction::Left || direction == Direction::Up || direction == Direction::Begin)
         stacks.move_before(current, inserted);
+
+    if (mode == Mode::Row) {
+        auto *currentStack = current->data();
+        const auto currentWidth = currentStack->get_geom_w();
+        const auto insertedWidth = stack->get_geom_w();
+        const auto totalWidth = currentWidth + insertedWidth;
+        if (totalWidth > max.w && currentWidth > 0.0 && insertedWidth > 0.0) {
+            const auto scale = max.w / totalWidth;
+            currentStack->set_width_free();
+            currentStack->set_geom_w(currentWidth * scale);
+            stack->set_width_free();
+            stack->set_geom_w(insertedWidth * scale);
+        }
+    }
+
     active = inserted;
     recalculate_lane_geometry();
 }

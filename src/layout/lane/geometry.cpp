@@ -25,14 +25,14 @@
 
 namespace {
 namespace viewport {
-// Return true when a stack intersects the visible horizontal viewport.
-bool stack_intersects_visible_box(const Stack *stack, const ScrollerCore::Box &visible_box) {
+// Return true when a stack would intersect the visible viewport at a projected X.
+bool projected_stack_intersects_visible_box(const Stack *stack, const double projected_x,
+                                            const ScrollerCore::Box &visible_box) {
     if (!stack)
         return false;
 
-    const auto left = stack->get_geom_x();
-    const auto right = left + stack->get_geom_w();
-    return ScrollerCore::Interval::intersects(left, right, visible_box.x, visible_box.x + visible_box.w);
+    const auto right = projected_x + stack->get_geom_w();
+    return ScrollerCore::Interval::intersects(projected_x, right, visible_box.x, visible_box.x + visible_box.w);
 }
 
 // Choose the X anchor that keeps the active stack and a useful neighbor visible
@@ -347,8 +347,12 @@ void Lane::recalculate_lane_geometry() {
     }
 
     const Box active_window(max.x, max.y, max.w, max.h);
-    const bool prev_inside = viewport::stack_intersects_visible_box(active->prev() ? active->prev()->data() : nullptr, active_window);
-    const bool next_inside = viewport::stack_intersects_visible_box(active->next() ? active->next()->data() : nullptr, active_window);
+    const auto *prev = active->prev() ? active->prev()->data() : nullptr;
+    const auto *next = active->next() ? active->next()->data() : nullptr;
+    const auto prev_x = prev ? a_x - prev->get_geom_w() : 0.0;
+    const auto next_x = a_x + a_w;
+    const bool prev_inside = viewport::projected_stack_intersects_visible_box(prev, prev_x, active_window);
+    const bool next_inside = viewport::projected_stack_intersects_visible_box(next, next_x, active_window);
     const bool keep_current = prev_inside || next_inside;
     const double new_x = keep_current ? a_x : viewport::choose_anchor_x(active, a_w, a_x, max);
     active->data()->set_geom_pos(new_x, max.y);

@@ -28,6 +28,21 @@ std::string workspace_selector(PHLWORKSPACE workspace) {
     return std::to_string(workspace->m_id);
 }
 
+Direction opposite_direction(Direction direction) {
+    switch (direction) {
+    case Direction::Left:
+        return Direction::Right;
+    case Direction::Right:
+        return Direction::Left;
+    case Direction::Up:
+        return Direction::Down;
+    case Direction::Down:
+        return Direction::Up;
+    default:
+        return direction;
+    }
+}
+
 } // namespace
 
 // Cycle the active stack width or active window height by one preset step.
@@ -75,6 +90,7 @@ void CanvasLayout::move_window(int workspace, Direction direction) {
             if (!payload)
                 return true;
 
+            const auto insertDirection = opposite_direction(direction);
             targetLayout->rememberManualCrossMonitorInsertion(currentWindow);
 
             moveDispatcher->second(selector);
@@ -89,7 +105,7 @@ void CanvasLayout::move_window(int workspace, Direction direction) {
 
             if (targetAnchorWindow && targetLane->has_window(targetAnchorWindow) && !targetLane->is_active(targetAnchorWindow))
                 targetLane->focus_window(targetAnchorWindow);
-            targetLane->insert_window_payload(payload, direction);
+            targetLane->insert_window_payload(payload, insertDirection);
             targetLayout->forgetManualCrossMonitorInsertion(currentWindow);
             targetLayout->setActiveLane(targetLane);
 
