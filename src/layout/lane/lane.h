@@ -42,6 +42,7 @@ public:
 
     // Structural and state queries.
     bool empty() const;
+    bool is_single_window_lane() const;
     Mode get_mode() const;
     bool is_ephemeral() const;
     void set_ephemeral(bool value);

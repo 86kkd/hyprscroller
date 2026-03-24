@@ -84,16 +84,33 @@ void CanvasLayout::move_window(int workspace, Direction direction) {
                 return;
             }
 
-            if (auto *targetLayout = CanvasLayoutInternal::get_canvas_for_workspace(workspaceId)) {
-                targetLayout->syncActiveStateFromWorkspaceFocus();
-                if (!targetLayout->getActiveLane()) {
-                    auto *newLane = new Lane(targetMonitor, mode);
-                    targetLayout->lanes.push_back(newLane);
-                    targetLayout->activeLane = targetLayout->lanes.last();
-                }
+            auto *targetLayout = CanvasLayoutInternal::get_canvas_for_workspace(workspaceId);
+            if (!targetLayout) {
+                CanvasLayoutInternal::dispatch_directional_builtin("movewindow", direction);
+                return;
+            }
+
+            const auto payload = lane->extract_active_window_payload();
+            if (!payload)
+                return;
+
+            targetLayout->syncActiveStateFromWorkspaceFocus();
+            auto *targetLane = targetLayout->getActiveLane();
+            if (!targetLane) {
+                targetLane = new Lane(targetMonitor, mode);
+                targetLayout->lanes.push_back(targetLane);
+                targetLayout->activeLane = targetLayout->lanes.last();
             }
 
             moveDispatcher->second(selector);
+            targetLane->insert_window_payload(payload, direction);
+            targetLayout->setActiveLane(targetLane);
+
+            if (!dropEmptyLane(getLaneNode(lane), nullptr, sourceMonitor))
+                relayoutVisibleCanvas(sourceMonitor);
+
+            targetLayout->relayoutVisibleCanvas(targetMonitor);
+            targetLayout->suppressNextWorkspaceFocusSync = true;
             CanvasLayoutInternal::switch_to_window(currentWindow, true);
             return;
         }
@@ -176,7 +193,9 @@ void CanvasLayout::toggle_overview(int workspace) {
 // Toggle scroller-managed fullscreen/expanded behavior.
 void CanvasLayout::toggle_fullscreen(int workspace) {
     (void)workspace;
-    withActiveLane(ActiveLaneSyncPolicy::WorkspaceFocus, [](Lane *lane) {
+    const auto syncPolicy = suppressNextWorkspaceFocusSync ? ActiveLaneSyncPolicy::None : ActiveLaneSyncPolicy::WorkspaceFocus;
+    suppressNextWorkspaceFocusSync = false;
+    withActiveLane(syncPolicy, [](Lane *lane) {
         lane->toggle_fullscreen_active_window();
     });
 }

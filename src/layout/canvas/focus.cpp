@@ -451,6 +451,7 @@ void CanvasLayout::move_focus(int workspace, Direction direction)
                      CanvasLayoutInternal::direction_name(direction),
                      static_cast<const void*>(crossMonitorTarget.get()),
                      focus_move_result_name(FocusMoveResult::CrossMonitor));
+        suppressNextWorkspaceFocusSync = true;
         CanvasLayoutInternal::switch_to_window(crossMonitorTarget, true);
     };
 
@@ -475,8 +476,10 @@ void CanvasLayout::move_focus(int workspace, Direction direction)
                          CanvasLayoutInternal::direction_name(direction),
                          true,
                          static_cast<const void*>(targetWindow ? targetWindow.get() : nullptr));
-            if (targetWindow)
+            if (targetWindow) {
+                suppressNextWorkspaceFocusSync = true;
                 CanvasLayoutInternal::switch_to_window(targetWindow, true);
+            }
             return;
         }
 
@@ -542,5 +545,6 @@ void CanvasLayout::move_focus(int workspace, Direction direction)
                  focus_move_result_name(moveResult));
 
     setActiveLane(s);
+    suppressNextWorkspaceFocusSync = true;
     CanvasLayoutInternal::switch_to_window(s->get_active_window(), true);
 }

@@ -293,11 +293,14 @@ void Lane::recalculate_lane_geometry() {
     g_pEventManager->postEvent(SHyprIPCEvent{"scroller", active->data()->get_width_name() + "," + active->data()->get_height_name()});
 #endif
     if (stacks.size() == 1 && active->data()->size() == 1) {
-        active->data()->set_geom_pos(max.x, max.y);
-        active->data()->set_geom_w(max.w);
-        active->data()->recalculate_stack_geometry(calculate_gap_x(active), gap);
+        auto *stack = active->data();
+        stack->update_width(stack->get_width(), max.w, max.h);
+        stack->set_geom_pos(max.x, max.y);
+        stack->set_geom_w(max.w);
+        stack->fit_size(FitSize::All, calculate_gap_x(active), gap);
+        stack->recalculate_stack_geometry(calculate_gap_x(active), gap);
         spdlog::debug("lane_recalc_single: active_window={} stacks={}",
-                      logging::active_window_ptr(active->data()),
+                      logging::active_window_ptr(stack),
                       logging::summarize_stacks(stacks));
         return;
     }

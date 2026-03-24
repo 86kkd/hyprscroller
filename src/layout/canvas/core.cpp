@@ -36,13 +36,6 @@ void clear_lanes(List<Lane*>& lanes) {
 }
 
 // Return true when any lane is a temporary page-like lane.
-bool has_ephemeral_lane(const List<Lane*>& lanes) {
-    for (auto lane = lanes.first(); lane != nullptr; lane = lane->next()) {
-        if (lane->data() && lane->data()->is_ephemeral())
-            return true;
-    }
-    return false;
-}
 } // namespace
 
 CanvasLayoutInternal::CanvasBounds CanvasLayoutInternal::compute_canvas_bounds(PHLMONITOR monitor) {
@@ -212,7 +205,10 @@ void CanvasLayout::relayoutCanvas(PHLMONITOR monitor, bool honor_fullscreen) {
     const auto& max = bounds.max;
 
     const auto mode = getActiveLane() ? getActiveLane()->get_mode() : Mode::Row;
-    const auto paged = has_ephemeral_lane(lanes);
+    // Lanes represent pages on the canvas. Once a canvas has more than one lane,
+    // keep each lane at full workarea size and page between them instead of
+    // splitting the monitor into shorter visible rows/columns.
+    const auto paged = lanes.size() > 1;
     const auto count = static_cast<double>(lanes.size());
     const auto activeIndex = static_cast<size_t>(std::max(0, laneIndexOf(activeLane ? activeLane->data() : lanes.first()->data())));
     size_t index = 0;

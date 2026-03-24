@@ -144,4 +144,7 @@ private:
     ListNode<Lane *> *activeLane = nullptr;
     // Ordered lanes that make up the current canvas.
     List<Lane *> lanes;
+    // One-shot guard used to avoid immediately re-syncing stale workspace focus
+    // after the plugin itself has just moved focus.
+    bool suppressNextWorkspaceFocusSync = false;
 };

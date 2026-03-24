@@ -45,6 +45,10 @@ bool Lane::empty() const {
     return stacks.empty();
 }
 
+bool Lane::is_single_window_lane() const {
+    return stacks.size() == 1 && active && active->data()->size() == 1;
+}
+
 Mode Lane::get_mode() const {
     return mode;
 }
