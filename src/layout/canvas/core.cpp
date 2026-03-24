@@ -422,6 +422,16 @@ void CanvasLayout::moveTargetInDirection(SP<Layout::ITarget> t, Math::eDirection
 // Insert a newly mapped tiled window into the active lane, creating one if needed.
 void CanvasLayout::onWindowCreatedTiling(PHLWINDOW window, Math::eDirection)
 {
+    if (!window)
+        return;
+
+    if (getLaneForWindow(window) != nullptr) {
+        spdlog::debug("onWindowCreatedTiling: window already managed window={} workspace={}",
+                      static_cast<const void*>(window.get()),
+                      window->workspaceID());
+        return;
+    }
+
     auto s = getActiveLane();
     if (s == nullptr) {
         s = new Lane(window);

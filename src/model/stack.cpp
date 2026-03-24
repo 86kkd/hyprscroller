@@ -425,6 +425,21 @@ PHLWINDOW Stack::get_active_window() {
     return active->data()->ptr().lock();
 }
 
+// Return whether the active window is already at the requested stack edge.
+bool Stack::active_at_edge(Direction direction) const {
+    if (!active)
+        return false;
+
+    switch (direction) {
+    case Direction::Up:
+        return active == windows.first();
+    case Direction::Down:
+        return active == windows.last();
+    default:
+        return false;
+    }
+}
+
 // Move the active model window one step upward inside the stack.
 void Stack::move_active_up() {
     if (active == windows.first())

@@ -189,6 +189,8 @@ public:
     void recalculate_stack_geometry(const Vector2D &gap_x, double gap);
     // Return currently active compositor window.
     PHLWINDOW get_active_window();
+    // Return whether the active model window is already at a stack edge.
+    bool active_at_edge(Direction direction) const;
     // Move active model window inside the same stack list.
     void move_active_up();
     void move_active_down();

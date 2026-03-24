@@ -41,17 +41,78 @@ void CanvasLayout::cycle_window_size(int workspace, int step)
 
 // Move the focused window or stack according to lane/mode routing rules.
 void CanvasLayout::move_window(int workspace, Direction direction) {
-    (void)workspace;
     withActiveLane(ActiveLaneSyncPolicy::WorkspaceFocus, [&](Lane *lane) {
         const auto mode = lane->get_mode();
-        if (!CanvasLayoutInternal::direction_moves_between_lanes(mode, direction)) {
+        const auto currentWindow = lane->get_active_window();
+        const auto sourceMonitor = currentWindow ? g_pCompositor->getMonitorFromID(currentWindow->monitorID()) : getVisibleCanvasMonitor();
+
+        const auto moveAcrossMonitor = [&](PHLMONITOR targetMonitor) {
+            if (!currentWindow || !sourceMonitor || !targetMonitor)
+                return false;
+
+            const auto workspaceId = CanvasLayoutInternal::preferred_workspace_id(targetMonitor, workspace);
+            const auto targetWorkspace = g_pCompositor->getWorkspaceByID(workspaceId);
+            const auto selector = workspace_selector(targetWorkspace);
+            const auto moveDispatcher = g_pKeybindManager->m_dispatchers.find("movetoworkspacesilent");
+            if (selector.empty() || moveDispatcher == g_pKeybindManager->m_dispatchers.end())
+                return false;
+
+            auto *targetLayout = CanvasLayoutInternal::get_canvas_for_workspace(workspaceId);
+            if (!targetLayout)
+                return false;
+
+            const auto payload = lane->extract_active_window_payload();
+            if (!payload)
+                return true;
+
+            targetLayout->syncActiveStateFromWorkspaceFocus();
+            const auto targetMode = [&]() {
+                if (auto *existingLane = targetLayout->getActiveLane())
+                    return existingLane->get_mode();
+                return targetMonitor && targetMonitor->m_size.x >= targetMonitor->m_size.y
+                    ? Mode::Row
+                    : Mode::Column;
+            }();
+            auto *targetLane = targetLayout->ensureActiveLane(targetMonitor, targetMode);
+
+            moveDispatcher->second(selector);
+
+            // Hyprland may temporarily auto-register the moved window in the
+            // destination canvas before we restore the extracted payload model.
+            if (targetLayout->getLaneForWindow(currentWindow))
+                targetLayout->onWindowRemovedTiling(currentWindow);
+
+            targetLane = targetLayout->ensureActiveLane(targetMonitor, targetMode);
+            targetLane->insert_window_payload(payload, direction);
+            targetLayout->setActiveLane(targetLane);
+
+            if (!dropEmptyLane(getLaneNode(lane), nullptr, sourceMonitor))
+                relayoutVisibleCanvas(sourceMonitor);
+
+            targetLayout->relayoutVisibleCanvas(targetMonitor);
+            targetLayout->suppressNextWorkspaceFocusSync = true;
+            CanvasLayoutInternal::switch_to_window(currentWindow, true);
+            return true;
+        };
+
+        const auto betweenLanes = CanvasLayoutInternal::direction_moves_between_lanes(mode, direction);
+        if (!betweenLanes) {
+            const auto monitorDirection = CanvasLayoutInternal::direction_to_math(direction);
+            const auto targetMonitor = sourceMonitor && monitorDirection ? g_pCompositor->getMonitorInDirection(sourceMonitor, *monitorDirection) : nullptr;
+            if (!lane->active_item_at_edge(direction) || !targetMonitor) {
+                lane->move_active_stack(direction);
+                CanvasLayoutInternal::switch_to_window(lane->get_active_window());
+                return;
+            }
+
+            if (moveAcrossMonitor(targetMonitor))
+                return;
+
             lane->move_active_stack(direction);
             CanvasLayoutInternal::switch_to_window(lane->get_active_window());
             return;
         }
 
-        const auto currentWindow = lane->get_active_window();
-        const auto sourceMonitor = currentWindow ? g_pCompositor->getMonitorFromID(currentWindow->monitorID()) : getVisibleCanvasMonitor();
         if (!currentWindow || !sourceMonitor) {
             CanvasLayoutInternal::dispatch_directional_builtin("movewindow", direction);
             return;
@@ -71,39 +132,8 @@ void CanvasLayout::move_window(int workspace, Direction direction) {
         }
 
         if (handoffPlan.route == CanvasLayoutInternal::DirectionalHandoffRoute::CrossMonitor) {
-            const auto targetMonitor = handoffPlan.targetMonitor;
-            const auto workspaceId = CanvasLayoutInternal::preferred_workspace_id(targetMonitor, workspace);
-            const auto targetWorkspace = g_pCompositor->getWorkspaceByID(workspaceId);
-            const auto selector = workspace_selector(targetWorkspace);
-            const auto moveDispatcher = g_pKeybindManager->m_dispatchers.find("movetoworkspacesilent");
-            if (selector.empty() || moveDispatcher == g_pKeybindManager->m_dispatchers.end()) {
+            if (!moveAcrossMonitor(handoffPlan.targetMonitor))
                 CanvasLayoutInternal::dispatch_directional_builtin("movewindow", direction);
-                return;
-            }
-
-            auto *targetLayout = CanvasLayoutInternal::get_canvas_for_workspace(workspaceId);
-            if (!targetLayout) {
-                CanvasLayoutInternal::dispatch_directional_builtin("movewindow", direction);
-                return;
-            }
-
-            const auto payload = lane->extract_active_window_payload();
-            if (!payload)
-                return;
-
-            targetLayout->syncActiveStateFromWorkspaceFocus();
-            auto *targetLane = targetLayout->ensureActiveLane(targetMonitor, mode);
-
-            moveDispatcher->second(selector);
-            targetLane->insert_window_payload(payload, direction);
-            targetLayout->setActiveLane(targetLane);
-
-            if (!dropEmptyLane(getLaneNode(lane), nullptr, sourceMonitor))
-                relayoutVisibleCanvas(sourceMonitor);
-
-            targetLayout->relayoutVisibleCanvas(targetMonitor);
-            targetLayout->suppressNextWorkspaceFocusSync = true;
-            CanvasLayoutInternal::switch_to_window(currentWindow, true);
             return;
         }
 

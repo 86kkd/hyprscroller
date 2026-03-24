@@ -1,5 +1,7 @@
 #include "lane.h"
 
+#include <algorithm>
+
 #include <hyprland/src/Compositor.hpp>
 
 Lane::Lane(PHLWINDOW window)
@@ -126,14 +128,29 @@ void Lane::insert_window_payload(const ActiveWindowPayload& payload, Direction d
 
     reorder = Reorder::Auto;
     if (mode == Mode::Column && active) {
+        const auto windowCountBefore = active->data()->size();
         active->data()->admit_window(payload.window);
-        recalculate_lane_geometry();
+        if (windowCountBefore == 1) {
+            active->data()->fit_size(FitSize::All, calculate_gap_x(active), gap);
+        } else {
+            active->data()->recalculate_stack_geometry(calculate_gap_x(active), gap);
+        }
         return;
     }
 
+    const bool singleWindowLane = stacks.size() == 1 && stacks.first()->data()->size() == 1;
+    if (singleWindowLane)
+        stacks.first()->data()->update_width(StackWidth::OneHalf, max.w, max.h);
+
     payload.window->set_geom_h(max.h);
     payload.window->set_geom_y(max.y);
-    auto *stack = new Stack(payload.window, payload.width, payload.maxw, max.h);
+    const auto targetMaxWidth =
+        payload.width == StackWidth::Free && payload.maxw > 0.0
+            ? std::min(payload.maxw, max.w)
+            : max.w;
+    auto *stack = new Stack(payload.window, payload.width, targetMaxWidth, max.h);
+    if (singleWindowLane)
+        stack->update_width(StackWidth::OneHalf, max.w, max.h);
     stack->set_geom_pos(max.x, max.y);
     if (!active) {
         stacks.push_back(stack);

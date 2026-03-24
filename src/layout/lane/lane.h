@@ -63,6 +63,7 @@ public:
     bool remove_window(PHLWINDOW window);
     bool swapWindows(PHLWINDOW a, PHLWINDOW b);
     void focus_window(PHLWINDOW window);
+    bool active_item_at_edge(Direction direction) const;
     FocusMoveResult move_focus(Direction dir, bool focus_wrap);
 
     // Command-facing stack and window operations.

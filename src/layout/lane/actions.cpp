@@ -101,6 +101,25 @@ void Lane::focus_window(PHLWINDOW window) {
     }
 }
 
+// Report whether the active stack/window is already at the requested edge.
+bool Lane::active_item_at_edge(Direction direction) const {
+    if (!active)
+        return false;
+
+    switch (direction) {
+    case Direction::Left:
+        return mode == Mode::Row && active == stacks.first();
+    case Direction::Right:
+        return mode == Mode::Row && active == stacks.last();
+    case Direction::Up:
+        return mode == Mode::Column && active->data()->active_at_edge(Direction::Up);
+    case Direction::Down:
+        return mode == Mode::Column && active->data()->active_at_edge(Direction::Down);
+    default:
+        return false;
+    }
+}
+
 // Execute directional focus movement inside this lane.
 FocusMoveResult Lane::move_focus(Direction dir, bool focus_wrap) {
     if (!active)
