@@ -48,8 +48,9 @@ bool Lane::remove_window(PHLWINDOW window) {
             if (c == active)
                 active = active != stacks.last() ? active->next() : active->prev();
 
-            delete col;
+            auto *doomed = col;
             stacks.erase(c);
+            delete doomed;
             if (stacks.empty())
                 return false;
 
@@ -338,8 +339,12 @@ void Lane::admit_window_left() {
 
     auto w = active->data()->expel_active(gap);
     auto prev = active->prev();
-    if (active->data()->size() == 0)
-        stacks.erase(active);
+    if (active->data()->size() == 0) {
+        auto *doomed = active->data();
+        auto *emptyNode = active;
+        stacks.erase(emptyNode);
+        delete doomed;
+    }
     active = prev;
     active->data()->admit_window(w);
 
@@ -371,7 +376,8 @@ void Lane::fit_size(FitSize fitsize) {
         active->data()->fit_size(fitsize, calculate_gap_x(active), gap);
         return;
     }
-    ListNode<Stack *> *from, *to;
+    ListNode<Stack *> *from = nullptr;
+    ListNode<Stack *> *to = nullptr;
     switch (fitsize) {
     case FitSize::Active:
         from = to = active;
@@ -381,9 +387,9 @@ void Lane::fit_size(FitSize fitsize) {
             Stack *col = c->data();
             auto c0 = col->get_geom_x();
             auto c1 = col->get_geom_x() + col->get_geom_w();
-            if (c0 < max.x + max.w && c0 >= max.x ||
-                c1 > max.x && c1 <= max.x + max.w ||
-                c0 < max.x && c1 >= max.x + max.w) {
+            if ((c0 < max.x + max.w && c0 >= max.x) ||
+                (c1 > max.x && c1 <= max.x + max.w) ||
+                (c0 < max.x && c1 >= max.x + max.w)) {
                 from = c;
                 break;
             }
@@ -392,9 +398,9 @@ void Lane::fit_size(FitSize fitsize) {
             Stack *col = c->data();
             auto c0 = col->get_geom_x();
             auto c1 = col->get_geom_x() + col->get_geom_w();
-            if (c0 < max.x + max.w && c0 >= max.x ||
-                c1 > max.x && c1 <= max.x + max.w ||
-                c0 < max.x && c1 >= max.x + max.w) {
+            if ((c0 < max.x + max.w && c0 >= max.x) ||
+                (c1 > max.x && c1 <= max.x + max.w) ||
+                (c0 < max.x && c1 >= max.x + max.w)) {
                 to = c;
                 break;
             }
@@ -420,6 +426,8 @@ void Lane::fit_size(FitSize fitsize) {
         double total = 0.0;
         for (auto c = from; c != to->next(); c = c->next())
             total += c->data()->get_geom_w();
+        if (total <= 0.0)
+            return;
 
         for (auto c = from; c != to->next(); c = c->next()) {
             Stack *col = c->data();

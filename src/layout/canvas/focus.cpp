@@ -433,13 +433,20 @@ void CanvasLayout::handoffFocusAcrossMonitor(int workspace, Direction direction,
 // Compatibility entrypoint used by older target-based move-window callbacks.
 void CanvasLayout::moveWindowTo(PHLWINDOW window, const std::string &direction, bool)
 {
+    if (!window || direction.empty()) {
+        spdlog::debug("moveWindowTo: ignored invalid request window={} direction_empty={}",
+                      static_cast<const void*>(window ? window.get() : nullptr),
+                      direction.empty());
+        return;
+    }
+
     auto s = getLaneForWindow(window);
     if (s == nullptr || !s->is_active(window))
         return;
 
     onWindowFocusChange(window);
 
-    switch (direction.at(0)) {
+    switch (direction.front()) {
         case 'l': move_window(window->workspaceID(), Direction::Left); break;
         case 'r': move_window(window->workspaceID(), Direction::Right); break;
         case 'u': move_window(window->workspaceID(), Direction::Up); break;
@@ -474,7 +481,6 @@ void CanvasLayout::move_focus(int workspace, Direction direction)
     const auto beforeMonitor = before ? g_pCompositor->getMonitorFromID(before->monitorID()) : monitorFromPointingOrCursor();
     const auto beforeActiveWorkspaceId = beforeMonitor ? beforeMonitor->activeWorkspaceID() : WORKSPACE_INVALID;
     const auto beforeSpecialWorkspaceId = beforeMonitor ? beforeMonitor->activeSpecialWorkspaceID() : WORKSPACE_INVALID;
-    auto sourceLane = s;
     auto sourceLaneNode = activeLane;
     spdlog::info("move_focus: workspace={} direction={} lane_found={} before={}",
                  workspace, CanvasLayoutInternal::direction_name(direction), s != nullptr,

@@ -59,7 +59,7 @@ StackWidthPreset parse_stack_width_preset(PHLWINDOW window, double fallback_maxw
 }
 
 // Return true when a window is fully contained inside the stack viewport.
-static bool is_window_fully_visible(Window *window, double gap, const ScrollerCore::Box &geom) {
+static bool is_window_fully_visible(Window *window, const ScrollerCore::Box &geom) {
     if (!window)
         return false;
     const auto y0 = std::round(window->get_geom_y());
@@ -68,7 +68,7 @@ static bool is_window_fully_visible(Window *window, double gap, const ScrollerCo
 }
 
 // Return true when a window intersects the stack viewport.
-static bool is_window_intersect_viewport(Window *window, double gap, const ScrollerCore::Box &geom) {
+static bool is_window_intersect_viewport(Window *window, const ScrollerCore::Box &geom) {
     if (!window)
         return false;
     const auto y0 = window->get_geom_y();
@@ -207,10 +207,12 @@ void Stack::remove_window(PHLWINDOW window) {
     reorder = Reorder::Auto;
     for (auto win = windows.first(); win != nullptr; win = win->next()) {
         if (win->data()->ptr().lock() == window) {
-            if (window == active->data()->ptr().lock()) {
+            if (active && window == active->data()->ptr().lock()) {
                 active = active != windows.last() ? active->next() : active->prev();
             }
+            auto *removed = win->data();
             windows.erase(win);
+            delete removed;
             if (windows.size() == 1 && active) {
                 active->data()->update_height(WindowHeight::One, geom.h);
             }
@@ -242,6 +244,9 @@ void Stack::set_geom_w(double w) {
 
 // Return the current vertical extent occupied by the windows in this stack.
 Vector2D Stack::get_height() const {
+    if (windows.empty())
+        return Vector2D(geom.y, geom.y);
+
     Vector2D height;
     auto *first = windows.first()->data();
     auto *last = windows.last()->data();
@@ -258,6 +263,8 @@ void Stack::scale(const Vector2D &bmin, const Vector2D &start, double scale, dou
         win->data()->set_geom_y(newY);
         win->data()->set_geom_h(win->data()->get_geom_h() * scale);
         PHLWINDOW window = win->data()->ptr().lock();
+        if (!window)
+            continue;
         auto border = window->getRealBorderSize();
         auto gap0 = win == windows.first() ? 0.0 : gap;
         window->m_position = Vector2D(start.x + border + geom.x - bmin.x,
@@ -273,6 +280,8 @@ void Stack::scale(const Vector2D &bmin, const Vector2D &start, double scale, dou
 // Toggle scroller-managed fullscreen/expanded behavior for the active window/stack.
 bool Stack::toggle_fullscreen(const ScrollerCore::Box &fullbbox, Mode mode) {
     full = fullbbox;
+    if (!active)
+        return false;
 
     if (mode == Mode::Row) {
         fullscreened = !fullscreened;
@@ -311,6 +320,9 @@ void Stack::pop_geom() {
 
 // Toggle maximized stack geometry while preserving previous stack/window state.
 void Stack::toggle_maximized(double maxw, double maxh) {
+    if (!active)
+        return;
+
     maxdim = !maxdim;
     if (maxdim) {
         mem.geom = geom;
@@ -350,8 +362,13 @@ void Stack::set_geom_pos(double x, double y) {
 // Main relayout pass for a stack: keep the active window visible and update all
 // compositor window rectangles from logical geometry.
 void Stack::recalculate_stack_geometry(const Vector2D &gap_x, double gap) {
+    if (!active)
+        return;
+
     if (fullscreen()) {
         PHLWINDOW wactive = active->data()->ptr().lock();
+        if (!wactive)
+            return;
         active->data()->set_geom_y(full.y);
         wactive->m_position = Vector2D(full.x, full.y);
         wactive->m_size = Vector2D(full.w, full.h);
@@ -361,7 +378,8 @@ void Stack::recalculate_stack_geometry(const Vector2D &gap_x, double gap) {
 
     Window *wactive = active->data();
     PHLWINDOW win = wactive->ptr().lock();
-    auto gap0 = active == windows.first() ? 0.0 : gap;
+    if (!win)
+        return;
     auto border = win->getRealBorderSize();
     const auto base_x = window_active_x(geom, border, gap_x.x);
     auto a_y0 = std::round(wactive->get_geom_y());
@@ -396,10 +414,9 @@ void Stack::recalculate_stack_geometry(const Vector2D &gap_x, double gap) {
 
     Window *prev = active->prev() ? active->prev()->data() : nullptr;
     Window *next = active->next() ? active->next()->data() : nullptr;
-    const auto prev_gap = active->prev() == windows.first() ? 0.0 : gap;
-    const auto next_gap = active->next() == windows.first() ? 0.0 : gap;
-    const bool keep_current = is_window_fully_visible(prev, prev_gap, geom) ||
-                             is_window_fully_visible(next, next_gap, geom);
+    const bool prev_visible = is_window_fully_visible(prev, geom);
+    const bool next_visible = is_window_fully_visible(next, geom);
+    const bool keep_current = prev_visible || next_visible;
     if (keep_current) {
         win->m_position.x = base_x;
         adjust_windows(active, gap_x, gap);
@@ -415,14 +432,14 @@ void Stack::recalculate_stack_geometry(const Vector2D &gap_x, double gap) {
     spdlog::debug("stack_recalc_auto: active_window={} keep_current={} prev_visible={} next_visible={} new_y={}",
                   static_cast<const void*>(win ? win.get() : nullptr),
                   keep_current,
-                  is_window_fully_visible(prev, prev_gap, geom),
-                  is_window_fully_visible(next, next_gap, geom),
+                  prev_visible,
+                  next_visible,
                   new_y);
 }
 
 // Return the compositor window currently active inside this stack.
 PHLWINDOW Stack::get_active_window() {
-    return active->data()->ptr().lock();
+    return active ? active->data()->ptr().lock() : nullptr;
 }
 
 // Return whether the active window is already at the requested stack edge.
@@ -517,8 +534,11 @@ void Stack::admit_window(Window *window) {
 }
 
 // Remove and return the active model window from this stack.
-Window *Stack::expel_active(double gap) {
+Window *Stack::expel_active(double /*gap*/) {
     reorder = Reorder::Auto;
+    if (!active)
+        return nullptr;
+
     Window *window = active->data();
     auto act = active == windows.first() ? active->next() : active->prev();
     windows.erase(active);
@@ -527,11 +547,10 @@ Window *Stack::expel_active(double gap) {
 }
 
 // Align the active window vertically inside the current stack viewport.
-void Stack::align_window(Direction direction, double gap) {
-    PHLWINDOW window = active->data()->ptr().lock();
-    auto border = window->getRealBorderSize();
-    auto gap0 = active == windows.first() ? 0.0 : gap;
-    auto gap1 = active == windows.last() ? 0.0 : gap;
+void Stack::align_window(Direction direction, double /*gap*/) {
+    if (!active)
+        return;
+
     switch (direction) {
     case Direction::Up:
         reorder = Reorder::Lazy;
@@ -615,24 +634,23 @@ void Stack::update_width(StackWidth cwidth, double maxw, double maxh) {
 // Resize a requested window range so it fills the current stack viewport.
 void Stack::fit_size(FitSize fitsize, const Vector2D &gap_x, double gap) {
     reorder = Reorder::Auto;
-    ListNode<Window *> *from, *to;
+    ListNode<Window *> *from = nullptr;
+    ListNode<Window *> *to = nullptr;
     switch (fitsize) {
     case FitSize::Active:
         from = to = active;
         break;
     case FitSize::Visible:
         for (auto w = windows.first(); w != nullptr; w = w->next()) {
-            auto gap0 = w == windows.first() ? 0.0 : gap;
             Window *win = w->data();
-            if (is_window_intersect_viewport(win, gap0, geom)) {
+            if (is_window_intersect_viewport(win, geom)) {
                 from = w;
                 break;
             }
         }
         for (auto w = windows.last(); w != nullptr; w = w->prev()) {
-            auto gap0 = w == windows.first() ? 0.0 : gap;
             Window *win = w->data();
-            if (is_window_intersect_viewport(win, gap0, geom)) {
+            if (is_window_intersect_viewport(win, geom)) {
                 to = w;
                 break;
             }
@@ -659,6 +677,8 @@ void Stack::fit_size(FitSize fitsize, const Vector2D &gap_x, double gap) {
         for (auto c = from; c != to->next(); c = c->next()) {
             total += c->data()->get_geom_h();
         }
+        if (total <= 0.0)
+            return;
         for (auto c = from; c != to->next(); c = c->next()) {
             Window *win = c->data();
             win->set_height_free();
@@ -686,6 +706,9 @@ void Stack::cycle_size_active_window(int step, const Vector2D &gap_x, double gap
 // Shift windows around the anchor window and then write the resulting geometry
 // back to Hyprland window/target state.
 void Stack::adjust_windows(ListNode<Window *> *win, const Vector2D &gap_x, double gap) {
+    if (!win)
+        return;
+
     if (win) {
         auto anchorWindow = win->data()->ptr().lock();
         if (anchorWindow) {
@@ -700,6 +723,8 @@ void Stack::adjust_windows(ListNode<Window *> *win, const Vector2D &gap_x, doubl
         auto *pdata = p->data();
         wdata->set_geom_y(pdata->get_geom_y() - wdata->get_geom_h());
         PHLWINDOW ww = w->data()->ptr().lock();
+        if (!ww)
+            continue;
         auto wgap0 = w == windows.first() ? 0.0 : gap;
         auto wborder = ww->getRealBorderSize();
         ww->m_position = Vector2D(geom.x + wborder + gap_x.x, wdata->get_geom_y() + wborder + wgap0);
@@ -709,6 +734,8 @@ void Stack::adjust_windows(ListNode<Window *> *win, const Vector2D &gap_x, doubl
         auto *pdata = p->data();
         wdata->set_geom_y(pdata->get_geom_y() + pdata->get_geom_h());
         PHLWINDOW ww = w->data()->ptr().lock();
+        if (!ww)
+            continue;
         auto wborder = ww->getRealBorderSize();
         auto wgap0 = w == windows.first() ? 0.0 : gap;
         ww->m_position = Vector2D(geom.x + wborder + gap_x.x, wdata->get_geom_y() + wborder + wgap0);
@@ -750,23 +777,32 @@ void Stack::adjust_windows(ListNode<Window *> *win, const Vector2D &gap_x, doubl
     }
 
     for (auto w = windows.first(); w != nullptr; w = w->next()) {
-        PHLWINDOW win = w->data()->ptr().lock();
+        PHLWINDOW window = w->data()->ptr().lock();
+        if (!window)
+            continue;
         auto gap0 = w == windows.first() ? 0.0 : gap;
         auto gap1 = w == windows.last() ? 0.0 : gap;
-        auto border = win->getRealBorderSize();
+        auto border = window->getRealBorderSize();
         auto wh = w->data()->get_geom_h();
-        win->m_position = Vector2D(geom.x + border + gap_x.x,
-                                   w->data()->get_geom_y() + border + gap0);
-        win->m_size = Vector2D(std::max(geom.w - 2.0 * border - gap_x.x - gap_x.y, 1.0),
-                               std::max(wh - 2.0 * border - gap0 - gap1, 1.0));
-        sync_window_target_geometry(win);
+        window->m_position = Vector2D(geom.x + border + gap_x.x,
+                                      w->data()->get_geom_y() + border + gap0);
+        window->m_size = Vector2D(std::max(geom.w - 2.0 * border - gap_x.x - gap_x.y, 1.0),
+                                  std::max(wh - 2.0 * border - gap0 - gap1, 1.0));
+        sync_window_target_geometry(window);
     }
 }
 
 // Resize stack width and, optionally, active window height while keeping
 // geometry valid.
 void Stack::resize_active_window(double maxw, const Vector2D &gap_x, double gap, const Vector2D &delta) {
-    auto border = active->data()->ptr().lock()->getRealBorderSize();
+    if (!active)
+        return;
+
+    const auto activeWindow = active->data()->ptr().lock();
+    if (!activeWindow)
+        return;
+
+    auto border = activeWindow->getRealBorderSize();
     auto rwidth = geom.w + delta.x - 2.0 * border - gap_x.x - gap_x.y;
     auto mwidth = geom.w + delta.x - 2.0 * (border + std::max(std::max(gap_x.x, gap_x.y), gap));
     if (mwidth <= 0.0 || rwidth >= maxw)
@@ -777,9 +813,12 @@ void Stack::resize_active_window(double maxw, const Vector2D &gap_x, double gap,
             auto gap0 = win == windows.first() ? 0.0 : gap;
             auto gap1 = win == windows.last() ? 0.0 : gap;
             auto wh = win->data()->get_geom_h() - gap0 - gap1 - 2.0 * border;
+            const auto window = win->data()->ptr().lock();
+            if (!window)
+                return;
             if (win == active)
                 wh += delta.y;
-            if (wh <= 0.0 || wh + 2.0 * win->data()->ptr().lock()->getRealBorderSize() + gap0 + gap1 > geom.h)
+            if (wh <= 0.0 || wh + 2.0 * window->getRealBorderSize() + gap0 + gap1 > geom.h)
                 return;
         }
     }

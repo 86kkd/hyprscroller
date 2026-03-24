@@ -27,6 +27,7 @@ struct Box {
         : x(pos.x), y(pos.y), w(size.x), h(size.y) {}
     Box(const Box &box)
         : x(box.x), y(box.y), w(box.w), h(box.h) {}
+    Box &operator=(const Box &) = default;
 
     void set_size(double w_, double h_) {
         w = w_;

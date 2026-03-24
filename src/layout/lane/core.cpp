@@ -5,7 +5,7 @@
 #include <hyprland/src/Compositor.hpp>
 
 Lane::Lane(PHLWINDOW window)
-    : mode(Mode::Row), reorder(Reorder::Auto), overview(false), ephemeral(false), active(nullptr) {
+    : overview(false), ephemeral(false), gap(0), reorder(Reorder::Auto), mode(Mode::Row), active(nullptr) {
     const auto monitor = g_pCompositor->getMonitorFromID(window->monitorID());
     if (!monitor)
         return;
@@ -15,13 +15,13 @@ Lane::Lane(PHLWINDOW window)
 }
 
 Lane::Lane(PHLMONITOR monitor, Mode laneMode)
-    : mode(laneMode), reorder(Reorder::Auto), overview(false), ephemeral(false), active(nullptr) {
+    : overview(false), ephemeral(false), gap(0), reorder(Reorder::Auto), mode(laneMode), active(nullptr) {
     if (monitor)
         update_sizes(monitor);
 }
 
 Lane::Lane(Stack *stack)
-    : mode(Mode::Row), reorder(Reorder::Auto), overview(false), ephemeral(false), active(nullptr) {
+    : overview(false), ephemeral(false), gap(0), reorder(Reorder::Auto), mode(Mode::Row), active(nullptr) {
     const auto window = stack ? stack->get_active_window() : nullptr;
     const auto monitor = window ? g_pCompositor->getMonitorFromID(window->monitorID()) : nullptr;
     if (monitor) {
@@ -116,8 +116,8 @@ ActiveWindowPayload Lane::extract_active_window_payload() {
 
     auto emptyNode = active;
     active = emptyNode == stacks.last() ? emptyNode->prev() : emptyNode->next();
-    delete stack;
     stacks.erase(emptyNode);
+    delete stack;
     reorder = Reorder::Auto;
     return payload;
 }

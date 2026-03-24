@@ -9,6 +9,8 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
 endif()
 
+option(HYPRSCROLLER_ENABLE_SANITIZERS "Enable ASan/UBSan in debug builds" OFF)
+
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(DEPS REQUIRED hyprland pixman-1 libdrm)
 find_package(spdlog REQUIRED)
@@ -35,6 +37,18 @@ add_library(hyprscroller SHARED
             src/layout/lane/core.cpp
             src/layout/lane/actions.cpp
             src/layout/lane/geometry.cpp)
+
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(hyprscroller PRIVATE
+        $<$<CONFIG:Debug>:-Wall;-Wextra;-Wpedantic>)
+
+    if(HYPRSCROLLER_ENABLE_SANITIZERS)
+        target_compile_options(hyprscroller PRIVATE
+            $<$<CONFIG:Debug>:-fsanitize=address,undefined;-fno-omit-frame-pointer>)
+        set(CMAKE_SHARED_LINKER_FLAGS_DEBUG
+            "${CMAKE_SHARED_LINKER_FLAGS_DEBUG} -fsanitize=address,undefined")
+    endif()
+endif()
 
 add_compile_definitions(WLR_USE_UNSTABLE)
 

@@ -117,6 +117,18 @@ Projection compute_projection(List<Stack *>& stacks, const ScrollerCore::Box &vi
 
     const auto width = bmax.x - bmin.x;
     const auto height = bmax.y - bmin.y;
+    if (width <= 0.0 || height <= 0.0) {
+        spdlog::debug("overview_projection_degenerate: width={} height={} visible_box=({}, {}, {}, {})",
+                      width,
+                      height,
+                      visible_box.x,
+                      visible_box.y,
+                      visible_box.w,
+                      visible_box.h);
+        const auto offset = Vector2D(bmin.x - visible_box.x, bmin.y - visible_box.y);
+        return Projection{bmin, bmax, width, height, 1.0, offset};
+    }
+
     const auto scale = std::min(visible_box.w / width, visible_box.h / height);
     const auto offset = Vector2D(0.5 * (visible_box.w - width * scale), 0.5 * (visible_box.h - height * scale));
     return Projection{bmin, bmax, width, height, scale, offset};
@@ -285,10 +297,12 @@ void Lane::recalculate_lane_geometry() {
 #ifdef COLORS_IPC
     static auto *const FREECOLUMN = (CGradientValueData *) HyprlandAPI::getConfigValue(PHANDLE, "plugin:scroller:col.freecolumn_border")->data.get();
     static auto *const ACTIVECOL = (CGradientValueData *)g_pConfigManager->getConfigValuePtr("general:col.active_border")->data.get();
-    if (active->data()->get_width() == StackWidth::Free) {
-        active->data()->get_active_window()->m_cRealBorderColor = *FREECOLUMN;
-    } else {
-        active->data()->get_active_window()->m_cRealBorderColor = *ACTIVECOL;
+    if (const auto activeWindow = active->data()->get_active_window()) {
+        if (active->data()->get_width() == StackWidth::Free) {
+            activeWindow->m_cRealBorderColor = *FREECOLUMN;
+        } else {
+            activeWindow->m_cRealBorderColor = *ACTIVECOL;
+        }
     }
     g_pEventManager->postEvent(SHyprIPCEvent{"scroller", active->data()->get_width_name() + "," + active->data()->get_height_name()});
 #endif

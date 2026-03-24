@@ -398,7 +398,7 @@ std::optional<Vector2D> CanvasLayout::predictSizeForNewTarget()
 }
 
 // Return the next target candidate using the active window of the active lane.
-SP<Layout::ITarget> CanvasLayout::getNextCandidate(SP<Layout::ITarget> old)
+SP<Layout::ITarget> CanvasLayout::getNextCandidate(SP<Layout::ITarget> /*old*/)
 {
     auto s = getActiveLane();
     if (!s)
