@@ -114,6 +114,8 @@ private:
     void rememberLaneWindows(Lane *lane);
     // Drop every cached entry that still points at the given lane pointer.
     void forgetLaneWindows(Lane *lane);
+    // Validate the debug window -> lane cache against the actual lane contents.
+    void debugVerifyLaneCache() const;
     // Return the list node for a lane inside this canvas.
     ListNode<Lane *> *getLaneNode(Lane *lane) const;
     // Return the zero-based index of a lane for logs and paging math.

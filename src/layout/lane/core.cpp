@@ -1,6 +1,7 @@
 #include "lane.h"
 
 #include <algorithm>
+#include <cassert>
 
 #include <hyprland/src/Compositor.hpp>
 
@@ -35,6 +36,7 @@ Lane::Lane(Stack *stack)
     stacks.push_back(stack);
     active = stacks.first();
     rememberStackWindows(stack);
+    debugVerifyStackCache();
 }
 
 Lane::~Lane() {
@@ -119,6 +121,27 @@ void Lane::forgetStackWindows(Stack *stack) {
     }
 }
 
+void Lane::debugVerifyStackCache() const {
+#ifndef NDEBUG
+    std::unordered_map<uintptr_t, Stack *> expected;
+    for (auto col = stacks.first(); col != nullptr; col = col->next()) {
+        auto *stack = col->data();
+        stack->for_each_window([&](PHLWINDOW window) {
+            const auto [it, inserted] = expected.emplace(windowKey(window), stack);
+            assert(inserted);
+            assert(it->second == stack);
+        });
+    }
+
+    assert(expected.size() == stackByWindow.size());
+    for (const auto &[key, stack] : expected) {
+        const auto it = stackByWindow.find(key);
+        assert(it != stackByWindow.end());
+        assert(it->second == stack);
+    }
+#endif
+}
+
 bool Lane::empty() const {
     return stacks.empty();
 }
@@ -163,6 +186,7 @@ Stack *Lane::extract_active_stack() {
     forgetStackWindows(stack);
     active = node != stacks.last() ? node->next() : node->prev();
     stacks.erase(node);
+    debugVerifyStackCache();
     return stack;
 }
 
@@ -185,6 +209,7 @@ ActiveWindowPayload Lane::extract_active_window_payload() {
     if (stack->size() != 0) {
         reorder = Reorder::Auto;
         stack->recalculate_stack_geometry(calculate_gap_x(active), gap);
+        debugVerifyStackCache();
         return payload;
     }
 
@@ -194,6 +219,7 @@ ActiveWindowPayload Lane::extract_active_window_payload() {
     forgetStackWindows(stack);
     delete stack;
     reorder = Reorder::Auto;
+    debugVerifyStackCache();
     return payload;
 }
 
@@ -213,6 +239,7 @@ void Lane::insert_window_payload(ActiveWindowPayload payload, Direction directio
         } else {
             active->data()->recalculate_stack_geometry(calculate_gap_x(active), gap);
         }
+        debugVerifyStackCache();
         return;
     }
 
@@ -240,6 +267,7 @@ void Lane::insert_window_payload(ActiveWindowPayload payload, Direction directio
         active = stacks.last();
         rememberWindowStack(compositorWindow, stack);
         recalculate_lane_geometry();
+        debugVerifyStackCache();
         return;
     }
 
@@ -268,6 +296,7 @@ void Lane::insert_window_payload(ActiveWindowPayload payload, Direction directio
     active = inserted;
     rememberWindowStack(compositorWindow, stack);
     recalculate_lane_geometry();
+    debugVerifyStackCache();
 }
 
 void Lane::set_canvas_geometry(const Box &full_box, const Box &max_box, int gap_size) {

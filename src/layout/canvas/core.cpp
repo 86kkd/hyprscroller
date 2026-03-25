@@ -7,6 +7,7 @@
  * removal/creation flows that keep canvas state coherent.
  */
 #include <algorithm>
+#include <cassert>
 
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/config/ConfigManager.hpp>
@@ -151,6 +152,27 @@ void CanvasLayout::forgetLaneWindows(Lane *lane) {
     }
 }
 
+void CanvasLayout::debugVerifyLaneCache() const {
+#ifndef NDEBUG
+    std::unordered_map<uintptr_t, Lane *> expected;
+    for (auto laneNode = lanes.first(); laneNode != nullptr; laneNode = laneNode->next()) {
+        auto *lane = laneNode->data();
+        lane->for_each_window([&](PHLWINDOW window) {
+            const auto [it, inserted] = expected.emplace(reinterpret_cast<uintptr_t>(window.get()), lane);
+            assert(inserted);
+            assert(it->second == lane);
+        });
+    }
+
+    assert(expected.size() == laneByWindow.size());
+    for (const auto &[key, lane] : expected) {
+        const auto it = laneByWindow.find(key);
+        assert(it != laneByWindow.end());
+        assert(it->second == lane);
+    }
+#endif
+}
+
 ListNode<Lane *> *CanvasLayout::insertLaneNode(Lane *lane, Direction direction, ListNode<Lane *> *anchor) {
     if (!lane)
         return nullptr;
@@ -275,6 +297,7 @@ bool CanvasLayout::dropEmptyLane(ListNode<Lane *> *laneNode, Lane *preferredLane
     delete lane;
     setActiveLane(fallbackLane);
     relayoutVisibleCanvas(fallbackMonitor);
+    debugVerifyLaneCache();
     return true;
 }
 
@@ -531,6 +554,8 @@ void CanvasLayout::switchWindows(PHLWINDOW a, PHLWINDOW b)
         else
             forgetWindowLane(b);
     }
+
+    debugVerifyLaneCache();
 }
 
 // Insert a newly mapped tiled window into the active lane, creating one if needed.
@@ -553,6 +578,7 @@ void CanvasLayout::onWindowCreatedTiling(PHLWINDOW window, Math::eDirection)
     }
     lane->add_active_window(window);
     rememberWindowLane(window, lane);
+    debugVerifyLaneCache();
 }
 
 // Remove a tiled window and delete the lane if it becomes empty.
@@ -571,8 +597,10 @@ void CanvasLayout::onWindowRemovedTiling(PHLWINDOW window)
     }
 
     forgetWindowLane(window);
-    if (s->remove_window(window))
+    if (s->remove_window(window)) {
+        debugVerifyLaneCache();
         return;
+    }
 
     auto lane = getLaneNode(s);
     if (!lane) {
@@ -592,6 +620,7 @@ void CanvasLayout::onWindowRemovedTiling(PHLWINDOW window)
 
     setActiveLane(nextActiveLane);
     relayoutVisibleCanvas();
+    debugVerifyLaneCache();
 }
 
 // Return whether this canvas currently manages a given window.
@@ -675,6 +704,7 @@ void CanvasLayout::onEnable() {
     }
 
     relayoutCanvas(monitor, !workspace->m_isSpecialWorkspace);
+    debugVerifyLaneCache();
 }
 
 void CanvasLayout::onDisable() {
@@ -684,6 +714,7 @@ void CanvasLayout::onDisable() {
     laneByWindow.clear();
     marks.reset();
     resetHandoffState();
+    debugVerifyLaneCache();
 }
 
 Vector2D CanvasLayout::predictSizeForNewWindowTiled() {
@@ -709,6 +740,7 @@ void CanvasLayout::replaceWindowDataWith(PHLWINDOW from, PHLWINDOW to)
 
     forgetWindowLane(from);
     rememberWindowLane(to, lane);
+    debugVerifyLaneCache();
 }
 
 void CanvasLayout::marks_add(const std::string &name) {

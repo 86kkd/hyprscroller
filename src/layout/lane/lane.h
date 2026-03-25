@@ -113,6 +113,7 @@ private:
     void forgetWindowStack(PHLWINDOW window);
     void rememberStackWindows(Stack *stack);
     void forgetStackWindows(Stack *stack);
+    void debugVerifyStackCache() const;
 
     // Calculate lateral gaps for a stack based on neighbor presence.
     Vector2D calculate_gap_x(const ListNode<Stack *> *stack) const;

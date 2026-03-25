@@ -96,6 +96,8 @@ bool CanvasLayout::handoffMoveWindowAcrossMonitor(int workspace, Direction direc
     targetLayout->relayoutVisibleCanvas(targetMonitor);
     targetLayout->requestWorkspaceFocusSyncSuppression();
     CanvasLayoutInternal::switch_to_window(currentWindow, true);
+    debugVerifyLaneCache();
+    targetLayout->debugVerifyLaneCache();
     return true;
 }
 
@@ -116,6 +118,7 @@ void CanvasLayout::transferMoveWindowToAdjacentLane(Lane *sourceLane, PHLWINDOW 
     rememberWindowLane(currentWindow, targetLaneNode->data());
     activeLane = targetLaneNode;
     finishLaneTransfer(sourceLaneNode, sourceMonitor, false, true);
+    debugVerifyLaneCache();
 }
 
 void CanvasLayout::transferMoveWindowToNewLane(Lane *sourceLane, PHLWINDOW currentWindow,
@@ -137,6 +140,7 @@ void CanvasLayout::transferMoveWindowToNewLane(Lane *sourceLane, PHLWINDOW curre
     rememberWindowLane(currentWindow, newLane);
     activeLane = newLaneNode;
     finishLaneTransfer(sourceLaneNode, sourceMonitor, false, true);
+    debugVerifyLaneCache();
 }
 
 void CanvasLayout::handleMoveWindowWithinLane(int workspace, Direction direction, Lane *lane,
@@ -287,6 +291,7 @@ void CanvasLayout::create_lane(int workspace, Direction direction) {
         rememberLaneWindows(newLane);
         activeLane = newLaneNode;
         finishLaneTransfer(currentLaneNode, nullptr, false, true);
+        debugVerifyLaneCache();
     });
 }
 

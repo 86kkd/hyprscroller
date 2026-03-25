@@ -16,11 +16,13 @@ void Lane::add_active_window(PHLWINDOW window) {
     if (mode == Mode::Column && active != nullptr) {
         const auto windowCountBefore = active->data()->size();
         active->data()->add_active_window(window, 0.5 * max.h);
+        rememberWindowStack(window, active->data());
         if (windowCountBefore == 1) {
             active->data()->fit_size(FitSize::All, calculate_gap_x(active), gap);
         } else {
             active->data()->recalculate_stack_geometry(calculate_gap_x(active), gap);
         }
+        debugVerifyStackCache();
         return;
     }
 
@@ -29,10 +31,12 @@ void Lane::add_active_window(PHLWINDOW window) {
         stacks.first()->data()->update_width(StackWidth::OneHalf, max.w, max.h);
 
     active = stacks.emplace_after(active, new Stack(window, max.w, max.h));
+    rememberWindowStack(window, active->data());
     if (singleWindowWorkspace)
         active->data()->update_width(StackWidth::OneHalf, max.w, max.h);
     reorder = Reorder::Auto;
     recalculate_lane_geometry();
+    debugVerifyStackCache();
 }
 
 // Remove a window from this lane and keep stack/lane state coherent.
@@ -53,10 +57,13 @@ bool Lane::remove_window(PHLWINDOW window) {
         auto *doomed = col;
         stacks.erase(c);
         delete doomed;
-        if (stacks.empty())
+        if (stacks.empty()) {
+            debugVerifyStackCache();
             return false;
+        }
 
         recalculate_lane_geometry();
+        debugVerifyStackCache();
         return true;
     }
 
@@ -68,6 +75,7 @@ bool Lane::remove_window(PHLWINDOW window) {
     } else {
         col->recalculate_stack_geometry(calculate_gap_x(c), gap);
     }
+    debugVerifyStackCache();
     return true;
 }
 
@@ -345,6 +353,7 @@ void Lane::admit_window_left() {
 
     reorder = Reorder::Auto;
     recalculate_lane_geometry();
+    debugVerifyStackCache();
 }
 
 // Split the active window into a new stack to the right.
@@ -366,6 +375,7 @@ void Lane::expel_window_right() {
 
     reorder = Reorder::Auto;
     recalculate_lane_geometry();
+    debugVerifyStackCache();
 }
 
 // Fit stack/window sizes to the requested visible range.
