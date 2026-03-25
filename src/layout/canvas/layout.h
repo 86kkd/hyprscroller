@@ -14,7 +14,6 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
-#include <unordered_set>
 #include <utility>
 
 #include <hyprland/src/layout/algorithm/TiledAlgorithm.hpp>
@@ -23,8 +22,7 @@
 
 #include "../../core/types.h"
 #include "../../list.h"
-
-enum class ActiveLaneSyncPolicy { None, WorkspaceFocus };
+#include "handoff_state.h"
 
 class Lane;
 
@@ -202,45 +200,5 @@ private:
     // Cached window -> lane index used to avoid repeated whole-canvas scans.
     std::unordered_map<uintptr_t, Lane *> laneByWindow;
     // Concentrated one-shot focus and cross-monitor handoff state.
-    struct HandoffState {
-        bool suppressWorkspaceFocusSync = false;
-        std::unordered_set<uintptr_t> pendingManualCrossMonitorInsertions;
-
-        static uintptr_t windowKey(PHLWINDOW window) {
-            return reinterpret_cast<uintptr_t>(window.get());
-        }
-
-        void requestWorkspaceFocusSyncSuppression() {
-            suppressWorkspaceFocusSync = true;
-        }
-
-        ActiveLaneSyncPolicy consumeActiveLaneSyncPolicy() {
-            return std::exchange(suppressWorkspaceFocusSync, false)
-                ? ActiveLaneSyncPolicy::None
-                : ActiveLaneSyncPolicy::WorkspaceFocus;
-        }
-
-        void rememberManualCrossMonitorInsertion(PHLWINDOW window) {
-            if (!window)
-                return;
-
-            pendingManualCrossMonitorInsertions.insert(windowKey(window));
-        }
-
-        void forgetManualCrossMonitorInsertion(PHLWINDOW window) {
-            if (!window)
-                return;
-
-            pendingManualCrossMonitorInsertions.erase(windowKey(window));
-        }
-
-        bool hasPendingManualCrossMonitorInsertion(PHLWINDOW window) const {
-            return window && pendingManualCrossMonitorInsertions.contains(windowKey(window));
-        }
-
-        void reset() {
-            suppressWorkspaceFocusSync = false;
-            pendingManualCrossMonitorInsertions.clear();
-        }
-    } handoffState;
+    HandoffState handoffState;
 };

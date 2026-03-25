@@ -15,6 +15,7 @@
 
 #include "../../core/direction.h"
 #include "internal.h"
+#include "route.h"
 
 extern HANDLE PHANDLE;
 
@@ -32,113 +33,6 @@ const char* focus_move_result_name(FocusMoveResult result) {
     return "unknown";
 }
 } // namespace
-
-namespace CanvasLayoutInternal {
-// Return true when a direction should jump between lanes instead of staying
-// inside the current lane's own focus model.
-bool direction_moves_between_lanes(Mode mode, Direction direction) {
-    switch (mode) {
-        case Mode::Row:
-            return direction == Direction::Up || direction == Direction::Down;
-        case Mode::Column:
-            return direction == Direction::Left || direction == Direction::Right;
-    }
-
-    return false;
-}
-
-// Return true when a lane created in this direction should be inserted before
-// the current lane instead of after it.
-bool direction_inserts_before_current(Mode mode, Direction direction) {
-    switch (mode) {
-        case Mode::Row:
-            return direction == Direction::Up || direction == Direction::Begin;
-        case Mode::Column:
-            return direction == Direction::Left || direction == Direction::Begin;
-    }
-
-    return false;
-}
-
-// Resolve the adjacent lane node in the logical direction for the current mode.
-ListNode<Lane*>* adjacent_lane(ListNode<Lane*>* current, Mode mode, Direction direction) {
-    if (!current)
-        return nullptr;
-
-    switch (mode) {
-        case Mode::Row:
-            if (direction == Direction::Up)
-                return current->prev();
-            if (direction == Direction::Down)
-                return current->next();
-            break;
-        case Mode::Column:
-            if (direction == Direction::Left)
-                return current->prev();
-            if (direction == Direction::Right)
-                return current->next();
-            break;
-    }
-
-    return nullptr;
-}
-
-// Choose the edge lane that acts as the anchor for newly created temporary or
-// persistent lanes.
-ListNode<Lane*>* edge_lane_anchor(List<Lane*>& lanes, Mode mode, Direction direction) {
-    if (lanes.empty())
-        return nullptr;
-
-    if (direction_inserts_before_current(mode, direction))
-        return lanes.first();
-
-    return lanes.last();
-}
-
-// Workspace-focus sync should not run while the user is navigating inside an
-// empty temporary lane, otherwise that lane would immediately collapse.
-bool should_sync_workspace_focus_before_move(ListNode<Lane*>* activeLaneNode) {
-    if (!activeLaneNode || !activeLaneNode->data())
-        return true;
-
-    const auto lane = activeLaneNode->data();
-    return !(lane->is_ephemeral() && lane->empty());
-}
-
-// Build the shared routing plan used by focus and movewindow when a direction
-// leaves the current lane.
-DirectionalHandoffPlan plan_directional_handoff(List<Lane*>& lanes, ListNode<Lane*>* current, PHLMONITOR sourceMonitor, Mode mode, Direction direction, bool allow_create) {
-    if (!direction_moves_between_lanes(mode, direction))
-        return {};
-
-    if (auto targetLaneNode = adjacent_lane(current, mode, direction)) {
-        return {
-            .route = DirectionalHandoffRoute::AdjacentLane,
-            .targetLaneNode = targetLaneNode,
-        };
-    }
-
-    const auto monitorDirection = direction_to_math(direction);
-    if (sourceMonitor && monitorDirection) {
-        if (auto targetMonitor = g_pCompositor->getMonitorInDirection(sourceMonitor, *monitorDirection)) {
-            return {
-                .route = DirectionalHandoffRoute::CrossMonitor,
-                .targetMonitor = targetMonitor,
-            };
-        }
-    }
-
-    if (allow_create) {
-        return {
-            .route = DirectionalHandoffRoute::CreateLane,
-            .targetLaneNode = edge_lane_anchor(lanes, mode, direction),
-        };
-    }
-
-    return {};
-}
-
-} // namespace CanvasLayoutInternal
 
 // Synchronize the canvas active lane/window with a concrete focused window.
 void CanvasLayout::onWindowFocusChange(PHLWINDOW window)
@@ -433,7 +327,7 @@ void CanvasLayout::routeMoveFocusAcrossLanesOrCreate(int workspace, Direction di
                                                      ListNode<Lane *> *sourceLaneNode, Mode mode,
                                                      bool allowCreate) {
     const auto handoffPlan = CanvasLayoutInternal::plan_directional_handoff(
-        lanes, activeLane, sourceMonitor, mode, direction, allowCreate);
+        lanes, activeLane, sourceMonitor, mode, direction, allowCreate, CanvasLayoutInternal::resolve_monitor_in_direction);
     switch (handoffPlan.route) {
     case CanvasLayoutInternal::DirectionalHandoffRoute::AdjacentLane:
         focusAdjacentLane(workspace, direction, sourceLaneNode, sourceMonitor, handoffPlan.targetLaneNode);
@@ -509,8 +403,7 @@ void CanvasLayout::move_focus(int workspace, Direction direction)
     }
 
     if (moveResult == FocusMoveResult::CrossMonitor) {
-        const auto monitorDirection = CanvasLayoutInternal::direction_to_math(direction);
-        auto monitor = beforeMonitor && monitorDirection ? g_pCompositor->getMonitorInDirection(beforeMonitor, *monitorDirection) : nullptr;
+        auto monitor = CanvasLayoutInternal::resolve_monitor_in_direction(beforeMonitor, direction);
         handoffFocusAcrossMonitor(workspace, direction, before, beforeMonitor, beforeActiveWorkspaceId, beforeSpecialWorkspaceId, sourceLaneNode, monitor);
         return;
     }

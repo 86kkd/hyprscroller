@@ -15,6 +15,7 @@
 #include "../lane/lane.h"
 #include "layout.h"
 #include "internal.h"
+#include "route.h"
 
 namespace {
 // Convert a workspace to the selector string expected by Hyprland workspace
@@ -32,8 +33,7 @@ std::string workspace_selector(PHLWORKSPACE workspace) {
 } // namespace
 
 PHLMONITOR CanvasLayout::directionalMoveTargetMonitor(PHLMONITOR sourceMonitor, Direction direction) const {
-    const auto monitorDirection = CanvasLayoutInternal::direction_to_math(direction);
-    return sourceMonitor && monitorDirection ? g_pCompositor->getMonitorInDirection(sourceMonitor, *monitorDirection) : nullptr;
+    return CanvasLayoutInternal::resolve_monitor_in_direction(sourceMonitor, direction);
 }
 
 bool CanvasLayout::handoffMoveWindowAcrossMonitor(int workspace, Direction direction, Lane *sourceLane,
@@ -168,25 +168,26 @@ void CanvasLayout::handleMoveWindowAcrossLanes(int workspace, Direction directio
     if (!lane)
         return;
 
-    if (!currentWindow || !sourceMonitor) {
+    const auto handoffPlan = currentWindow && sourceMonitor
+        ? CanvasLayoutInternal::plan_directional_handoff(
+              lanes, activeLane, sourceMonitor, mode, direction, true, CanvasLayoutInternal::resolve_monitor_in_direction)
+        : CanvasLayoutInternal::DirectionalHandoffPlan{};
+
+    switch (CanvasLayoutInternal::decide_cross_lane_move_window_action(currentWindow != nullptr, sourceMonitor != nullptr, handoffPlan.route)) {
+    case CanvasLayoutInternal::CrossLaneMoveWindowAction::BuiltinFallback:
         CanvasLayoutInternal::dispatch_directional_builtin("movewindow", direction);
         return;
-    }
-
-    const auto handoffPlan = CanvasLayoutInternal::plan_directional_handoff(
-        lanes, activeLane, sourceMonitor, mode, direction, true);
-    switch (handoffPlan.route) {
-    case CanvasLayoutInternal::DirectionalHandoffRoute::AdjacentLane:
+    case CanvasLayoutInternal::CrossLaneMoveWindowAction::AdjacentLaneTransfer:
         transferMoveWindowToAdjacentLane(lane, currentWindow, handoffPlan.targetLaneNode, direction, sourceMonitor);
         return;
-    case CanvasLayoutInternal::DirectionalHandoffRoute::CrossMonitor:
+    case CanvasLayoutInternal::CrossLaneMoveWindowAction::CrossMonitorTransfer:
         if (!handoffMoveWindowAcrossMonitor(workspace, direction, lane, currentWindow, sourceMonitor, handoffPlan.targetMonitor))
             CanvasLayoutInternal::dispatch_directional_builtin("movewindow", direction);
         return;
-    case CanvasLayoutInternal::DirectionalHandoffRoute::CreateLane:
+    case CanvasLayoutInternal::CrossLaneMoveWindowAction::CreateLaneTransfer:
         transferMoveWindowToNewLane(lane, currentWindow, sourceMonitor, mode, direction);
         return;
-    case CanvasLayoutInternal::DirectionalHandoffRoute::NoOp:
+    case CanvasLayoutInternal::CrossLaneMoveWindowAction::NoOp:
         return;
     }
 }

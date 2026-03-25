@@ -22,6 +22,7 @@
 #include "../lane/lane.h"
 #include "layout.h"
 #include "internal.h"
+#include "route.h"
 
 using namespace ScrollerCore;
 
@@ -200,15 +201,21 @@ Lane *CanvasLayout::ensureActiveLane(PHLMONITOR monitor, Mode mode) {
 }
 
 void CanvasLayout::rememberManualCrossMonitorInsertion(PHLWINDOW window) {
-    handoffState.rememberManualCrossMonitorInsertion(window);
+    if (!window)
+        return;
+
+    handoffState.rememberManualCrossMonitorInsertion(reinterpret_cast<uintptr_t>(window.get()));
 }
 
 void CanvasLayout::forgetManualCrossMonitorInsertion(PHLWINDOW window) {
-    handoffState.forgetManualCrossMonitorInsertion(window);
+    if (!window)
+        return;
+
+    handoffState.forgetManualCrossMonitorInsertion(reinterpret_cast<uintptr_t>(window.get()));
 }
 
 bool CanvasLayout::hasPendingManualCrossMonitorInsertion(PHLWINDOW window) const {
-    return handoffState.hasPendingManualCrossMonitorInsertion(window);
+    return window && handoffState.hasPendingManualCrossMonitorInsertion(reinterpret_cast<uintptr_t>(window.get()));
 }
 
 void CanvasLayout::requestWorkspaceFocusSyncSuppression() {

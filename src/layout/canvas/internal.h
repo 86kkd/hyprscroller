@@ -19,37 +19,6 @@ struct CanvasBounds {
     int               gap;
 };
 
-/**
- * @brief Planned routing result for directional focus/window handoff.
- */
-enum class DirectionalHandoffRoute {
-    NoOp,
-    AdjacentLane,
-    CrossMonitor,
-    CreateLane,
-};
-
-/**
- * @brief Routing plan shared by movefocus and movewindow.
- *
- * Depending on the direction and current canvas state, a command can stay on
- * the current lane, jump to an adjacent lane, cross to another monitor, or
- * create a new lane.
- */
-struct DirectionalHandoffPlan {
-    DirectionalHandoffRoute route = DirectionalHandoffRoute::NoOp;
-    ListNode<Lane*>*        targetLaneNode = nullptr;
-    PHLMONITOR              targetMonitor = nullptr;
-};
-
-// Return true when a direction should move between lanes for the current mode.
-bool                            direction_moves_between_lanes(Mode mode, Direction direction);
-// Return true when inserting or creating in this direction should happen before the current lane.
-bool                            direction_inserts_before_current(Mode mode, Direction direction);
-// Return the neighboring lane in the given logical direction.
-ListNode<Lane*>*                adjacent_lane(ListNode<Lane*>* current, Mode mode, Direction direction);
-// Compute the shared lane/monitor/create routing plan for directional actions.
-DirectionalHandoffPlan          plan_directional_handoff(List<Lane*>& lanes, ListNode<Lane*>* current, PHLMONITOR sourceMonitor, Mode mode, Direction direction, bool allow_create);
 // Compute monitor bounds once so canvas and lane logic use the same workarea math.
 CanvasBounds                    compute_canvas_bounds(PHLMONITOR monitor);
 // Recalculate one lane against the given workspace/monitor pair.
@@ -62,6 +31,18 @@ PHLMONITOR                      visible_monitor_for_workspace(PHLWORKSPACE works
 CanvasLayout*                   get_canvas_for_workspace(WORKSPACEID workspace_id);
 // Translate plugin direction to Hyprland monitor direction when possible.
 std::optional<Math::eDirection> direction_to_math(Direction direction);
+// Runtime seam around dispatcher and focus-related global state.
+struct DispatcherRuntime {
+    virtual ~DispatcherRuntime() = default;
+    virtual bool hasDispatcherRegistry() const = 0;
+    virtual bool hasDispatcher(const char* dispatcher) const = 0;
+    virtual bool invokeDispatcher(const char* dispatcher, std::string_view arg) const = 0;
+    virtual PHLMONITOR getMonitorFromID(int monitorId) const = 0;
+    virtual PHLMONITOR getMonitorFromCursor() const = 0;
+    virtual bool isWindowActive(PHLWINDOW window) const = 0;
+};
+// Replace the dispatcher runtime for in-process tests.
+void                            set_dispatcher_runtime_for_tests(DispatcherRuntime* runtime);
 // Pick the best target window on another monitor when crossing focus.
 PHLWINDOW                       pick_cross_monitor_target_window(PHLMONITOR monitor, WORKSPACEID workspace_id, Direction direction, PHLWINDOW source_window);
 // Return true when a dispatcher call is well-formed and the target dispatcher exists.

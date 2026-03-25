@@ -8,7 +8,6 @@
  */
 #include <cstdio>
 #include <string>
-#include <type_traits>
 
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/helpers/Monitor.hpp>
@@ -19,7 +18,45 @@
 #include "internal.h"
 
 namespace {
-using DispatcherHandler = std::decay_t<decltype(g_pKeybindManager->m_dispatchers.begin()->second)>;
+class HyprlandDispatcherRuntime final : public CanvasLayoutInternal::DispatcherRuntime {
+public:
+    bool hasDispatcherRegistry() const override {
+        return static_cast<bool>(g_pKeybindManager);
+    }
+
+    bool hasDispatcher(const char *dispatcher) const override {
+        if (!g_pKeybindManager)
+            return false;
+
+        return g_pKeybindManager->m_dispatchers.contains(dispatcher);
+    }
+
+    bool invokeDispatcher(const char *dispatcher, std::string_view arg) const override {
+        if (!g_pKeybindManager)
+            return false;
+
+        const auto it = g_pKeybindManager->m_dispatchers.find(dispatcher);
+        if (it == g_pKeybindManager->m_dispatchers.end())
+            return false;
+
+        it->second(std::string(arg));
+        return true;
+    }
+
+    PHLMONITOR getMonitorFromID(int monitorId) const override {
+        return g_pCompositor ? g_pCompositor->getMonitorFromID(monitorId) : nullptr;
+    }
+
+    PHLMONITOR getMonitorFromCursor() const override {
+        return g_pCompositor ? g_pCompositor->getMonitorFromCursor() : nullptr;
+    }
+
+    bool isWindowActive(PHLWINDOW window) const override {
+        return g_pCompositor && window && g_pCompositor->isWindowActive(window);
+    }
+};
+
+CanvasLayoutInternal::DispatcherRuntime *g_dispatcherRuntimeOverride = nullptr;
 
 const char *dispatcher_context(const char *context, const char *dispatcher) {
     if (context && context[0] != '\0')
@@ -29,46 +66,52 @@ const char *dispatcher_context(const char *context, const char *dispatcher) {
     return "dispatcher";
 }
 
-DispatcherHandler *resolve_dispatcher(const char *dispatcher, std::string_view arg, const char *context) {
+CanvasLayoutInternal::DispatcherRuntime &dispatcher_runtime() {
+    static HyprlandDispatcherRuntime runtime;
+    return g_dispatcherRuntimeOverride ? *g_dispatcherRuntimeOverride : runtime;
+}
+
+bool validate_dispatch_request(const char *dispatcher, std::string_view arg, const char *context) {
     const auto *ctx = dispatcher_context(context, dispatcher);
     if (!dispatcher || dispatcher[0] == '\0') {
         spdlog::warn("{}: missing dispatcher name", ctx);
-        return nullptr;
+        return false;
     }
 
     if (arg.empty()) {
         spdlog::warn("{}: empty dispatcher arg dispatcher={}", ctx, dispatcher);
-        return nullptr;
+        return false;
     }
 
-    if (!g_pKeybindManager) {
+    if (!dispatcher_runtime().hasDispatcherRegistry()) {
         spdlog::warn("{}: keybind manager unavailable dispatcher={}", ctx, dispatcher);
-        return nullptr;
+        return false;
     }
 
-    const auto it = g_pKeybindManager->m_dispatchers.find(dispatcher);
-    if (it == g_pKeybindManager->m_dispatchers.end()) {
+    if (!dispatcher_runtime().hasDispatcher(dispatcher)) {
         spdlog::warn("{}: dispatcher not found dispatcher={}", ctx, dispatcher);
-        return nullptr;
+        return false;
     }
 
-    return &it->second;
+    return true;
 }
 } // namespace
 
 namespace CanvasLayoutInternal {
 
+void set_dispatcher_runtime_for_tests(DispatcherRuntime *runtime) {
+    g_dispatcherRuntimeOverride = runtime;
+}
+
 bool can_invoke_dispatcher(const char* dispatcher, std::string_view arg, const char* context) {
-    return resolve_dispatcher(dispatcher, arg, context) != nullptr;
+    return validate_dispatch_request(dispatcher, arg, context);
 }
 
 bool invoke_dispatcher(const char* dispatcher, std::string_view arg, const char* context) {
-    auto *handler = resolve_dispatcher(dispatcher, arg, context);
-    if (!handler)
+    if (!validate_dispatch_request(dispatcher, arg, context))
         return false;
 
-    (*handler)(std::string(arg));
-    return true;
+    return dispatcher_runtime().invokeDispatcher(dispatcher, arg);
 }
 
 // Shared wrapper around Hyprland builtin directional dispatchers.
@@ -94,8 +137,8 @@ void focus_window_monitor(PHLWINDOW window) {
     if (!window)
         return;
 
-    const auto targetMonitor = g_pCompositor->getMonitorFromID(window->monitorID());
-    const auto currentMonitor = g_pCompositor->getMonitorFromCursor();
+    const auto targetMonitor = dispatcher_runtime().getMonitorFromID(window->monitorID());
+    const auto currentMonitor = dispatcher_runtime().getMonitorFromCursor();
     if (!targetMonitor || !currentMonitor || targetMonitor == currentMonitor || targetMonitor->m_name.empty())
         return;
 
@@ -114,7 +157,7 @@ void switch_to_window(PHLWINDOW window, bool warp_cursor)
 
     focus_window_monitor(window);
 
-    if (!g_pCompositor->isWindowActive(window)) {
+    if (!dispatcher_runtime().isWindowActive(window)) {
         spdlog::debug("switch_to_window: focusing window={} workspace={}",
                       static_cast<const void*>(window.get()), window->workspaceID());
         char selector[64];
