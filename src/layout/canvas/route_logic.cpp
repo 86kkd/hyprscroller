@@ -82,11 +82,11 @@ CrossLaneMoveWindowAction decide_cross_lane_move_window_action(bool hasCurrentWi
     return CrossLaneMoveWindowAction::NoOp;
 }
 
-bool should_drop_hidden_special_ephemeral_lane(bool workspaceIsSpecial, bool workspaceVisible, bool activeLaneIsEphemeral, bool activeLaneEmpty) {
+bool should_mark_special_ephemeral_lane_for_restore(bool workspaceIsSpecial, bool workspaceVisible, bool activeLaneIsEphemeral, bool activeLaneEmpty) {
     return workspaceIsSpecial && !workspaceVisible && activeLaneIsEphemeral && activeLaneEmpty;
 }
 
-bool should_restore_visible_special_ephemeral_lane(bool workspaceIsSpecial, bool workspaceVisible, bool restorePending, bool activeLaneIsEphemeral, bool activeLaneEmpty) {
+bool should_restore_marked_special_ephemeral_lane(bool workspaceIsSpecial, bool workspaceVisible, bool restorePending, bool activeLaneIsEphemeral, bool activeLaneEmpty) {
     return workspaceIsSpecial && workspaceVisible && restorePending && activeLaneIsEphemeral && activeLaneEmpty;
 }
 

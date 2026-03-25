@@ -108,7 +108,7 @@ bool CanvasLayout::syncSpecialWorkspaceVisibilityState(PHLMONITOR visibleMonitor
         return false;
 
     const auto workspaceVisible = visibleMonitor != nullptr;
-    if (CanvasLayoutInternal::should_drop_hidden_special_ephemeral_lane(
+    if (CanvasLayoutInternal::should_mark_special_ephemeral_lane_for_restore(
             workspace->m_isSpecialWorkspace,
             workspaceVisible,
             currentLane->is_ephemeral(),
@@ -123,7 +123,7 @@ bool CanvasLayout::syncSpecialWorkspaceVisibilityState(PHLMONITOR visibleMonitor
         return false;
     }
 
-    if (!CanvasLayoutInternal::should_restore_visible_special_ephemeral_lane(
+    if (!CanvasLayoutInternal::should_restore_marked_special_ephemeral_lane(
             workspace->m_isSpecialWorkspace,
             workspaceVisible,
             specialEphemeralLaneRestorePending,
