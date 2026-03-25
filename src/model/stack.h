@@ -60,15 +60,6 @@ enum class Reorder {
     Lazy
 };
 
-enum class FocusMoveResult {
-    // Focus moved inside the current stack/lane.
-    Moved,
-    // No focus change happened.
-    NoOp,
-    // Movement should continue on another monitor.
-    CrossMonitor
-};
-
 /**
  * @brief Lightweight model wrapper around a compositor window.
  *

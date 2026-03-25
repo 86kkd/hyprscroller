@@ -5,6 +5,7 @@
 enum class Direction { Left, Right, Up, Down, Begin, End, Center };
 enum class FitSize { Active, Visible, All, ToEnd, ToBeg };
 enum class Mode { Row, Column };
+enum class FocusMoveResult { Moved, NoOp, CrossMonitor };
 
 namespace ScrollerCore {
 

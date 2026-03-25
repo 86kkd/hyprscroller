@@ -34,7 +34,9 @@ add_library(hyprscroller SHARED
             src/model/stack.cpp
             src/layout/canvas/core.cpp
             src/layout/canvas/dispatch.cpp
+            src/layout/canvas/dispatch_logic.cpp
             src/layout/canvas/route.cpp
+            src/layout/canvas/route_logic.cpp
             src/layout/canvas/workspace.cpp
             src/layout/canvas/focus.cpp
             src/layout/canvas/commands.cpp
@@ -68,7 +70,14 @@ if(BUILD_TESTING)
     add_executable(hyprscroller_logic_tests
                    tests/logic_tests.cpp
                    src/core/direction.cpp
-                   src/core/layout_math.cpp)
-    target_include_directories(hyprscroller_logic_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+                   src/core/layout_math.cpp
+                   src/layout/canvas/dispatch_logic.cpp
+                   src/layout/canvas/route_logic.cpp)
+    target_include_directories(hyprscroller_logic_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${DEPS_INCLUDE_DIRS}
+        /usr/include/hyprland/wlroots-hyprland/hyprland
+        /usr/include/hyprland/src)
+    target_link_libraries(hyprscroller_logic_tests PRIVATE spdlog::spdlog_header_only)
     add_test(NAME hyprscroller.logic COMMAND hyprscroller_logic_tests)
 endif()

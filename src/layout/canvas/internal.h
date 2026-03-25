@@ -5,6 +5,7 @@
 
 #include "../lane/lane.h"
 #include "layout.h"
+#include "dispatch_logic.h"
 
 namespace CanvasLayoutInternal {
 /**
@@ -32,11 +33,7 @@ CanvasLayout*                   get_canvas_for_workspace(WORKSPACEID workspace_i
 // Translate plugin direction to Hyprland monitor direction when possible.
 std::optional<Math::eDirection> direction_to_math(Direction direction);
 // Runtime seam around dispatcher and focus-related global state.
-struct DispatcherRuntime {
-    virtual ~DispatcherRuntime() = default;
-    virtual bool hasDispatcherRegistry() const = 0;
-    virtual bool hasDispatcher(const char* dispatcher) const = 0;
-    virtual bool invokeDispatcher(const char* dispatcher, std::string_view arg) const = 0;
+struct DispatcherRuntime : DispatcherRegistryRuntime {
     virtual PHLMONITOR getMonitorFromID(int monitorId) const = 0;
     virtual PHLMONITOR getMonitorFromCursor() const = 0;
     virtual bool isWindowActive(PHLWINDOW window) const = 0;
