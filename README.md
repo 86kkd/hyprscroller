@@ -52,6 +52,9 @@ cmake --build ./Debug -j
 ctest --test-dir ./Debug --output-on-failure
 ```
 
+For compositor-level regressions after touching canvas or lane hot paths, run
+the manual [smoke test checklist](./docs/smoke-test-checklist.md) as well.
+
 A more automated option is to use `hyprpm`.
 
 ``` sh
