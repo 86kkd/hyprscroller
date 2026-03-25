@@ -41,6 +41,9 @@ bool CanvasLayout::handoffMoveWindowAcrossMonitor(int workspace, Direction direc
                                                   PHLMONITOR targetMonitor) {
     if (!sourceLane || !currentWindow || !sourceMonitor || !targetMonitor)
         return false;
+    auto *sourceLaneNode = getLaneNode(sourceLane);
+    if (!sourceLaneNode)
+        return false;
 
     const auto workspaceId = CanvasLayoutInternal::preferred_workspace_id(targetMonitor, workspace);
     const auto targetWorkspace = g_pCompositor->getWorkspaceByID(workspaceId);
@@ -87,7 +90,7 @@ bool CanvasLayout::handoffMoveWindowAcrossMonitor(int workspace, Direction direc
     targetLayout->forgetManualCrossMonitorInsertion(currentWindow);
     targetLayout->setActiveLane(targetLane);
 
-    if (!dropEmptyLane(getLaneNode(sourceLane), nullptr, sourceMonitor))
+    if (!dropEmptyLane(sourceLaneNode, nullptr, sourceMonitor))
         relayoutVisibleCanvas(sourceMonitor);
 
     targetLayout->relayoutVisibleCanvas(targetMonitor);
@@ -101,6 +104,9 @@ void CanvasLayout::transferMoveWindowToAdjacentLane(Lane *sourceLane, PHLWINDOW 
                                                     PHLMONITOR sourceMonitor) {
     if (!sourceLane || !currentWindow || !targetLaneNode)
         return;
+    auto *sourceLaneNode = getLaneNode(sourceLane);
+    if (!sourceLaneNode)
+        return;
 
     auto payload = sourceLane->extract_active_window_payload();
     if (!payload)
@@ -109,20 +115,19 @@ void CanvasLayout::transferMoveWindowToAdjacentLane(Lane *sourceLane, PHLWINDOW 
     targetLaneNode->data()->insert_window_payload(std::move(payload), direction);
     rememberWindowLane(currentWindow, targetLaneNode->data());
     activeLane = targetLaneNode;
-    finishLaneTransfer(getLaneNode(sourceLane), sourceMonitor, false, true);
+    finishLaneTransfer(sourceLaneNode, sourceMonitor, false, true);
 }
 
 void CanvasLayout::transferMoveWindowToNewLane(Lane *sourceLane, PHLWINDOW currentWindow,
                                                PHLMONITOR sourceMonitor, Mode mode, Direction direction) {
     if (!sourceLane || !currentWindow)
         return;
+    auto sourceLaneNode = getLaneNode(sourceLane);
+    if (!sourceLaneNode)
+        return;
 
     auto payload = sourceLane->extract_active_window_payload();
     if (!payload)
-        return;
-
-    auto sourceLaneNode = getLaneNode(sourceLane);
-    if (!sourceLaneNode)
         return;
 
     auto *newLane = new Lane(sourceMonitor, mode);

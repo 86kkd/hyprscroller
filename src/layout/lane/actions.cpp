@@ -340,7 +340,7 @@ void Lane::admit_window_left() {
         delete doomed;
     }
     active = prev;
-    active->data()->admit_window(w);
+    active->data()->admit_window(std::move(w));
     rememberWindowStack(movedWindow, active->data());
 
     reorder = Reorder::Auto;
@@ -360,7 +360,7 @@ void Lane::expel_window_right() {
     forgetWindowStack(movedWindow);
     StackWidth width = active->data()->get_width();
     double maxw = width == StackWidth::Free ? active->data()->get_geom_w() : max.w;
-    active = stacks.emplace_after(active, new Stack(w, width, maxw, max.h));
+    active = stacks.emplace_after(active, new Stack(std::move(w), width, maxw, max.h));
     rememberWindowStack(movedWindow, active->data());
     active->data()->set_geom_pos(active->prev()->data()->get_geom_x() + active->prev()->data()->get_geom_w(), max.y);
 

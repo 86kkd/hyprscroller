@@ -14,6 +14,7 @@
  */
 #pragma once
 
+#include <memory>
 #include <string>
 #include <utility>
 
@@ -139,7 +140,7 @@ public:
     // Build a new stack from a compositor window with configuration defaults.
     Stack(PHLWINDOW cwindow, double maxw, double maxh);
     // Build a new stack from an existing model window when splitting.
-    Stack(Window *window, StackWidth width, double maxw, double maxh);
+    Stack(std::unique_ptr<Window> window, StackWidth width, double maxw, double maxh);
     // Destroy all windows in this stack.
     ~Stack();
 
@@ -207,9 +208,9 @@ public:
     FocusMoveResult move_focus_down(bool focus_wrap);
 
     // Insert a model window whose ownership has been transferred to this stack.
-    void admit_window(Window *window);
-    // Remove the active model window and transfer ownership to the caller.
-    Window *expel_active(double gap);
+    void admit_window(std::unique_ptr<Window> window);
+    // Remove the active model window and transfer ownership to the caller as a unique owner.
+    std::unique_ptr<Window> expel_active(double gap);
     // Move active window toward viewport edges/center inside the current stack.
     void align_window(Direction direction, double gap);
 
@@ -258,7 +259,7 @@ private:
     // Full monitor box used by fullscreen behavior.
     ScrollerCore::Box full;
     // Currently active model window node.
-    ListNode<Window *> *active;
+    ListNode<Window *> *active = nullptr;
     // Ordered windows inside this stack.
     List<Window *> windows;
 };

@@ -203,10 +203,10 @@ void Lane::insert_window_payload(ActiveWindowPayload payload, Direction directio
 
     reorder = Reorder::Auto;
     if (mode == Mode::Column && active) {
-        auto *window = payload.release_window();
+        auto window = payload.release_window();
         const auto compositorWindow = window ? window->ptr().lock() : nullptr;
         const auto windowCountBefore = active->data()->size();
-        active->data()->admit_window(window);
+        active->data()->admit_window(std::move(window));
         rememberWindowStack(compositorWindow, active->data());
         if (windowCountBefore == 1) {
             active->data()->fit_size(FitSize::All, calculate_gap_x(active), gap);
@@ -220,7 +220,7 @@ void Lane::insert_window_payload(ActiveWindowPayload payload, Direction directio
     if (singleWindowLane)
         stacks.first()->data()->update_width(StackWidth::OneHalf, max.w, max.h);
 
-    auto *window = payload.release_window();
+    auto window = payload.release_window();
     if (!window)
         return;
     const auto compositorWindow = window->ptr().lock();
@@ -231,7 +231,7 @@ void Lane::insert_window_payload(ActiveWindowPayload payload, Direction directio
         payload.width == StackWidth::Free && payload.maxw > 0.0
             ? std::min(payload.maxw, max.w)
             : max.w;
-    auto *stack = new Stack(window, payload.width, targetMaxWidth, max.h);
+    auto *stack = new Stack(std::move(window), payload.width, targetMaxWidth, max.h);
     if (singleWindowLane)
         stack->update_width(StackWidth::OneHalf, max.w, max.h);
     stack->set_geom_pos(max.x, max.y);

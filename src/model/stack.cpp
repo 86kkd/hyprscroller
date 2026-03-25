@@ -110,12 +110,15 @@ Stack::Stack(PHLWINDOW cwindow, double maxw, double maxh)
 }
 
 // Build a stack directly from an extracted model window payload.
-Stack::Stack(Window *window, StackWidth width, double maxw, double maxh)
+Stack::Stack(std::unique_ptr<Window> window, StackWidth width, double maxw, double maxh)
     : width(width), height(WindowHeight::One), reorder(Reorder::Auto), initialized(true), maxdim(false) {
-    window->set_geom_h(maxh);
     update_width(width, maxw, maxh);
     geom.h = maxh;
-    windows.push_back(window);
+    if (!window)
+        return;
+
+    window->set_geom_h(maxh);
+    windows.push_back(window.release());
     active = windows.first();
 }
 
@@ -496,7 +499,7 @@ FocusMoveResult Stack::move_focus_down(bool focus_wrap) {
 }
 
 // Insert an extracted window into the current stack next to the active window.
-void Stack::admit_window(Window *window) {
+void Stack::admit_window(std::unique_ptr<Window> window) {
     reorder = Reorder::Auto;
     if (!window) {
         return;
@@ -511,16 +514,16 @@ void Stack::admit_window(Window *window) {
         window->set_geom_y(geom.y);
     }
 
-    active = windows.emplace_after(active, window);
+    active = windows.emplace_after(active, window.release());
 }
 
 // Remove and return the active model window from this stack.
-Window *Stack::expel_active(double /*gap*/) {
+std::unique_ptr<Window> Stack::expel_active(double /*gap*/) {
     reorder = Reorder::Auto;
     if (!active)
-        return nullptr;
+        return {};
 
-    Window *window = active->data();
+    std::unique_ptr<Window> window(active->data());
     auto act = active == windows.first() ? active->next() : active->prev();
     windows.erase(active);
     active = act;

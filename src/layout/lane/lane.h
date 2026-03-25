@@ -9,6 +9,7 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <unordered_map>
 #include <utility>
 
@@ -21,37 +22,28 @@ using namespace ScrollerModel;
 /**
  * @brief Transfer object used when moving an active window between lanes.
  *
- * A moved window needs more than the raw `Window*`: the destination lane also
+ * A moved window needs more than the model window itself: the destination lane also
  * needs the stack width semantics and any free-width value so it can rebuild a
  * destination stack without losing sizing intent.
  */
 struct ActiveWindowPayload {
-    Window*    window = nullptr;
-    StackWidth width = StackWidth::OneHalf;
-    double     maxw = 0.0;
+    std::unique_ptr<Window> window;
+    StackWidth              width = StackWidth::OneHalf;
+    double                  maxw = 0.0;
 
     ActiveWindowPayload() = default;
     ActiveWindowPayload(const ActiveWindowPayload &) = delete;
     ActiveWindowPayload &operator=(const ActiveWindowPayload &) = delete;
-    ActiveWindowPayload(ActiveWindowPayload &&other) noexcept
-        : window(std::exchange(other.window, nullptr)), width(other.width), maxw(other.maxw) {}
-    ActiveWindowPayload &operator=(ActiveWindowPayload &&other) noexcept {
-        if (this == &other)
-            return *this;
-
-        window = std::exchange(other.window, nullptr);
-        width = other.width;
-        maxw = other.maxw;
-        return *this;
-    }
+    ActiveWindowPayload(ActiveWindowPayload &&other) noexcept = default;
+    ActiveWindowPayload &operator=(ActiveWindowPayload &&other) noexcept = default;
 
     // Release ownership of the moved model window to the destination consumer.
-    Window *release_window() {
-        return std::exchange(window, nullptr);
+    std::unique_ptr<Window> release_window() {
+        return std::move(window);
     }
 
     explicit operator bool() const {
-        return window != nullptr;
+        return static_cast<bool>(window);
     }
 };
 
