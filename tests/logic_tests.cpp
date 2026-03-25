@@ -230,6 +230,17 @@ void test_route_logic() {
     expect_eq(decide_cross_lane_move_window_action(false, true, DirectionalHandoffRoute::AdjacentLane),
               CrossLaneMoveWindowAction::BuiltinFallback,
               "movewindow falls back to builtin dispatch when current window is missing");
+
+    expect_true(should_drop_hidden_special_ephemeral_lane(true, false, true, true),
+                "hidden special workspace drops empty ephemeral lane");
+    expect_true(!should_drop_hidden_special_ephemeral_lane(true, true, true, true),
+                "visible special workspace keeps empty ephemeral lane for navigation");
+    expect_true(!should_drop_hidden_special_ephemeral_lane(true, false, true, false),
+                "non-empty lane is preserved when hiding special workspace");
+    expect_true(should_restore_visible_special_ephemeral_lane(true, true, true, true, true),
+                "reopened special workspace restores a pending empty ephemeral lane");
+    expect_true(!should_restore_visible_special_ephemeral_lane(true, true, false, true, true),
+                "visible special workspace does not restore without a pending hidden state");
 }
 
 void test_dispatch_logic() {

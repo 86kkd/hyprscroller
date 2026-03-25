@@ -204,6 +204,27 @@ int get_workspace_id() {
 }
 } // namespace CanvasLayoutInternal
 
+void CanvasLayout::syncHiddenSpecialWorkspaceCanvases()
+{
+    for (const auto& workspaceRef : g_pCompositor->getWorkspaces()) {
+        const auto workspace = workspaceRef.lock();
+        if (!workspace || !workspace->m_isSpecialWorkspace)
+            continue;
+        if (CanvasLayoutInternal::visible_monitor_for_workspace(workspace))
+            continue;
+
+        auto* layout = CanvasLayoutInternal::get_canvas_for_workspace(workspace->m_id);
+        if (!layout || !layout->activeLane || !layout->activeLane->data())
+            continue;
+
+        auto* lane = layout->activeLane->data();
+        if (!lane->is_ephemeral() || !lane->empty())
+            continue;
+
+        (void)layout->syncSpecialWorkspaceVisibilityState(nullptr);
+    }
+}
+
 // Recalculate this canvas only when the requested monitor is the visible one.
 void CanvasLayout::recalculateMonitor(const int &monitor_id)
 {
@@ -211,8 +232,12 @@ void CanvasLayout::recalculateMonitor(const int &monitor_id)
     if (!workspace)
         return;
 
+    syncHiddenSpecialWorkspaceCanvases();
     const auto monitor = CanvasLayoutInternal::visible_monitor_for_workspace(workspace);
-    if (!monitor || monitor->m_id != monitor_id)
+    (void)syncSpecialWorkspaceVisibilityState(monitor);
+    if (!monitor)
+        return;
+    if (monitor->m_id != monitor_id)
         return;
 
     g_pHyprRenderer->damageMonitor(monitor);

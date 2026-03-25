@@ -74,6 +74,8 @@ public:
     void onWindowFocusChange(PHLWINDOW);
     void replaceWindowDataWith(PHLWINDOW from, PHLWINDOW to);
     Vector2D predictSizeForNewWindowTiled();
+    // Refresh stale special-workspace lane state before a dispatcher acts on this layout.
+    void prepareForActionContext();
 
     // New dispatchers: command-facing control surface from Hyprland config.
     void cycle_window_size(int workspace, int step);
@@ -126,6 +128,10 @@ private:
     void relayoutVisibleCanvas(PHLMONITOR fallbackMonitor = nullptr);
     // Recalculate all lanes inside the canvas against one monitor.
     void relayoutCanvas(PHLMONITOR monitor, bool honor_fullscreen);
+    // Sweep all hidden special canvases so stale empty-lane state gets marked even when the hidden canvas is not ticking.
+    void syncHiddenSpecialWorkspaceCanvases();
+    // Track hidden/visible transitions for special-workspace empty lanes and restore focus when they reappear.
+    bool syncSpecialWorkspaceVisibilityState(PHLMONITOR visibleMonitor);
     // Sync active lane/window state from Hyprland's remembered workspace focus.
     void syncActiveStateFromWorkspaceFocus();
     // Adopt the lane containing a newly focused window.
@@ -193,6 +199,8 @@ private:
 
     // Optional Hyprland focus listener used to keep canvas state synchronized.
     CHyprSignalListener m_focusCallback;
+    // Workspace-active listener used to observe special workspace hide/show transitions.
+    CHyprSignalListener m_workspaceActiveCallback;
     // Currently active lane inside this canvas.
     ListNode<Lane *> *activeLane = nullptr;
     // Ordered lanes that make up the current canvas.
@@ -201,4 +209,6 @@ private:
     std::unordered_map<uintptr_t, Lane *> laneByWindow;
     // Concentrated one-shot focus and cross-monitor handoff state.
     HandoffState handoffState;
+    // Remember whether a hidden special workspace needs to restore from a stale empty lane when shown again.
+    bool specialEphemeralLaneRestorePending = false;
 };

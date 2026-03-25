@@ -272,6 +272,14 @@ PHLMONITOR CanvasLayout::getVisibleCanvasMonitor(PHLMONITOR fallbackMonitor) con
     return visibleMonitor ? visibleMonitor : fallbackMonitor;
 }
 
+void CanvasLayout::prepareForActionContext() {
+    syncHiddenSpecialWorkspaceCanvases();
+    const auto workspace = getCanvasWorkspace();
+    const auto monitor = getVisibleCanvasMonitor();
+    if (syncSpecialWorkspaceVisibilityState(monitor) && workspace && monitor)
+        relayoutCanvas(monitor, !workspace->m_isSpecialWorkspace);
+}
+
 // Relayout the canvas on the monitor currently showing it.
 void CanvasLayout::relayoutVisibleCanvas(PHLMONITOR fallbackMonitor) {
     const auto workspace = getCanvasWorkspace();
@@ -459,7 +467,9 @@ void CanvasLayout::recalculate()
     if (!workspace)
         return;
 
+    syncHiddenSpecialWorkspaceCanvases();
     const auto monitor = getVisibleCanvasMonitor();
+    (void)syncSpecialWorkspaceVisibilityState(monitor);
     if (!monitor)
         return;
 
@@ -674,6 +684,8 @@ void CanvasLayout::onEnable() {
     laneByWindow.clear();
     marks.reset();
     resetHandoffState();
+    specialEphemeralLaneRestorePending = false;
+    m_workspaceActiveCallback = nullptr;
     m_focusCallback = Event::bus()->m_events.window.active.listen([this](PHLWINDOW window, Desktop::eFocusReason) {
         onWindowFocusChange(window);
     });
@@ -686,6 +698,16 @@ void CanvasLayout::onEnable() {
                      static_cast<const void*>(this));
         return;
     }
+
+    m_workspaceActiveCallback = workspace->m_events.activeChanged.listen([this] {
+        const auto workspace = getCanvasWorkspace();
+        if (!workspace)
+            return;
+        syncHiddenSpecialWorkspaceCanvases();
+        const auto monitor = CanvasLayoutInternal::visible_monitor_for_workspace(workspace);
+        if (syncSpecialWorkspaceVisibilityState(monitor) && monitor)
+            relayoutCanvas(monitor, !workspace->m_isSpecialWorkspace);
+    });
 
     spdlog::info("onEnable: rebuilding layout instance={} workspace={} from mapped windows",
                  static_cast<const void*>(this), workspace->m_id);
@@ -716,11 +738,13 @@ void CanvasLayout::onEnable() {
 
 void CanvasLayout::onDisable() {
     m_focusCallback = nullptr;
+    m_workspaceActiveCallback = nullptr;
     clear_lanes(lanes);
     activeLane = nullptr;
     laneByWindow.clear();
     marks.reset();
     resetHandoffState();
+    specialEphemeralLaneRestorePending = false;
     debugVerifyLaneCache();
 }
 

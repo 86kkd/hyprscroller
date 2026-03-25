@@ -92,6 +92,54 @@ void CanvasLayout::onWindowFocusChange(PHLWINDOW window)
                  static_cast<const void*>(afterWindow ? afterWindow.get() : nullptr));
 }
 
+bool CanvasLayout::syncSpecialWorkspaceVisibilityState(PHLMONITOR visibleMonitor)
+{
+    const auto workspace = getCanvasWorkspace();
+    const auto currentLane = activeLane ? activeLane->data() : nullptr;
+    if (!workspace) {
+        specialEphemeralLaneRestorePending = false;
+        return false;
+    }
+    if (!workspace->m_isSpecialWorkspace) {
+        specialEphemeralLaneRestorePending = false;
+        return false;
+    }
+    if (!currentLane)
+        return false;
+
+    const auto workspaceVisible = visibleMonitor != nullptr;
+    if (CanvasLayoutInternal::should_drop_hidden_special_ephemeral_lane(
+            workspace->m_isSpecialWorkspace,
+            workspaceVisible,
+            currentLane->is_ephemeral(),
+            currentLane->empty())) {
+        specialEphemeralLaneRestorePending = true;
+        return false;
+    }
+
+    if (workspaceVisible && specialEphemeralLaneRestorePending &&
+        (!currentLane->is_ephemeral() || !currentLane->empty())) {
+        specialEphemeralLaneRestorePending = false;
+        return false;
+    }
+
+    if (!CanvasLayoutInternal::should_restore_visible_special_ephemeral_lane(
+            workspace->m_isSpecialWorkspace,
+            workspaceVisible,
+            specialEphemeralLaneRestorePending,
+            currentLane->is_ephemeral(),
+            currentLane->empty()))
+        return false;
+
+    syncActiveStateFromWorkspaceFocus();
+
+    const auto afterLane = activeLane ? activeLane->data() : nullptr;
+    const auto restored = !(afterLane && afterLane->is_ephemeral() && afterLane->empty());
+    if (restored)
+        specialEphemeralLaneRestorePending = false;
+    return restored;
+}
+
 // Adopt the lane that owns Hyprland's current focused window, dropping a stale
 // empty temporary lane when necessary.
 bool CanvasLayout::adoptFocusedLane(PHLWINDOW focusedWindow, PHLMONITOR fallbackMonitor)

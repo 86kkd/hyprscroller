@@ -93,7 +93,10 @@ namespace {
         if (workspace)
             *workspace = workspace_id;
 
-        return getCanvasForWorkspace(workspace_id);
+        auto *layout = getCanvasForWorkspace(workspace_id);
+        if (layout)
+            layout->prepareForActionContext();
+        return layout;
     }
 
     // cyclesize(+1|-1): change active stack width/height step.
