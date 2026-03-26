@@ -18,6 +18,7 @@
 #include "dispatchers.h"
 #include "hyprlang.hpp"
 #include "layout/canvas/layout.h"
+#include "overview/render.h"
 
 // Hyprland plugin handle used by config lookups and dispatcher registration.
 HANDLE PHANDLE = nullptr;
@@ -85,11 +86,14 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         &typeid(CanvasLayout),
         []() -> UP<Layout::ITiledAlgorithm> { return makeUnique<CanvasLayout>(); });
 
+    Overview::initializeRendererHooks(PHANDLE);
+
     // Keep the exported plugin metadata stable for plugin discovery and UI.
     return {"hyprscroller", "scrolling window layout", "dawser", "1.0"};
 }
 
 // Plugin shutdown hook used for final logging only.
 APICALL EXPORT void PLUGIN_EXIT() {
+    Overview::shutdownRendererHooks(PHANDLE);
     spdlog::info("pluginExit");
 }

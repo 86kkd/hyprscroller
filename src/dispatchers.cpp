@@ -21,6 +21,7 @@
 #include "core/direction.h"
 #include "dispatchers.h"
 #include "layout/canvas/layout.h"
+#include "overview/session.h"
 
 extern HANDLE PHANDLE;
 
@@ -65,6 +66,13 @@ namespace {
     // Resolve layout by cursor position and current active workspace, while
     // excluding fullscreen contexts that should not react to plugin actions.
     CanvasLayout *layout_for_action(int *workspace) {
+        if (Overview::session().active()) {
+            spdlog::debug("layout_for_action: ignored while global overview is active");
+            if (workspace)
+                *workspace = -1;
+            return nullptr;
+        }
+
         PHLMONITOR monitor = g_pCompositor->getMonitorFromCursor();
         if (!monitor) {
             spdlog::warn("layout_for_action: no monitor under cursor");
@@ -120,6 +128,19 @@ namespace {
     // movefocus <dir>: move focus inside scroller layout, with optional monitor
     // fallback when the active lane cannot move in requested direction.
     void dispatch_movefocus(std::string arg) {
+        auto args = CVarList(arg);
+        const auto direction = ScrollerCore::parse_direction_arg(args[0]);
+        if (!direction) {
+            spdlog::warn("dispatch_movefocus: unsupported arg='{}'", arg);
+            return;
+        }
+
+        if (Overview::session().active()) {
+            spdlog::info("dispatch_movefocus: overview arg='{}'", arg);
+            (void)Overview::session().moveSelection(*direction);
+            return;
+        }
+
         int workspace;
         auto layout = layout_for_action(&workspace);
         if (!layout || workspace == -1) {
@@ -127,13 +148,8 @@ namespace {
             return;
         }
 
-        auto args = CVarList(arg);
-        if (auto direction = ScrollerCore::parse_direction_arg(args[0])) {
-            spdlog::info("dispatch_movefocus: arg='{}' workspace={}", arg, workspace);
-            layout->move_focus(workspace, *direction);
-        } else {
-            spdlog::warn("dispatch_movefocus: unsupported arg='{}'", arg);
-        }
+        spdlog::info("dispatch_movefocus: arg='{}' workspace={}", arg, workspace);
+        layout->move_focus(workspace, *direction);
     }
 
     // movewindow <dir>: reorder active window inside lane/stack.
@@ -213,8 +229,20 @@ namespace {
         }
     }
 
-    // toggleoverview: switch overview miniaturized layout mode for active workspace.
+    // toggleoverview: enter or accept the global logical overview session.
     void dispatch_toggleoverview(std::string arg) {
+        (void)arg;
+        auto& overview = Overview::session();
+        if (overview.active()) {
+            overview.close(true);
+            return;
+        }
+
+        overview.open();
+    }
+
+    // togglelaneoverview: switch the old lane-local geometry overview mode.
+    void dispatch_togglelaneoverview(std::string arg) {
         int workspace;
         auto layout = layout_for_action(&workspace);
         if (!layout || workspace == -1)
@@ -313,6 +341,7 @@ void dispatchers::addDispatchers() {
     HyprlandAPI::addDispatcherV2(PHANDLE, "scroller:setmode", wrap(dispatch_setmode));
     HyprlandAPI::addDispatcherV2(PHANDLE, "scroller:fitsize", wrap(dispatch_fitsize));
     HyprlandAPI::addDispatcherV2(PHANDLE, "scroller:toggleoverview", wrap(dispatch_toggleoverview));
+    HyprlandAPI::addDispatcherV2(PHANDLE, "scroller:togglelaneoverview", wrap(dispatch_togglelaneoverview));
     HyprlandAPI::addDispatcherV2(PHANDLE, "scroller:togglefullscreen", wrap(dispatch_togglefullscreen));
     HyprlandAPI::addDispatcherV2(PHANDLE, "scroller:createlane", wrap(dispatch_createlane));
     HyprlandAPI::addDispatcherV2(PHANDLE, "scroller:focuslane", wrap(dispatch_focuslane));

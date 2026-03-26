@@ -30,6 +30,10 @@ add_library(hyprscroller SHARED
             src/core/direction.cpp
             src/core/layout_math.cpp
             src/list.h
+            src/overview/session.h
+            src/overview/session.cpp
+            src/overview/render.h
+            src/overview/render.cpp
             src/model/window.cpp
             src/model/stack.cpp
             src/layout/canvas/core.cpp
