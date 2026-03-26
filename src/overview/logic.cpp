@@ -181,4 +181,17 @@ std::vector<AcceptAction> buildEmptyAcceptPlan(int monitorId, WorkspaceId worksp
     };
 }
 
+std::vector<AcceptAction> buildWorkspaceAcceptPlan(int monitorId, WorkspaceId workspaceId, bool specialWorkspace) {
+    auto plan = std::vector<AcceptAction>{
+        {.type = AcceptActionType::FocusMonitor, .monitorId = monitorId, .workspaceId = WORKSPACE_ID_INVALID},
+    };
+
+    plan.push_back({
+        .type = specialWorkspace ? AcceptActionType::ToggleSpecialWorkspace : AcceptActionType::Workspace,
+        .monitorId = MONITOR_ID_INVALID,
+        .workspaceId = workspaceId,
+    });
+    return plan;
+}
+
 } // namespace OverviewLogic

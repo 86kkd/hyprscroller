@@ -32,10 +32,14 @@ add_library(hyprscroller SHARED
             src/list.h
             src/overview/logic.h
             src/overview/logic.cpp
+            src/overview/model.h
+            src/overview/model.cpp
             src/overview/session.h
             src/overview/session.cpp
             src/overview/render.h
             src/overview/render.cpp
+            src/overview/pass_element.h
+            src/overview/pass_element.cpp
             src/model/window.cpp
             src/model/stack.cpp
             src/layout/canvas/core.cpp
@@ -86,6 +90,7 @@ if(BUILD_TESTING)
         ${DEPS_INCLUDE_DIRS}
         /usr/include/hyprland/wlroots-hyprland/hyprland
         /usr/include/hyprland/src)
-    target_link_libraries(hyprscroller_logic_tests PRIVATE spdlog::spdlog_header_only)
+    target_link_libraries(hyprscroller_logic_tests PRIVATE spdlog::spdlog_header_only stdc++)
+    set_target_properties(hyprscroller_logic_tests PROPERTIES LINKER_LANGUAGE CXX)
     add_test(NAME hyprscroller.logic COMMAND hyprscroller_logic_tests)
 endif()

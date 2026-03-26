@@ -17,6 +17,7 @@
 #include <hyprland/src/helpers/Monitor.hpp>
 #include <spdlog/spdlog.h>
 #include <optional>
+#include <string_view>
 
 #include "core/direction.h"
 #include "dispatchers.h"
@@ -26,6 +27,14 @@
 extern HANDLE PHANDLE;
 
 namespace {
+    bool is_overview_cancel_arg(std::string_view arg) {
+        return arg == "cancel" || arg == "abort" || arg == "close";
+    }
+
+    bool is_overview_accept_arg(std::string_view arg) {
+        return arg == "accept" || arg == "confirm" || arg == "enter";
+    }
+
     // Resolve canvas layout instance from workspace id, returning nullptr when
     // the workspace is not currently managed by this plugin.
     CanvasLayout *getCanvasForWorkspace(const int workspace_id) {
@@ -231,14 +240,35 @@ namespace {
 
     // toggleoverview: enter or accept the global logical overview session.
     void dispatch_toggleoverview(std::string arg) {
-        (void)arg;
         auto& overview = Overview::session();
+        if (is_overview_cancel_arg(arg)) {
+            if (overview.active())
+                overview.close(false);
+            return;
+        }
+
+        if (is_overview_accept_arg(arg)) {
+            if (overview.active())
+                overview.close(true);
+            else
+                overview.open();
+            return;
+        }
+
         if (overview.active()) {
             overview.close(true);
             return;
         }
 
         overview.open();
+    }
+
+    // canceloverview: leave the global overview session without accepting.
+    void dispatch_canceloverview(std::string arg) {
+        (void)arg;
+        auto& overview = Overview::session();
+        if (overview.active())
+            overview.close(false);
     }
 
     // togglelaneoverview: switch the old lane-local geometry overview mode.
@@ -341,6 +371,7 @@ void dispatchers::addDispatchers() {
     HyprlandAPI::addDispatcherV2(PHANDLE, "scroller:setmode", wrap(dispatch_setmode));
     HyprlandAPI::addDispatcherV2(PHANDLE, "scroller:fitsize", wrap(dispatch_fitsize));
     HyprlandAPI::addDispatcherV2(PHANDLE, "scroller:toggleoverview", wrap(dispatch_toggleoverview));
+    HyprlandAPI::addDispatcherV2(PHANDLE, "scroller:canceloverview", wrap(dispatch_canceloverview));
     HyprlandAPI::addDispatcherV2(PHANDLE, "scroller:togglelaneoverview", wrap(dispatch_togglelaneoverview));
     HyprlandAPI::addDispatcherV2(PHANDLE, "scroller:togglefullscreen", wrap(dispatch_togglefullscreen));
     HyprlandAPI::addDispatcherV2(PHANDLE, "scroller:createlane", wrap(dispatch_createlane));

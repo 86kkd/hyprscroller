@@ -10,8 +10,6 @@
 #include "session.h"
 
 #include <algorithm>
-#include <cmath>
-#include <limits>
 #include <string>
 
 #include <hyprland/src/Compositor.hpp>
@@ -37,20 +35,6 @@ std::string workspace_selector(PHLWORKSPACE workspace) {
     return std::to_string(workspace->m_id);
 }
 
-bool is_tiled_overview_window(PHLWINDOW window) {
-    return window && window->m_isMapped && !window->m_isFloating;
-}
-
-PHLMONITOR monitor_for_workspace(PHLWORKSPACE workspace) {
-    if (!workspace)
-        return nullptr;
-
-    if (const auto monitor = CanvasLayoutInternal::visible_monitor_for_workspace(workspace))
-        return monitor;
-
-    return g_pCompositor->getMonitorFromID(workspace->monitorID());
-}
-
 void prepareAllCanvasesForOverview() {
     for (const auto& workspaceRef : g_pCompositor->getWorkspaces()) {
         const auto workspace = workspaceRef.lock();
@@ -65,103 +49,46 @@ void prepareAllCanvasesForOverview() {
     }
 }
 
-Box union_box(const std::vector<Target>& targets) {
-    if (targets.empty())
-        return {};
-
-    auto left = targets.front().box.x;
-    auto top = targets.front().box.y;
-    auto right = targets.front().box.x + targets.front().box.w;
-    auto bottom = targets.front().box.y + targets.front().box.h;
-
-    for (const auto& target : targets) {
-        left = std::min(left, target.box.x);
-        top = std::min(top, target.box.y);
-        right = std::max(right, target.box.x + target.box.w);
-        bottom = std::max(bottom, target.box.y + target.box.h);
+int resolved_monitor_id(PHLWORKSPACE workspace, PHLWINDOW window, int fallbackMonitorId) {
+    if (window) {
+        if (const auto monitor = g_pCompositor->getMonitorFromID(window->monitorID()))
+            return monitor->m_id;
     }
 
-    return {left, top, right - left, bottom - top};
-}
+    if (workspace) {
+        if (const auto monitor = CanvasLayoutInternal::visible_monitor_for_workspace(workspace))
+            return monitor->m_id;
 
-void scale_workspace_targets(WorkspaceNode& node) {
-    if (node.targets.empty())
-        return;
-
-    const auto sourceBounds = union_box(node.targets);
-    const auto usableWidth = std::max(1.0, node.box.w - 24.0);
-    const auto usableHeight = std::max(1.0, node.box.h - 24.0);
-    const auto sourceWidth = std::max(1.0, sourceBounds.w);
-    const auto sourceHeight = std::max(1.0, sourceBounds.h);
-    const auto scale = std::min(usableWidth / sourceWidth, usableHeight / sourceHeight);
-    const auto offsetX = node.box.x + (node.box.w - sourceWidth * scale) / 2.0;
-    const auto offsetY = node.box.y + (node.box.h - sourceHeight * scale) / 2.0;
-
-    for (auto& target : node.targets) {
-        const auto relativeX = target.box.x - sourceBounds.x;
-        const auto relativeY = target.box.y - sourceBounds.y;
-        target.box = {
-            offsetX + relativeX * scale,
-            offsetY + relativeY * scale,
-            std::max(24.0, target.box.w * scale),
-            std::max(24.0, target.box.h * scale),
-        };
+        if (const auto workspaceMonitor = g_pCompositor->getMonitorFromID(workspace->monitorID()))
+            return workspaceMonitor->m_id;
     }
+
+    return fallbackMonitorId;
 }
 
-double center_x(const Box& box) {
-    return box.x + box.w / 2.0;
-}
-
-double center_y(const Box& box) {
-    return box.y + box.h / 2.0;
-}
-
-bool is_in_direction(const Box& from, const Box& candidate, Direction direction) {
-    switch (direction) {
-        case Direction::Left:
-            return center_x(candidate) < center_x(from);
-        case Direction::Right:
-            return center_x(candidate) > center_x(from);
-        case Direction::Up:
-            return center_y(candidate) < center_y(from);
-        case Direction::Down:
-            return center_y(candidate) > center_y(from);
-        default:
-            return false;
+bool execute_accept_plan(const std::vector<OverviewLogic::AcceptAction>& plan, PHLWORKSPACE workspace, const char* context) {
+    for (const auto& step : plan) {
+        switch (step.type) {
+            case OverviewLogic::AcceptActionType::FocusMonitor:
+                if (const auto monitor = g_pCompositor->getMonitorFromID(step.monitorId)) {
+                    if (!monitor->m_name.empty())
+                        (void)CanvasLayoutInternal::invoke_dispatcher("focusmonitor", monitor->m_name, context);
+                }
+                break;
+            case OverviewLogic::AcceptActionType::Workspace: {
+                const auto selector = workspace ? workspace_selector(workspace) : std::to_string(step.workspaceId);
+                (void)CanvasLayoutInternal::invoke_dispatcher("workspace", selector, context);
+                break;
+            }
+            case OverviewLogic::AcceptActionType::ToggleSpecialWorkspace: {
+                const auto selector = workspace ? workspace_selector(workspace) : std::to_string(step.workspaceId);
+                (void)CanvasLayoutInternal::invoke_dispatcher("togglespecialworkspace", selector, context);
+                break;
+            }
+        }
     }
-}
 
-double primary_distance(const Box& from, const Box& candidate, Direction direction) {
-    switch (direction) {
-        case Direction::Left:
-            return center_x(from) - center_x(candidate);
-        case Direction::Right:
-            return center_x(candidate) - center_x(from);
-        case Direction::Up:
-            return center_y(from) - center_y(candidate);
-        case Direction::Down:
-            return center_y(candidate) - center_y(from);
-        default:
-            return std::numeric_limits<double>::infinity();
-    }
-}
-
-double secondary_distance(const Box& from, const Box& candidate, Direction direction) {
-    switch (direction) {
-        case Direction::Left:
-        case Direction::Right:
-            return std::abs(center_y(candidate) - center_y(from));
-        case Direction::Up:
-        case Direction::Down:
-            return std::abs(center_x(candidate) - center_x(from));
-        default:
-            return std::numeric_limits<double>::infinity();
-    }
-}
-
-bool same_target(const Target& a, const Target& b) {
-    return a.type == b.type && a.workspaceId == b.workspaceId && a.monitorId == b.monitorId && a.window == b.window;
+    return true;
 }
 
 } // namespace
@@ -170,16 +97,12 @@ bool Session::active() const {
     return active_;
 }
 
-const std::vector<MonitorRegion>& Session::monitors() const {
-    return monitors_;
-}
-
-const std::optional<Target>& Session::selection() const {
-    return selection_;
+const Model& Session::model() const {
+    return model_;
 }
 
 void Session::damageMonitors() const {
-    for (const auto& region : monitors_) {
+    for (const auto& region : model_.monitors()) {
         if (region.monitor)
             g_pHyprRenderer->damageMonitor(region.monitor);
     }
@@ -192,198 +115,72 @@ Session& session() {
 
 void Session::clear() {
     active_ = false;
-    originWorkspace_ = WORKSPACE_INVALID;
-    originWindow_ = nullptr;
-    monitors_.clear();
-    selection_.reset();
-    syntheticEmptyTarget_.reset();
-}
-
-WORKSPACEID Session::nextWorkspaceId() const {
-    WORKSPACEID maxWorkspaceId = 0;
-
-    for (const auto& workspaceRef : g_pCompositor->getWorkspaces()) {
-        const auto workspace = workspaceRef.lock();
-        if (!workspace)
-            continue;
-
-        maxWorkspaceId = std::max(maxWorkspaceId, workspace->m_id);
-    }
-
-    return maxWorkspaceId + 1;
-}
-
-const MonitorRegion* Session::regionForMonitor(int monitorId) const {
-    for (const auto& region : monitors_) {
-        if (region.monitorId == monitorId)
-            return &region;
-    }
-
-    return nullptr;
-}
-
-std::vector<const Target*> Session::collectTargets() const {
-    std::vector<const Target*> targets;
-
-    for (const auto& monitor : monitors_) {
-        for (const auto& workspace : monitor.workspaces) {
-            for (const auto& target : workspace.targets)
-                targets.push_back(&target);
-        }
-    }
-
-    if (syntheticEmptyTarget_)
-        targets.push_back(&*syntheticEmptyTarget_);
-
-    return targets;
-}
-
-void Session::rebuild() {
-    monitors_.clear();
-    syntheticEmptyTarget_.reset();
-
-    for (const auto& monitor : g_pCompositor->m_monitors) {
-        if (!monitor)
-            continue;
-
-        const auto bounds = CanvasLayoutInternal::compute_canvas_bounds(monitor);
-        MonitorRegion region;
-        region.monitorId = monitor->m_id;
-        region.monitor = monitor;
-        region.box = bounds.max;
-        monitors_.push_back(std::move(region));
-    }
-
-    for (const auto& workspaceRef : g_pCompositor->getWorkspaces()) {
-        const auto workspace = workspaceRef.lock();
-        if (!workspace)
-            continue;
-
-        auto* layout = CanvasLayoutInternal::get_canvas_for_workspace(workspace->m_id);
-        if (!layout)
-            continue;
-
-        const auto snapshot = layout->buildOverviewSnapshot();
-        if (snapshot.windows.empty())
-            continue;
-
-        auto regionIt = std::find_if(monitors_.begin(), monitors_.end(), [&](const MonitorRegion& region) {
-            return region.monitorId == snapshot.monitorId;
-        });
-        if (regionIt == monitors_.end()) {
-            if (const auto monitor = monitor_for_workspace(workspace)) {
-                regionIt = std::find_if(monitors_.begin(), monitors_.end(), [&](const MonitorRegion& region) {
-                    return region.monitorId == monitor->m_id;
-                });
-            }
-        }
-        if (regionIt == monitors_.end())
-            continue;
-
-        WorkspaceNode node;
-        node.workspaceId = snapshot.workspaceId;
-        node.monitorId = regionIt->monitorId;
-        for (const auto& snapshotWindow : snapshot.windows) {
-            if (!is_tiled_overview_window(snapshotWindow.window))
-                continue;
-
-            Target target;
-            target.type = TargetType::Window;
-            target.workspaceId = snapshot.workspaceId;
-            target.monitorId = regionIt->monitorId;
-            target.window = snapshotWindow.window;
-            target.box = snapshotWindow.box;
-            target.synthetic = false;
-            node.targets.push_back(std::move(target));
-        }
-
-        if (node.targets.empty())
-            continue;
-
-        regionIt->workspaces.push_back(std::move(node));
-    }
-
-    for (auto& region : monitors_) {
-        std::sort(region.workspaces.begin(), region.workspaces.end(), [](const WorkspaceNode& a, const WorkspaceNode& b) {
-            return a.workspaceId < b.workspaceId;
-        });
-
-        const auto count = static_cast<double>(region.workspaces.size());
-        if (count == 0.0)
-            continue;
-
-        const auto sliceHeight = region.box.h / count;
-        auto index = 0.0;
-        for (auto& workspace : region.workspaces) {
-            workspace.box = {
-                region.box.x,
-                region.box.y + sliceHeight * index,
-                region.box.w,
-                sliceHeight,
-            };
-            scale_workspace_targets(workspace);
-            index += 1.0;
-        }
-    }
+    model_.clear();
 }
 
 bool Session::selectInitialTarget() {
-    const auto targets = collectTargets();
-    if (targets.empty()) {
-        if (monitors_.empty())
+    const auto& targetGraph = model_.targetGraph();
+    if (targetGraph.empty()) {
+        if (model_.monitors().empty())
             return false;
 
-        const auto* region = regionForMonitor(g_pCompositor->getMonitorFromCursor() ? g_pCompositor->getMonitorFromCursor()->m_id : monitors_.front().monitorId);
+        const auto* region = model_.regionForMonitor(g_pCompositor->getMonitorFromCursor() ? g_pCompositor->getMonitorFromCursor()->m_id : model_.monitors().front().monitorId);
         if (!region)
-            region = &monitors_.front();
+            region = &model_.monitors().front();
 
-        const auto workspaceId = nextWorkspaceId();
-        Target target;
-        target.type = TargetType::EmptyWorkspace;
-        target.workspaceId = workspaceId;
-        target.monitorId = region->monitorId;
-        target.window = nullptr;
-        target.box = {region->box.x + region->box.w * 0.25, region->box.y + region->box.h * 0.25, region->box.w * 0.5, region->box.h * 0.5};
-        target.synthetic = true;
-        selection_ = target;
-        syntheticEmptyTarget_ = selection_;
+        model_.setSyntheticSelection(makeEmptyTarget(model_.nextWorkspaceId(),
+                                                     region->monitorId,
+                                                     {region->box.x + region->box.w * 0.16,
+                                                      region->box.y + region->box.h * 0.16,
+                                                      region->box.w * 0.68,
+                                                      region->box.h * 0.68},
+                                                     true));
         return true;
     }
 
-    if (originWindow_) {
-        const auto it = std::find_if(targets.begin(), targets.end(), [&](const Target* target) {
-            return target->window == originWindow_;
-        });
-        if (it != targets.end()) {
-            selection_ = **it;
+    if (const auto originWindow = model_.origin().window; originWindow) {
+        if (const auto ref = model_.findByWindow(originWindow)) {
+            model_.setSelection(*ref);
             return true;
         }
     }
 
-    if (originWorkspace_ != WORKSPACE_INVALID) {
-        const auto it = std::find_if(targets.begin(), targets.end(), [&](const Target* target) {
-            return target->workspaceId == originWorkspace_;
-        });
-        if (it != targets.end()) {
-            selection_ = **it;
+    if (const auto originWorkspace = model_.origin().workspaceId; originWorkspace != WORKSPACE_INVALID) {
+        if (const auto ref = model_.findByWorkspace(originWorkspace)) {
+            model_.setSelection(*ref);
             return true;
         }
     }
 
-    selection_ = *targets.front();
-    return true;
+    if (const auto ref = model_.firstTarget()) {
+        model_.setSelection(*ref);
+        return true;
+    }
+
+    return false;
 }
 
 void Session::open() {
     if (active_)
         return;
 
-    originWorkspace_ = CanvasLayoutInternal::get_workspace_id();
-    if (const auto workspace = g_pCompositor->getWorkspaceByID(originWorkspace_))
-        originWindow_ = workspace->getLastFocusedWindow();
+    auto originWorkspace = CanvasLayoutInternal::get_workspace_id();
+    auto originWindow = PHLWINDOW{};
+    auto originMonitor = MONITOR_INVALID;
 
+    if (const auto workspace = g_pCompositor->getWorkspaceByID(originWorkspace)) {
+        originWindow = workspace->getLastFocusedWindow();
+        originMonitor = resolved_monitor_id(workspace, originWindow, workspace->monitorID());
+    }
+
+    if (originMonitor == MONITOR_INVALID) {
+        if (const auto monitor = g_pCompositor->getMonitorFromCursor())
+            originMonitor = monitor->m_id;
+    }
+
+    model_.setOrigin(originMonitor, originWorkspace, originWindow);
     prepareAllCanvasesForOverview();
-    rebuild();
+    model_.rebuild();
     if (!selectInitialTarget()) {
         clear();
         spdlog::warn("overview_open: no targets available");
@@ -392,58 +189,60 @@ void Session::open() {
 
     active_ = true;
     damageMonitors();
+    const auto* selection = model_.selection();
     spdlog::info("overview_open: origin_workspace={} origin_window={} monitors={} selection_workspace={} selection_window={} synthetic={}",
-                 originWorkspace_,
-                 static_cast<const void*>(originWindow_ ? originWindow_.get() : nullptr),
-                 monitors_.size(),
-                 selection_ ? selection_->workspaceId : WORKSPACE_INVALID,
-                 static_cast<const void*>(selection_ && selection_->window ? selection_->window.get() : nullptr),
-                 selection_ ? selection_->synthetic : false);
+                 model_.origin().workspaceId,
+                 static_cast<const void*>(model_.origin().window ? model_.origin().window.get() : nullptr),
+                 model_.monitors().size(),
+                 selection ? selection->workspaceId : WORKSPACE_INVALID,
+                 static_cast<const void*>(selection && selection->window ? selection->window.get() : nullptr),
+                 selection ? selection->synthetic : false);
 }
 
-const Target* Session::findBestTarget(Direction direction) const {
-    if (!selection_)
-        return nullptr;
+std::optional<TargetRef> Session::findBestTarget(Direction direction) const {
+    if (!model_.selectionRef())
+        return std::nullopt;
 
-    const auto targets = collectTargets();
-    if (targets.empty())
-        return nullptr;
+    const auto& targetGraph = model_.targetGraph();
+    if (targetGraph.empty())
+        return std::nullopt;
 
     std::vector<OverviewLogic::TargetCandidate> candidates;
-    candidates.reserve(targets.size());
+    candidates.reserve(targetGraph.size());
     auto currentIndex = size_t{0};
     auto foundCurrent = false;
-    for (size_t index = 0; index < targets.size(); ++index) {
-        const auto* target = targets[index];
-        candidates.push_back({.monitorId = target->monitorId, .box = target->box});
-        if (!foundCurrent && same_target(*target, *selection_)) {
+    for (size_t index = 0; index < targetGraph.size(); ++index) {
+        const auto& target = targetGraph[index];
+        candidates.push_back({.monitorId = target.monitorId, .box = target.box});
+        if (!foundCurrent && target.ref == *model_.selectionRef()) {
             currentIndex = index;
             foundCurrent = true;
         }
     }
 
     if (!foundCurrent)
-        return nullptr;
+        return std::nullopt;
 
     const auto nextIndex = OverviewLogic::pickTargetIndex(candidates, currentIndex, direction);
     if (!nextIndex)
-        return nullptr;
+        return std::nullopt;
 
-    return targets[*nextIndex];
+    return targetGraph[*nextIndex].ref;
 }
 
 bool Session::createSyntheticEmptyTarget(Direction direction) {
-    if (!selection_)
+    const auto* selection = model_.selection();
+    if (!selection)
         return false;
 
     std::vector<OverviewLogic::RegionCandidate> regions;
-    regions.reserve(monitors_.size());
+    regions.reserve(model_.monitors().size());
     auto currentRegionIndex = size_t{0};
     auto foundCurrentRegion = false;
-    for (size_t index = 0; index < monitors_.size(); ++index) {
-        const auto& region = monitors_[index];
+    for (size_t index = 0; index < model_.monitors().size(); ++index) {
+        const auto& region = model_.monitors()[index];
         regions.push_back({.monitorId = region.monitorId, .box = region.box});
-        if (!foundCurrentRegion && region.monitorId == selection_->monitorId) {
+        if (!foundCurrentRegion && region.monitorId == selection->monitorId) {
             currentRegionIndex = index;
             foundCurrentRegion = true;
         }
@@ -452,44 +251,40 @@ bool Session::createSyntheticEmptyTarget(Direction direction) {
     if (!foundCurrentRegion)
         return false;
 
-    const auto regionIndex = OverviewLogic::pickRegionIndexForSyntheticTarget(regions, currentRegionIndex, selection_->box, direction);
+    const auto regionIndex = OverviewLogic::pickRegionIndexForSyntheticTarget(regions, currentRegionIndex, selection->box, direction);
     if (!regionIndex)
         return false;
 
-    const auto& region = monitors_[*regionIndex];
-
-    Target target;
-    target.type = TargetType::EmptyWorkspace;
-    target.workspaceId = nextWorkspaceId();
-    target.monitorId = region.monitorId;
-    target.window = nullptr;
-    target.box = OverviewLogic::buildSyntheticTargetBox(regions[*regionIndex], selection_->box, direction);
-    target.synthetic = true;
-    syntheticEmptyTarget_ = target;
-    selection_ = syntheticEmptyTarget_;
+    const auto& region = model_.monitors()[*regionIndex];
+    model_.setSyntheticSelection(makeEmptyTarget(model_.nextWorkspaceId(),
+                                                 region.monitorId,
+                                                 OverviewLogic::buildSyntheticTargetBox(regions[*regionIndex], selection->box, direction),
+                                                 true));
+    const auto* syntheticSelection = model_.selection();
     spdlog::info("overview_create_empty: workspace={} monitor={} box=({}, {}, {}, {})",
-                 syntheticEmptyTarget_->workspaceId,
-                 syntheticEmptyTarget_->monitorId,
-                 syntheticEmptyTarget_->box.x,
-                 syntheticEmptyTarget_->box.y,
-                 syntheticEmptyTarget_->box.w,
-                 syntheticEmptyTarget_->box.h);
+                 syntheticSelection ? syntheticSelection->workspaceId : WORKSPACE_INVALID,
+                 syntheticSelection ? syntheticSelection->monitorId : MONITOR_INVALID,
+                 syntheticSelection ? syntheticSelection->box.x : 0.0,
+                 syntheticSelection ? syntheticSelection->box.y : 0.0,
+                 syntheticSelection ? syntheticSelection->box.w : 0.0,
+                 syntheticSelection ? syntheticSelection->box.h : 0.0);
     return true;
 }
 
 bool Session::moveSelection(Direction direction) {
-    if (!active_ || !selection_)
+    if (!active_ || !model_.selection())
         return false;
 
-    if (const auto* target = findBestTarget(direction)) {
-        selection_ = *target;
-        if (!selection_->synthetic)
-            syntheticEmptyTarget_.reset();
+    if (const auto targetRef = findBestTarget(direction)) {
+        model_.setSelection(*targetRef);
+        if (const auto* selection = model_.selection(); selection && !selection->synthetic)
+            model_.clearSyntheticSelection();
+        const auto* selection = model_.selection();
         spdlog::info("overview_move: direction={} workspace={} window={} synthetic={}",
                      ScrollerCore::direction_name(direction),
-                     selection_->workspaceId,
-                     static_cast<const void*>(selection_->window ? selection_->window.get() : nullptr),
-                     selection_->synthetic);
+                     selection ? selection->workspaceId : WORKSPACE_INVALID,
+                     static_cast<const void*>(selection && selection->window ? selection->window.get() : nullptr),
+                     selection ? selection->synthetic : false);
         damageMonitors();
         return true;
     }
@@ -501,43 +296,63 @@ bool Session::moveSelection(Direction direction) {
 }
 
 void Session::acceptSelection() {
-    if (!selection_)
+    const auto* selection = model_.selection();
+    if (!selection)
         return;
 
-    if (selection_->type == TargetType::EmptyWorkspace) {
-        const auto acceptPlan = OverviewLogic::buildEmptyAcceptPlan(selection_->monitorId, selection_->workspaceId);
-        for (const auto& step : acceptPlan) {
-            switch (step.type) {
-                case OverviewLogic::AcceptActionType::FocusMonitor:
-                    if (const auto monitor = g_pCompositor->getMonitorFromID(step.monitorId))
-                        CanvasLayoutInternal::invoke_dispatcher("focusmonitor", monitor->m_name, "overview_accept_empty_monitor");
-                    break;
-                case OverviewLogic::AcceptActionType::Workspace:
-                    CanvasLayoutInternal::invoke_dispatcher("workspace", std::to_string(step.workspaceId), "overview_accept_empty_workspace");
-                    break;
-            }
-        }
-        spdlog::info("overview_accept_empty: workspace={} monitor={}", selection_->workspaceId, selection_->monitorId);
+    const auto workspace = g_pCompositor->getWorkspaceByID(selection->workspaceId);
+    const auto monitorId = resolved_monitor_id(workspace, selection->window, selection->monitorId);
+
+    if (selection->type == TargetType::EmptyWorkspace) {
+        const auto acceptPlan = workspace ? OverviewLogic::buildWorkspaceAcceptPlan(monitorId, workspace->m_id, workspace->m_isSpecialWorkspace)
+                                          : OverviewLogic::buildEmptyAcceptPlan(monitorId, selection->workspaceId);
+        execute_accept_plan(acceptPlan, workspace, "overview_accept_empty");
+        spdlog::info("overview_accept_empty: workspace={} monitor={} synthetic={}",
+                     selection->workspaceId,
+                     monitorId,
+                     selection->synthetic);
         return;
     }
 
-    const auto workspace = g_pCompositor->getWorkspaceByID(selection_->workspaceId);
-    if (!workspace || !selection_->window) {
+    if (!workspace || !selection->window) {
         spdlog::warn("overview_accept_window: invalid target workspace={} window={}",
-                     selection_->workspaceId,
-                     static_cast<const void*>(selection_->window ? selection_->window.get() : nullptr));
+                     selection->workspaceId,
+                     static_cast<const void*>(selection->window ? selection->window.get() : nullptr));
         return;
     }
 
-    if (workspace->m_isSpecialWorkspace)
-        CanvasLayoutInternal::invoke_dispatcher("togglespecialworkspace", workspace_selector(workspace), "overview_accept_special");
-    else
-        CanvasLayoutInternal::invoke_dispatcher("workspace", workspace_selector(workspace), "overview_accept_window");
-
-    CanvasLayoutInternal::switch_to_window(selection_->window, true);
+    const auto acceptPlan = OverviewLogic::buildWorkspaceAcceptPlan(monitorId, workspace->m_id, workspace->m_isSpecialWorkspace);
+    execute_accept_plan(acceptPlan, workspace, "overview_accept_window");
+    CanvasLayoutInternal::switch_to_window(selection->window, true);
     spdlog::info("overview_accept_window: workspace={} window={} special={}",
-                 selection_->workspaceId,
-                 static_cast<const void*>(selection_->window.get()),
+                 selection->workspaceId,
+                 static_cast<const void*>(selection->window.get()),
+                 workspace->m_isSpecialWorkspace);
+}
+
+void Session::restoreOrigin() {
+    const auto workspace = g_pCompositor->getWorkspaceByID(model_.origin().workspaceId);
+    const auto monitorId = resolved_monitor_id(workspace, model_.origin().window, model_.origin().monitorId);
+
+    if (model_.origin().window && model_.origin().window->m_isMapped && workspace) {
+        const auto acceptPlan = OverviewLogic::buildWorkspaceAcceptPlan(monitorId, workspace->m_id, workspace->m_isSpecialWorkspace);
+        execute_accept_plan(acceptPlan, workspace, "overview_restore_origin_window");
+        CanvasLayoutInternal::switch_to_window(model_.origin().window, false);
+        spdlog::info("overview_restore_origin_window: workspace={} monitor={} window={}",
+                     workspace->m_id,
+                     monitorId,
+                     static_cast<const void*>(model_.origin().window.get()));
+        return;
+    }
+
+    if (!workspace)
+        return;
+
+    const auto acceptPlan = OverviewLogic::buildWorkspaceAcceptPlan(monitorId, workspace->m_id, workspace->m_isSpecialWorkspace);
+    execute_accept_plan(acceptPlan, workspace, "overview_restore_origin_workspace");
+    spdlog::info("overview_restore_origin_workspace: workspace={} monitor={} special={}",
+                 workspace->m_id,
+                 monitorId,
                  workspace->m_isSpecialWorkspace);
 }
 
@@ -547,11 +362,14 @@ void Session::close(bool acceptSelectionFlag) {
 
     if (acceptSelectionFlag)
         acceptSelection();
+    else
+        restoreOrigin();
 
+    const auto* selection = model_.selection();
     spdlog::info("overview_close: accepted={} selection_workspace={} selection_window={}",
                  acceptSelectionFlag,
-                 selection_ ? selection_->workspaceId : WORKSPACE_INVALID,
-                 static_cast<const void*>(selection_ && selection_->window ? selection_->window.get() : nullptr));
+                 selection ? selection->workspaceId : WORKSPACE_INVALID,
+                 static_cast<const void*>(selection && selection->window ? selection->window.get() : nullptr));
     damageMonitors();
     clear();
 }

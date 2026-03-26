@@ -307,6 +307,29 @@ void test_overview_empty_accept_plan() {
               "overview empty accept plan keeps the requested workspace id");
 }
 
+void test_overview_window_accept_plan() {
+    const auto plan = OverviewLogic::buildWorkspaceAcceptPlan(5, 17, false);
+    expect_eq(plan.size(), static_cast<size_t>(2), "overview window accept plan emits two steps");
+    expect_eq(plan[0].type, OverviewLogic::AcceptActionType::FocusMonitor,
+              "overview window accept plan focuses the monitor first");
+    expect_eq(plan[0].monitorId, 5, "overview window accept plan keeps the requested monitor id");
+    expect_eq(plan[1].type, OverviewLogic::AcceptActionType::Workspace,
+              "overview window accept plan switches normal workspace second");
+    expect_eq(plan[1].workspaceId, static_cast<OverviewLogic::WorkspaceId>(17),
+              "overview window accept plan keeps the requested workspace id");
+}
+
+void test_overview_special_workspace_accept_plan() {
+    const auto plan = OverviewLogic::buildWorkspaceAcceptPlan(3, 88, true);
+    expect_eq(plan.size(), static_cast<size_t>(2), "overview special accept plan emits two steps");
+    expect_eq(plan[0].type, OverviewLogic::AcceptActionType::FocusMonitor,
+              "overview special accept plan focuses the monitor first");
+    expect_eq(plan[1].type, OverviewLogic::AcceptActionType::ToggleSpecialWorkspace,
+              "overview special accept plan toggles special workspace second");
+    expect_eq(plan[1].workspaceId, static_cast<OverviewLogic::WorkspaceId>(88),
+              "overview special accept plan keeps the requested workspace id");
+}
+
 } // namespace
 
 int main() {
@@ -321,6 +344,8 @@ int main() {
     test_overview_target_selection_across_monitors();
     test_overview_empty_target_region_selection();
     test_overview_empty_accept_plan();
+    test_overview_window_accept_plan();
+    test_overview_special_workspace_accept_plan();
 
     if (failures != 0) {
         std::cerr << failures << " logic test(s) failed\n";

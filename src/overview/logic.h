@@ -31,6 +31,7 @@ struct RegionCandidate {
 enum class AcceptActionType {
     FocusMonitor,
     Workspace,
+    ToggleSpecialWorkspace,
 };
 
 struct AcceptAction {
@@ -44,6 +45,7 @@ std::optional<size_t> pickRegionIndexForSyntheticTarget(const std::vector<Region
                                                         const ScrollerCore::Box& sourceBox, Direction direction);
 ScrollerCore::Box     buildSyntheticTargetBox(const RegionCandidate& region, const ScrollerCore::Box& sourceBox,
                                               Direction direction);
+std::vector<AcceptAction> buildWorkspaceAcceptPlan(int monitorId, WorkspaceId workspaceId, bool specialWorkspace);
 std::vector<AcceptAction> buildEmptyAcceptPlan(int monitorId, WorkspaceId workspaceId);
 
 } // namespace OverviewLogic

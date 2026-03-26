@@ -9,45 +9,10 @@
  */
 #pragma once
 
-#include <optional>
-#include <vector>
-
-#include <hyprland/src/SharedDefs.hpp>
-#include <hyprland/src/desktop/DesktopTypes.hpp>
-#include <hyprland/src/macros.hpp>
-
 #include "../core/direction.h"
-#include "../core/types.h"
+#include "model.h"
 
 namespace Overview {
-
-enum class TargetType {
-    Window,
-    EmptyWorkspace,
-};
-
-struct Target {
-    TargetType         type = TargetType::Window;
-    WORKSPACEID        workspaceId = WORKSPACE_INVALID;
-    int                monitorId = MONITOR_INVALID;
-    PHLWINDOW          window = nullptr;
-    ScrollerCore::Box  box;
-    bool               synthetic = false;
-};
-
-struct WorkspaceNode {
-    WORKSPACEID         workspaceId = WORKSPACE_INVALID;
-    int                 monitorId = MONITOR_INVALID;
-    std::vector<Target> targets;
-    ScrollerCore::Box   box;
-};
-
-struct MonitorRegion {
-    int                       monitorId = MONITOR_INVALID;
-    PHLMONITOR                monitor = nullptr;
-    ScrollerCore::Box         box;
-    std::vector<WorkspaceNode> workspaces;
-};
 
 class Session {
   public:
@@ -55,28 +20,19 @@ class Session {
     void open();
     void close(bool acceptSelectionFlag);
     bool moveSelection(Direction direction);
-    const std::vector<MonitorRegion>& monitors() const;
-    const std::optional<Target>& selection() const;
+    const Model& model() const;
     void damageMonitors() const;
 
   private:
-    void rebuild();
-    void clear();
     bool selectInitialTarget();
     void acceptSelection();
+    void restoreOrigin();
     bool createSyntheticEmptyTarget(Direction direction);
-
-    std::vector<const Target*> collectTargets() const;
-    const Target*              findBestTarget(Direction direction) const;
-    const MonitorRegion*       regionForMonitor(int monitorId) const;
-    WORKSPACEID                nextWorkspaceId() const;
+    std::optional<TargetRef> findBestTarget(Direction direction) const;
+    void clear();
 
     bool                  active_ = false;
-    WORKSPACEID           originWorkspace_ = WORKSPACE_INVALID;
-    PHLWINDOW             originWindow_ = nullptr;
-    std::vector<MonitorRegion> monitors_;
-    std::optional<Target> selection_;
-    std::optional<Target> syntheticEmptyTarget_;
+    Model                 model_;
 };
 
 Session& session();
