@@ -9,6 +9,7 @@
 #include "core/direction.h"
 #include "core/interval.h"
 #include "core/layout_math.h"
+#include "overview/logic.h"
 #include "layout/canvas/dispatch_logic.h"
 #include "layout/canvas/handoff_state.h"
 #include "layout/canvas/route_logic.h"
@@ -270,6 +271,42 @@ void test_dispatch_logic() {
               "dispatcher helper keeps dispatcher arg");
 }
 
+void test_overview_target_selection_across_monitors() {
+    const std::vector<OverviewLogic::TargetCandidate> targets = {
+        {.monitorId = 1, .box = {0.0, 0.0, 100.0, 100.0}},
+        {.monitorId = 1, .box = {120.0, 0.0, 100.0, 100.0}},
+        {.monitorId = 2, .box = {400.0, 0.0, 100.0, 100.0}},
+    };
+
+    const auto next = OverviewLogic::pickTargetIndex(targets, 1, Direction::Right);
+    expect_true(next.has_value() && *next == 2,
+                "overview target selection crosses to the next monitor when the nearest target is there");
+}
+
+void test_overview_empty_target_region_selection() {
+    const std::vector<OverviewLogic::RegionCandidate> regions = {
+        {.monitorId = 1, .box = {0.0, 0.0, 300.0, 300.0}},
+        {.monitorId = 2, .box = {320.0, 0.0, 300.0, 300.0}},
+    };
+
+    const ScrollerCore::Box sourceBox(260.0, 120.0, 80.0, 80.0);
+    const auto regionIndex = OverviewLogic::pickRegionIndexForSyntheticTarget(regions, 0, sourceBox, Direction::Right);
+    expect_true(regionIndex.has_value() && *regionIndex == 1,
+                "overview empty target chooses the adjacent monitor region when crossing monitor bounds");
+}
+
+void test_overview_empty_accept_plan() {
+    const auto plan = OverviewLogic::buildEmptyAcceptPlan(7, 42);
+    expect_eq(plan.size(), static_cast<size_t>(2), "overview empty accept plan emits two steps");
+    expect_eq(plan[0].type, OverviewLogic::AcceptActionType::FocusMonitor,
+              "overview empty accept plan focuses the monitor first");
+    expect_eq(plan[0].monitorId, 7, "overview empty accept plan keeps the requested monitor id");
+    expect_eq(plan[1].type, OverviewLogic::AcceptActionType::Workspace,
+              "overview empty accept plan switches workspace second");
+    expect_eq(plan[1].workspaceId, static_cast<OverviewLogic::WorkspaceId>(42),
+              "overview empty accept plan keeps the requested workspace id");
+}
+
 } // namespace
 
 int main() {
@@ -281,6 +318,9 @@ int main() {
     test_handoff_state();
     test_route_logic();
     test_dispatch_logic();
+    test_overview_target_selection_across_monitors();
+    test_overview_empty_target_region_selection();
+    test_overview_empty_accept_plan();
 
     if (failures != 0) {
         std::cerr << failures << " logic test(s) failed\n";

@@ -20,6 +20,7 @@
 #include <spdlog/spdlog.h>
 
 #include "../layout/canvas/internal.h"
+#include "logic.h"
 
 namespace Overview {
 namespace {
@@ -50,11 +51,18 @@ PHLMONITOR monitor_for_workspace(PHLWORKSPACE workspace) {
     return g_pCompositor->getMonitorFromID(workspace->monitorID());
 }
 
-Box window_box(PHLWINDOW window) {
-    if (!window)
-        return {};
+void prepareAllCanvasesForOverview() {
+    for (const auto& workspaceRef : g_pCompositor->getWorkspaces()) {
+        const auto workspace = workspaceRef.lock();
+        if (!workspace)
+            continue;
 
-    return {window->m_position.x, window->m_position.y, window->m_size.x, window->m_size.y};
+        auto* layout = CanvasLayoutInternal::get_canvas_for_workspace(workspace->m_id);
+        if (!layout)
+            continue;
+
+        layout->prepareForOverviewSnapshot();
+    }
 }
 
 Box union_box(const std::vector<Target>& targets) {
@@ -246,38 +254,56 @@ void Session::rebuild() {
         monitors_.push_back(std::move(region));
     }
 
-    for (auto& region : monitors_) {
-        std::vector<PHLWORKSPACE> workspaces;
+    for (const auto& workspaceRef : g_pCompositor->getWorkspaces()) {
+        const auto workspace = workspaceRef.lock();
+        if (!workspace)
+            continue;
 
-        for (const auto& workspaceRef : g_pCompositor->getWorkspaces()) {
-            const auto workspace = workspaceRef.lock();
-            if (!workspace || monitor_for_workspace(workspace) != region.monitor)
-                continue;
+        auto* layout = CanvasLayoutInternal::get_canvas_for_workspace(workspace->m_id);
+        if (!layout)
+            continue;
 
-            WorkspaceNode node;
-            node.workspaceId = workspace->m_id;
-            node.monitorId = region.monitorId;
+        const auto snapshot = layout->buildOverviewSnapshot();
+        if (snapshot.windows.empty())
+            continue;
 
-            for (const auto& window : g_pCompositor->m_windows) {
-                if (!is_tiled_overview_window(window) || window->workspaceID() != workspace->m_id)
-                    continue;
-
-                Target target;
-                target.type = TargetType::Window;
-                target.workspaceId = workspace->m_id;
-                target.monitorId = region.monitorId;
-                target.window = window;
-                target.box = window_box(window);
-                target.synthetic = false;
-                node.targets.push_back(std::move(target));
+        auto regionIt = std::find_if(monitors_.begin(), monitors_.end(), [&](const MonitorRegion& region) {
+            return region.monitorId == snapshot.monitorId;
+        });
+        if (regionIt == monitors_.end()) {
+            if (const auto monitor = monitor_for_workspace(workspace)) {
+                regionIt = std::find_if(monitors_.begin(), monitors_.end(), [&](const MonitorRegion& region) {
+                    return region.monitorId == monitor->m_id;
+                });
             }
+        }
+        if (regionIt == monitors_.end())
+            continue;
 
-            if (node.targets.empty())
+        WorkspaceNode node;
+        node.workspaceId = snapshot.workspaceId;
+        node.monitorId = regionIt->monitorId;
+        for (const auto& snapshotWindow : snapshot.windows) {
+            if (!is_tiled_overview_window(snapshotWindow.window))
                 continue;
 
-            region.workspaces.push_back(std::move(node));
+            Target target;
+            target.type = TargetType::Window;
+            target.workspaceId = snapshot.workspaceId;
+            target.monitorId = regionIt->monitorId;
+            target.window = snapshotWindow.window;
+            target.box = snapshotWindow.box;
+            target.synthetic = false;
+            node.targets.push_back(std::move(target));
         }
 
+        if (node.targets.empty())
+            continue;
+
+        regionIt->workspaces.push_back(std::move(node));
+    }
+
+    for (auto& region : monitors_) {
         std::sort(region.workspaces.begin(), region.workspaces.end(), [](const WorkspaceNode& a, const WorkspaceNode& b) {
             return a.workspaceId < b.workspaceId;
         });
@@ -356,6 +382,7 @@ void Session::open() {
     if (const auto workspace = g_pCompositor->getWorkspaceByID(originWorkspace_))
         originWindow_ = workspace->getLastFocusedWindow();
 
+    prepareAllCanvasesForOverview();
     rebuild();
     if (!selectInitialTarget()) {
         clear();
@@ -379,74 +406,64 @@ const Target* Session::findBestTarget(Direction direction) const {
         return nullptr;
 
     const auto targets = collectTargets();
-    const auto& current = *selection_;
-    const Target* bestTarget = nullptr;
-    auto bestPrimary = std::numeric_limits<double>::infinity();
-    auto bestMonitorPenalty = std::numeric_limits<int>::max();
-    auto bestSecondary = std::numeric_limits<double>::infinity();
+    if (targets.empty())
+        return nullptr;
 
-    for (const auto* candidate : targets) {
-        if (!candidate || same_target(*candidate, current))
-            continue;
-        if (!is_in_direction(current.box, candidate->box, direction))
-            continue;
-
-        const auto primary = primary_distance(current.box, candidate->box, direction);
-        const auto monitorPenalty = candidate->monitorId == current.monitorId ? 0 : 1;
-        const auto secondary = secondary_distance(current.box, candidate->box, direction);
-
-        if (!bestTarget || primary < bestPrimary ||
-            (primary == bestPrimary && monitorPenalty < bestMonitorPenalty) ||
-            (primary == bestPrimary && monitorPenalty == bestMonitorPenalty && secondary < bestSecondary)) {
-            bestTarget = candidate;
-            bestPrimary = primary;
-            bestMonitorPenalty = monitorPenalty;
-            bestSecondary = secondary;
+    std::vector<OverviewLogic::TargetCandidate> candidates;
+    candidates.reserve(targets.size());
+    auto currentIndex = size_t{0};
+    auto foundCurrent = false;
+    for (size_t index = 0; index < targets.size(); ++index) {
+        const auto* target = targets[index];
+        candidates.push_back({.monitorId = target->monitorId, .box = target->box});
+        if (!foundCurrent && same_target(*target, *selection_)) {
+            currentIndex = index;
+            foundCurrent = true;
         }
     }
 
-    return bestTarget;
+    if (!foundCurrent)
+        return nullptr;
+
+    const auto nextIndex = OverviewLogic::pickTargetIndex(candidates, currentIndex, direction);
+    if (!nextIndex)
+        return nullptr;
+
+    return targets[*nextIndex];
 }
 
 bool Session::createSyntheticEmptyTarget(Direction direction) {
     if (!selection_)
         return false;
 
-    const auto* region = regionForMonitor(selection_->monitorId);
-    if (!region)
-        return false;
-
-    auto box = selection_->box;
-    const auto stepX = std::max(box.w, region->box.w * 0.35);
-    const auto stepY = std::max(box.h, region->box.h * 0.35);
-    switch (direction) {
-        case Direction::Left:
-            box.x -= stepX;
-            break;
-        case Direction::Right:
-            box.x += stepX;
-            break;
-        case Direction::Up:
-            box.y -= stepY;
-            break;
-        case Direction::Down:
-            box.y += stepY;
-            break;
-        default:
-            return false;
+    std::vector<OverviewLogic::RegionCandidate> regions;
+    regions.reserve(monitors_.size());
+    auto currentRegionIndex = size_t{0};
+    auto foundCurrentRegion = false;
+    for (size_t index = 0; index < monitors_.size(); ++index) {
+        const auto& region = monitors_[index];
+        regions.push_back({.monitorId = region.monitorId, .box = region.box});
+        if (!foundCurrentRegion && region.monitorId == selection_->monitorId) {
+            currentRegionIndex = index;
+            foundCurrentRegion = true;
+        }
     }
 
-    box.w = std::min(box.w, region->box.w);
-    box.h = std::min(box.h, region->box.h);
-    box.x = std::clamp(box.x, region->box.x, region->box.x + std::max(0.0, region->box.w - box.w));
-    box.y = std::clamp(box.y, region->box.y, region->box.y + std::max(0.0, region->box.h - box.h));
+    if (!foundCurrentRegion)
+        return false;
+
+    const auto regionIndex = OverviewLogic::pickRegionIndexForSyntheticTarget(regions, currentRegionIndex, selection_->box, direction);
+    if (!regionIndex)
+        return false;
+
+    const auto& region = monitors_[*regionIndex];
 
     Target target;
     target.type = TargetType::EmptyWorkspace;
     target.workspaceId = nextWorkspaceId();
-    target.monitorId = region->monitorId;
+    target.monitorId = region.monitorId;
     target.window = nullptr;
-    target.box = box;
+    target.box = OverviewLogic::buildSyntheticTargetBox(regions[*regionIndex], selection_->box, direction);
     target.synthetic = true;
     syntheticEmptyTarget_ = target;
     selection_ = syntheticEmptyTarget_;
@@ -488,7 +505,18 @@ void Session::acceptSelection() {
         return;
 
     if (selection_->type == TargetType::EmptyWorkspace) {
-        CanvasLayoutInternal::invoke_dispatcher("workspace", std::to_string(selection_->workspaceId), "overview_accept_empty");
+        const auto acceptPlan = OverviewLogic::buildEmptyAcceptPlan(selection_->monitorId, selection_->workspaceId);
+        for (const auto& step : acceptPlan) {
+            switch (step.type) {
+                case OverviewLogic::AcceptActionType::FocusMonitor:
+                    if (const auto monitor = g_pCompositor->getMonitorFromID(step.monitorId))
+                        CanvasLayoutInternal::invoke_dispatcher("focusmonitor", monitor->m_name, "overview_accept_empty_monitor");
+                    break;
+                case OverviewLogic::AcceptActionType::Workspace:
+                    CanvasLayoutInternal::invoke_dispatcher("workspace", std::to_string(step.workspaceId), "overview_accept_empty_workspace");
+                    break;
+            }
+        }
         spdlog::info("overview_accept_empty: workspace={} monitor={}", selection_->workspaceId, selection_->monitorId);
         return;
     }

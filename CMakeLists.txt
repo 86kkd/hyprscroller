@@ -30,6 +30,8 @@ add_library(hyprscroller SHARED
             src/core/direction.cpp
             src/core/layout_math.cpp
             src/list.h
+            src/overview/logic.h
+            src/overview/logic.cpp
             src/overview/session.h
             src/overview/session.cpp
             src/overview/render.h
@@ -37,6 +39,7 @@ add_library(hyprscroller SHARED
             src/model/window.cpp
             src/model/stack.cpp
             src/layout/canvas/core.cpp
+            src/layout/canvas/overview.cpp
             src/layout/canvas/dispatch.cpp
             src/layout/canvas/dispatch_logic.cpp
             src/layout/canvas/route.cpp
@@ -75,6 +78,7 @@ if(BUILD_TESTING)
                    tests/logic_tests.cpp
                    src/core/direction.cpp
                    src/core/layout_math.cpp
+                   src/overview/logic.cpp
                    src/layout/canvas/dispatch_logic.cpp
                    src/layout/canvas/route_logic.cpp)
     target_include_directories(hyprscroller_logic_tests PRIVATE

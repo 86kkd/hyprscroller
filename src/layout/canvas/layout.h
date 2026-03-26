@@ -26,6 +26,17 @@
 
 class Lane;
 
+struct CanvasOverviewSnapshotWindow {
+    PHLWINDOW         window = nullptr;
+    ScrollerCore::Box box;
+};
+
+struct CanvasOverviewSnapshot {
+    WORKSPACEID                           workspaceId = WORKSPACE_INVALID;
+    int                                   monitorId = MONITOR_INVALID;
+    std::vector<CanvasOverviewSnapshotWindow> windows;
+};
+
 /**
  * @brief Tiled layout controller for one canvas/workspace instance.
  *
@@ -76,6 +87,10 @@ public:
     Vector2D predictSizeForNewWindowTiled();
     // Refresh stale special-workspace lane state before a dispatcher acts on this layout.
     void prepareForActionContext();
+    // Synchronize and relayout this canvas so overview snapshots read current lane/stack geometry.
+    void prepareForOverviewSnapshot();
+    // Build a read-only snapshot of the current logical lane/stack window geometry.
+    CanvasOverviewSnapshot buildOverviewSnapshot() const;
 
     // New dispatchers: command-facing control surface from Hyprland config.
     void cycle_window_size(int workspace, int step);
