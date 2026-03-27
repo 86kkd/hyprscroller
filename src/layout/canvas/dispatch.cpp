@@ -62,6 +62,16 @@ CanvasLayoutInternal::DispatcherRuntime &dispatcher_runtime() {
     static HyprlandDispatcherRuntime runtime;
     return g_dispatcherRuntimeOverride ? *g_dispatcherRuntimeOverride : runtime;
 }
+
+std::string workspace_selector(PHLWORKSPACE workspace) {
+    if (!workspace)
+        return {};
+
+    if (!workspace->m_name.empty())
+        return workspace->m_name;
+
+    return std::to_string(workspace->m_id);
+}
 } // namespace
 
 namespace CanvasLayoutInternal {
@@ -94,6 +104,32 @@ void dispatch_directional_builtin(const char* dispatcher, Direction direction) {
 // Thin specialized wrapper for builtin movefocus.
 void dispatch_builtin_movefocus(Direction direction) {
     dispatch_directional_builtin("movefocus", direction);
+}
+
+// Focus a monitor even when no concrete target window exists yet.
+void focus_monitor_workspace(PHLMONITOR monitor, PHLWORKSPACE workspace, WORKSPACEID fallback_workspace_id, const char* context) {
+    const auto *ctx = context ? context : "focus_monitor_workspace";
+
+    if (monitor && !monitor->m_name.empty()) {
+        spdlog::debug("{}: focusing monitor={} workspace={}",
+                      ctx,
+                      monitor->m_name,
+                      workspace ? workspace->m_id : fallback_workspace_id);
+        (void)invoke_dispatcher("focusmonitor", monitor->m_name, ctx);
+    }
+
+    // `workspace` is idempotent for normal workspaces and keeps the focused
+    // monitor ready for subsequent window creation. Special workspaces are
+    // already visible on the target monitor, so re-toggling them would be risky.
+    if (workspace && !workspace->m_isSpecialWorkspace) {
+        const auto selector = workspace_selector(workspace);
+        if (!selector.empty())
+            (void)invoke_dispatcher("workspace", selector, ctx);
+        return;
+    }
+
+    if (!workspace && fallback_workspace_id != WORKSPACE_INVALID)
+        (void)invoke_dispatcher("workspace", std::to_string(fallback_workspace_id), ctx);
 }
 
 // Focus the monitor hosting a target window before focusing the window itself.

@@ -265,8 +265,21 @@ void CanvasLayout::handoffFocusAcrossMonitor(int workspace, Direction direction,
     auto *targetLayout = CanvasLayoutInternal::get_canvas_for_workspace(workspaceId);
     auto *targetLane = static_cast<Lane *>(nullptr);
     auto crossMonitorTarget = resolveCrossMonitorFocusTarget(targetLayout, targetMonitor, workspaceId, direction, sourceWindow, &targetLane, &targetSelection);
+    if (dropEmptyLane(sourceLaneNode, nullptr, sourceMonitor, true)) {
+        spdlog::info("move_focus: dropped empty lane after leaving workspace={} direction={}",
+                     workspace, ScrollerCore::direction_name(direction));
+    }
+
     if (!crossMonitorTarget) {
-        spdlog::warn("move_focus: no target window for crossed monitor workspace={}", workspaceId);
+        const auto targetWorkspace = g_pCompositor->getWorkspaceByID(workspaceId);
+        spdlog::info("move_focus: no target window for crossed monitor workspace={} target_monitor={} target_workspace_found={}",
+                     workspaceId,
+                     targetMonitor->m_id,
+                     targetWorkspace != nullptr);
+        CanvasLayoutInternal::focus_monitor_workspace(targetMonitor,
+                                                      targetWorkspace,
+                                                      workspaceId,
+                                                      "move_focus_cross_monitor_empty_target");
         return;
     }
 
@@ -283,11 +296,6 @@ void CanvasLayout::handoffFocusAcrossMonitor(int workspace, Direction direction,
         crossMonitorTarget ? crossMonitorTarget->m_position.y : 0.0,
         crossMonitorTarget ? crossMonitorTarget->m_size.x : 0.0,
         crossMonitorTarget ? crossMonitorTarget->m_size.y : 0.0);
-
-    if (dropEmptyLane(sourceLaneNode, nullptr, sourceMonitor, true)) {
-        spdlog::info("move_focus: dropped empty lane after leaving workspace={} direction={}",
-                     workspace, ScrollerCore::direction_name(direction));
-    }
 
     if (targetLane == nullptr) {
         spdlog::warn("move_focus: no lane for crossed monitor target window={} workspace={}",
