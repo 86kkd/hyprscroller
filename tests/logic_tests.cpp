@@ -10,6 +10,7 @@
 #include "core/interval.h"
 #include "core/layout_math.h"
 #include "overview/logic.h"
+#include "overview/orientation_math.h"
 #include "layout/canvas/dispatch_logic.h"
 #include "layout/canvas/handoff_state.h"
 #include "layout/canvas/route_logic.h"
@@ -153,6 +154,41 @@ void test_overview_projection() {
     expect_near(degenerateProjection.scale, 1.0, 1e-9, "degenerate projection keeps scale at 1");
     expect_near(degenerateProjection.offset.x, 50.0, 1e-9, "degenerate projection preserves raw x offset");
     expect_near(degenerateProjection.offset.y, 10.0, 1e-9, "degenerate projection preserves raw y offset");
+}
+
+void test_monitor_space_orientation() {
+    using Overview::MonitorOrientation;
+
+    expect_eq(Overview::orientation_for_transform(WL_OUTPUT_TRANSFORM_NORMAL),
+              MonitorOrientation::Landscape,
+              "normal transform is landscape");
+    expect_eq(Overview::orientation_for_transform(WL_OUTPUT_TRANSFORM_180),
+              MonitorOrientation::Landscape,
+              "180 transform stays landscape");
+    expect_eq(Overview::orientation_for_transform(WL_OUTPUT_TRANSFORM_90),
+              MonitorOrientation::Portrait,
+              "90 transform is portrait");
+    expect_eq(Overview::orientation_for_transform(WL_OUTPUT_TRANSFORM_270),
+              MonitorOrientation::Portrait,
+              "270 transform is portrait");
+
+    const auto portraitRenderBox = Overview::transform_box_to_render_space({10.0, 20.0, 100.0, 200.0},
+                                                                           WL_OUTPUT_TRANSFORM_270,
+                                                                           1080.0,
+                                                                           1920.0);
+    expect_near(portraitRenderBox.x, 860.0, 1e-9, "portrait transform remaps x into render space");
+    expect_near(portraitRenderBox.y, 10.0, 1e-9, "portrait transform remaps y into render space");
+    expect_near(portraitRenderBox.w, 200.0, 1e-9, "portrait transform swaps width");
+    expect_near(portraitRenderBox.h, 100.0, 1e-9, "portrait transform swaps height");
+
+    const auto landscapeRenderBox = Overview::transform_box_to_render_space({10.0, 20.0, 100.0, 200.0},
+                                                                            WL_OUTPUT_TRANSFORM_NORMAL,
+                                                                            1920.0,
+                                                                            1080.0);
+    expect_near(landscapeRenderBox.x, 10.0, 1e-9, "landscape transform keeps x stable");
+    expect_near(landscapeRenderBox.y, 20.0, 1e-9, "landscape transform keeps y stable");
+    expect_near(landscapeRenderBox.w, 100.0, 1e-9, "landscape transform keeps width stable");
+    expect_near(landscapeRenderBox.h, 200.0, 1e-9, "landscape transform keeps height stable");
 }
 
 void test_handoff_state() {
@@ -338,6 +374,7 @@ int main() {
     test_parse_helpers();
     test_anchor_selection();
     test_overview_projection();
+    test_monitor_space_orientation();
     test_handoff_state();
     test_route_logic();
     test_dispatch_logic();
