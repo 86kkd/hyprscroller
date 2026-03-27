@@ -178,6 +178,11 @@ bool Stack::swap_windows(PHLWINDOW a, PHLWINDOW b) {
 void Stack::add_active_window(PHLWINDOW window, double maxh) {
     reorder = Reorder::Auto;
     const auto previous = active;
+    // Portrait fullscreen is a temporary active-window expansion. Collapse it
+    // before inserting so the new window inherits the restored size instead of
+    // the full monitor height.
+    if (previous && previous->data()->expanded())
+        (void)previous->data()->toggle_expand(geom.h);
     const auto new_height = previous ? previous->data()->get_geom_h() : maxh;
     active = windows.emplace_after(active, new Window(window, new_height));
 
@@ -500,6 +505,11 @@ void Stack::admit_window(std::unique_ptr<Window> window) {
     if (!window) {
         return;
     }
+
+    // Moving a window into an expanded portrait stack should restore the stack
+    // first; otherwise the admitted window inherits fullscreen geometry.
+    if (active && active->data()->expanded())
+        (void)active->data()->toggle_expand(geom.h);
 
     if (active) {
         const auto activeWindow = active->data();
