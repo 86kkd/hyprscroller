@@ -63,6 +63,59 @@ Box inset_box(const Box& box, double ratio, double minimumInset = 18.0) {
     };
 }
 
+MonitorRegion make_monitor_region(PHLMONITOR monitor) {
+    const auto bounds = CanvasLayoutInternal::compute_canvas_bounds(monitor);
+    return {
+        .monitorId = static_cast<int>(monitor->m_id),
+        .monitor = monitor,
+        .box = bounds.max,
+        .workspaces = {},
+    };
+}
+
+MonitorRegion* find_region_by_monitor_id(std::vector<MonitorRegion>& monitors, int monitorId) {
+    if (monitorId == MONITOR_INVALID)
+        return nullptr;
+
+    const auto regionIt = std::find_if(monitors.begin(), monitors.end(), [&](const MonitorRegion& region) {
+        return region.monitorId == monitorId;
+    });
+    return regionIt == monitors.end() ? nullptr : &*regionIt;
+}
+
+MonitorRegion* resolve_workspace_region(std::vector<MonitorRegion>& monitors, int snapshotMonitorId, PHLWORKSPACE workspace) {
+    if (auto* region = find_region_by_monitor_id(monitors, snapshotMonitorId))
+        return region;
+
+    const auto monitor = monitor_for_workspace(workspace);
+    if (!monitor)
+        return nullptr;
+
+    return find_region_by_monitor_id(monitors, monitor->m_id);
+}
+
+WorkspaceNode build_workspace_node(const CanvasOverviewSnapshot& snapshot, int monitorId) {
+    WorkspaceNode node;
+    node.workspaceId = snapshot.workspaceId;
+    node.monitorId = monitorId;
+
+    for (const auto& snapshotWindow : snapshot.windows) {
+        if (!is_tiled_overview_window(snapshotWindow.window))
+            continue;
+
+        node.targets.push_back({
+            .type = TargetType::Window,
+            .workspaceId = snapshot.workspaceId,
+            .monitorId = monitorId,
+            .window = snapshotWindow.window,
+            .box = snapshotWindow.box,
+            .synthetic = false,
+        });
+    }
+
+    return node;
+}
+
 void scale_workspace_targets(WorkspaceNode& node) {
     if (node.targets.empty())
         return;
@@ -319,12 +372,7 @@ void Model::rebuild() {
         if (!monitor)
             continue;
 
-        const auto bounds = CanvasLayoutInternal::compute_canvas_bounds(monitor);
-        MonitorRegion region;
-        region.monitorId = monitor->m_id;
-        region.monitor = monitor;
-        region.box = bounds.max;
-        monitors_.push_back(std::move(region));
+        monitors_.push_back(make_monitor_region(monitor));
     }
 
     for (const auto& workspaceRef : g_pCompositor->getWorkspaces()) {
@@ -337,37 +385,11 @@ void Model::rebuild() {
             continue;
 
         const auto snapshot = layout->buildOverviewSnapshot();
-        auto regionIt = std::find_if(monitors_.begin(), monitors_.end(), [&](const MonitorRegion& region) {
-            return region.monitorId == snapshot.monitorId;
-        });
-        if (regionIt == monitors_.end()) {
-            if (const auto monitor = monitor_for_workspace(workspace)) {
-                regionIt = std::find_if(monitors_.begin(), monitors_.end(), [&](const MonitorRegion& region) {
-                    return region.monitorId == monitor->m_id;
-                });
-            }
-        }
-        if (regionIt == monitors_.end())
+        auto* region = resolve_workspace_region(monitors_, snapshot.monitorId, workspace);
+        if (!region)
             continue;
 
-        WorkspaceNode node;
-        node.workspaceId = snapshot.workspaceId;
-        node.monitorId = regionIt->monitorId;
-        for (const auto& snapshotWindow : snapshot.windows) {
-            if (!is_tiled_overview_window(snapshotWindow.window))
-                continue;
-
-            node.targets.push_back({
-                .type = TargetType::Window,
-                .workspaceId = snapshot.workspaceId,
-                .monitorId = regionIt->monitorId,
-                .window = snapshotWindow.window,
-                .box = snapshotWindow.box,
-                .synthetic = false,
-            });
-        }
-
-        regionIt->workspaces.push_back(std::move(node));
+        region->workspaces.push_back(build_workspace_node(snapshot, region->monitorId));
     }
 
     for (auto& region : monitors_)

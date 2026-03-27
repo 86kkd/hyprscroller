@@ -142,29 +142,28 @@ size_t Stack::size() {
     return windows.size();
 }
 
-bool Stack::has_window(PHLWINDOW window) const {
+ListNode<Window *> *Stack::findWindowNode(PHLWINDOW window) const {
+    if (!window)
+        return nullptr;
+
     for (auto win = windows.first(); win != nullptr; win = win->next()) {
         if (win->data()->ptr().lock() == window)
-            return true;
+            return win;
     }
-    return false;
+
+    return nullptr;
+}
+
+bool Stack::has_window(PHLWINDOW window) const {
+    return findWindowNode(window) != nullptr;
 }
 
 bool Stack::swap_windows(PHLWINDOW a, PHLWINDOW b) {
     if (a == b)
         return false;
 
-    ListNode<Window *> *na = nullptr;
-    ListNode<Window *> *nb = nullptr;
-    for (auto win = windows.first(); win != nullptr; win = win->next()) {
-        const auto w = win->data()->ptr().lock();
-        if (w == a)
-            na = win;
-        else if (w == b)
-            nb = win;
-        if (na && nb)
-            break;
-    }
+    auto *na = findWindowNode(a);
+    auto *nb = findWindowNode(b);
     if (!na || !nb)
         return false;
 
@@ -190,29 +189,25 @@ void Stack::add_active_window(PHLWINDOW window, double maxh) {
 
 void Stack::remove_window(PHLWINDOW window) {
     reorder = Reorder::Auto;
-    for (auto win = windows.first(); win != nullptr; win = win->next()) {
-        if (win->data()->ptr().lock() == window) {
-            if (active && window == active->data()->ptr().lock()) {
-                active = active != windows.last() ? active->next() : active->prev();
-            }
-            auto *removed = win->data();
-            windows.erase(win);
-            delete removed;
-            if (windows.size() == 1 && active) {
-                active->data()->update_height(WindowHeight::One, geom.h);
-            }
-            return;
-        }
-    }
+    auto *win = findWindowNode(window);
+    if (!win)
+        return;
+
+    if (active && window == active->data()->ptr().lock())
+        active = active != windows.last() ? active->next() : active->prev();
+
+    auto *removed = win->data();
+    windows.erase(win);
+    delete removed;
+    if (windows.size() != 1 || !active)
+        return;
+
+    active->data()->update_height(WindowHeight::One, geom.h);
 }
 
 void Stack::focus_window(PHLWINDOW window) {
-    for (auto win = windows.first(); win != nullptr; win = win->next()) {
-        if (win->data()->ptr().lock() == window) {
-            active = win;
-            return;
-        }
-    }
+    if (auto *win = findWindowNode(window))
+        active = win;
 }
 
 double Stack::get_geom_x() const {

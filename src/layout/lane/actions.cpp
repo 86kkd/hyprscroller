@@ -51,6 +51,7 @@ bool Lane::remove_window(PHLWINDOW window) {
 
     forgetWindowStack(window);
     col->remove_window(window);
+
     if (col->size() == 0) {
         if (c == active)
             active = active != stacks.last() ? active->next() : active->prev();
@@ -69,14 +70,17 @@ bool Lane::remove_window(PHLWINDOW window) {
         return true;
     }
 
-    if (ScrollerCore::mode_uses_window_expansion(mode)) {
-        if (col->size() <= 2)
-            col->fit_size(FitSize::All, calculate_gap_x(c), gap);
-        else
-            col->recalculate_stack_geometry(calculate_gap_x(c), gap);
-    } else {
+    if (!ScrollerCore::mode_uses_window_expansion(mode)) {
         col->recalculate_stack_geometry(calculate_gap_x(c), gap);
+        debugVerifyStackCache();
+        return true;
     }
+
+    if (col->size() <= 2)
+        col->fit_size(FitSize::All, calculate_gap_x(c), gap);
+    else
+        col->recalculate_stack_geometry(calculate_gap_x(c), gap);
+
     debugVerifyStackCache();
     return true;
 }

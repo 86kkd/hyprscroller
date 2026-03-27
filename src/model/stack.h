@@ -223,6 +223,8 @@ public:
     void resize_active_window(double maxw, const Vector2D &gap_x, double gap, const Vector2D &delta);
 
 private:
+    // Find the list node that owns a given compositor window.
+    ListNode<Window *> *findWindowNode(PHLWINDOW window) const;
     // Shift a window range so the active window stays visible inside the stack viewport.
     void adjust_windows(ListNode<Window *> *win, const Vector2D &gap_x, double gap);
 

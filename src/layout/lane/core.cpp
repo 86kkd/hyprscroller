@@ -207,20 +207,19 @@ ActiveWindowPayload Lane::extract_active_window_payload() {
         return {};
 
     forgetWindowStack(payloadWindow);
+    reorder = Reorder::Auto;
 
-    if (stack->size() != 0) {
-        reorder = Reorder::Auto;
-        stack->recalculate_stack_geometry(calculate_gap_x(active), gap);
+    if (stack->size() == 0) {
+        auto *emptyNode = active;
+        active = emptyNode == stacks.last() ? emptyNode->prev() : emptyNode->next();
+        stacks.erase(emptyNode);
+        forgetStackWindows(stack);
+        delete stack;
         debugVerifyStackCache();
         return payload;
     }
 
-    auto emptyNode = active;
-    active = emptyNode == stacks.last() ? emptyNode->prev() : emptyNode->next();
-    stacks.erase(emptyNode);
-    forgetStackWindows(stack);
-    delete stack;
-    reorder = Reorder::Auto;
+    stack->recalculate_stack_geometry(calculate_gap_x(active), gap);
     debugVerifyStackCache();
     return payload;
 }
@@ -273,26 +272,32 @@ void Lane::insert_window_payload(ActiveWindowPayload payload, Direction directio
         return;
     }
 
-    auto current = active;
-    if (ScrollerCore::mode_uses_stack_fullscreen(mode) && current->data()->expanded())
-        (void)current->data()->toggle_fullscreen(max, mode);
+    auto *current = active;
+    auto *currentStack = current->data();
+    if (ScrollerCore::mode_uses_stack_fullscreen(mode) && currentStack->expanded())
+        (void)currentStack->toggle_fullscreen(max, mode);
 
     auto inserted = stacks.emplace_after(current, stack);
     if (direction == Direction::Left || direction == Direction::Up || direction == Direction::Begin)
         stacks.move_before(current, inserted);
 
     if (ScrollerCore::mode_uses_stack_fullscreen(mode)) {
-        auto *currentStack = current->data();
         const auto currentWidth = currentStack->get_geom_w();
         const auto insertedWidth = stack->get_geom_w();
         const auto totalWidth = currentWidth + insertedWidth;
-        if (totalWidth > max.w && currentWidth > 0.0 && insertedWidth > 0.0) {
-            const auto scale = max.w / totalWidth;
-            currentStack->set_width_free();
-            currentStack->set_geom_w(currentWidth * scale);
-            stack->set_width_free();
-            stack->set_geom_w(insertedWidth * scale);
+        if (totalWidth <= max.w || currentWidth <= 0.0 || insertedWidth <= 0.0) {
+            active = inserted;
+            rememberWindowStack(compositorWindow, stack);
+            recalculate_lane_geometry();
+            debugVerifyStackCache();
+            return;
         }
+
+        const auto scale = max.w / totalWidth;
+        currentStack->set_width_free();
+        currentStack->set_geom_w(currentWidth * scale);
+        stack->set_width_free();
+        stack->set_geom_w(insertedWidth * scale);
     }
 
     active = inserted;

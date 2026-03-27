@@ -160,6 +160,199 @@ void draw_selection_overlay(PHLMONITOR monitor) {
                               data);
 }
 
+struct ScopedOverviewRendering {
+    ScopedOverviewRendering() {
+        g_renderingOverview = true;
+    }
+
+    ~ScopedOverviewRendering() {
+        g_renderingOverview = false;
+    }
+};
+
+struct ScopedPreviewCapture {
+    ScopedPreviewCapture(PHLMONITOR monitor, PHLWINDOW window, const MonitorSpace& captureSpace)
+        : window_(window),
+          previousWorkspace_(window ? window->m_workspace : nullptr),
+          previousRealPosition_(window ? window->m_realPosition->value() : Vector2D{}),
+          previousRealSize_(window ? window->m_realSize->value() : Vector2D{}),
+          previousBlockSurfaceFeedback_(g_pHyprRenderer->m_bBlockSurfaceFeedback),
+          uprightCaptureGuard_(monitor) {
+        if (!window_)
+            return;
+
+        g_pHyprRenderer->m_bBlockSurfaceFeedback = true;
+        if (monitor->m_activeWorkspace)
+            window_->m_workspace = monitor->m_activeWorkspace;
+        window_->m_realPosition->setValue(captureSpace.origin);
+    }
+
+    ~ScopedPreviewCapture() {
+        restore();
+    }
+
+    void restore() {
+        if (!window_ || restored_)
+            return;
+
+        window_->m_realPosition->setValue(previousRealPosition_);
+        window_->m_workspace = previousWorkspace_;
+        g_pHyprRenderer->m_bBlockSurfaceFeedback = previousBlockSurfaceFeedback_;
+        restored_ = true;
+    }
+
+    const Vector2D& previousRealPosition() const {
+        return previousRealPosition_;
+    }
+
+    const Vector2D& previousRealSize() const {
+        return previousRealSize_;
+    }
+
+  private:
+    PHLWINDOW                    window_ = nullptr;
+    PHLWORKSPACE                 previousWorkspace_ = nullptr;
+    Vector2D                     previousRealPosition_;
+    Vector2D                     previousRealSize_;
+    bool                         previousBlockSurfaceFeedback_ = false;
+    bool                         restored_ = false;
+    ScopedUprightMonitorCapture  uprightCaptureGuard_;
+};
+
+bool ensure_preview_framebuffer(WindowPreview& preview, PHLMONITOR monitor, const Target& target,
+                                int renderWidth, int renderHeight, int contentWidth, int contentHeight) {
+    const auto sizeMatches = preview.fb.isAllocated()
+        && static_cast<int>(preview.fb.m_size.x) == renderWidth
+        && static_cast<int>(preview.fb.m_size.y) == renderHeight;
+    if (sizeMatches)
+        return true;
+
+    spdlog::debug("overview_window_preview_resize: monitor={} workspace={} window={} size=({}, {}) content=({}, {}) target_box=({}, {}, {}, {}) allocated={}",
+                  monitor->m_id,
+                  target.workspaceId,
+                  preview_key(target.window),
+                  renderWidth,
+                  renderHeight,
+                  contentWidth,
+                  contentHeight,
+                  target.box.x,
+                  target.box.y,
+                  target.box.w,
+                  target.box.h,
+                  preview.fb.isAllocated());
+    preview.fb.release();
+    if (preview.fb.alloc(renderWidth, renderHeight))
+        return true;
+
+    spdlog::warn("overview_window_preview_alloc_failed: workspace={} window={} size=({}, {})",
+                 target.workspaceId,
+                 preview_key(target.window),
+                 renderWidth,
+                 renderHeight);
+    return false;
+}
+
+void log_preview_capture(const char* phase, PHLMONITOR monitor, PHLWINDOW window,
+                         const MonitorSpace& renderSpace, const MonitorSpace& captureSpace,
+                         const ScopedPreviewCapture& capture, int renderWidth, int renderHeight) {
+    const auto afterPhase = std::string_view(phase) == "after";
+    const auto key = std::string("overview_window_preview_call")
+        + (afterPhase ? "_after_" : "_")
+        + std::to_string(monitor->m_id)
+        + "_"
+        + std::to_string(reinterpret_cast<uintptr_t>(preview_key(window)));
+    if (!should_log(key))
+        return;
+
+    if (!afterPhase) {
+        spdlog::debug("overview_window_preview_call: phase=before monitor={} orientation={} capture_orientation={} transform={} scale={} window={} mapped={} workspace={} active_workspace={} "
+                      "monitor_pos=({}, {}) monitor_size=({}, {}) pixel_size=({}, {}) transformed_size=({}, {}) capture_transformed_size=({}, {}) "
+                      "window_pos=({}, {}) window_size=({}, {}) capture_pos=({}, {}) capture_size=({}, {}) fb=({}, {})",
+                      monitor->m_id,
+                      orientation_name(renderSpace.orientation()),
+                      orientation_name(captureSpace.orientation()),
+                      static_cast<int>(renderSpace.transform),
+                      monitor->m_scale,
+                      preview_key(window),
+                      window->m_isMapped,
+                      window->workspaceID(),
+                      monitor->m_activeWorkspace ? monitor->m_activeWorkspace->m_id : WORKSPACE_INVALID,
+                      monitor->m_position.x,
+                      monitor->m_position.y,
+                      monitor->m_size.x,
+                      monitor->m_size.y,
+                      renderSpace.pixelSize.x,
+                      renderSpace.pixelSize.y,
+                      renderSpace.transformedSize.x,
+                      renderSpace.transformedSize.y,
+                      captureSpace.transformedSize.x,
+                      captureSpace.transformedSize.y,
+                      capture.previousRealPosition().x,
+                      capture.previousRealPosition().y,
+                      capture.previousRealSize().x,
+                      capture.previousRealSize().y,
+                      window->m_realPosition->value().x,
+                      window->m_realPosition->value().y,
+                      window->m_realSize->value().x,
+                      window->m_realSize->value().y,
+                      renderWidth,
+                      renderHeight);
+        return;
+    }
+
+    spdlog::debug("overview_window_preview_call: phase=after monitor={} orientation={} capture_orientation={} transform={} scale={} window={} mapped={} workspace={} active_workspace={} "
+                  "window_pos=({}, {}) window_size=({}, {}) capture_pos=({}, {}) capture_size=({}, {}) fb=({}, {})",
+                  monitor->m_id,
+                  orientation_name(renderSpace.orientation()),
+                  orientation_name(captureSpace.orientation()),
+                  static_cast<int>(renderSpace.transform),
+                  monitor->m_scale,
+                  preview_key(window),
+                  window->m_isMapped,
+                  window->workspaceID(),
+                  monitor->m_activeWorkspace ? monitor->m_activeWorkspace->m_id : WORKSPACE_INVALID,
+                  capture.previousRealPosition().x,
+                  capture.previousRealPosition().y,
+                  capture.previousRealSize().x,
+                  capture.previousRealSize().y,
+                  window->m_realPosition->value().x,
+                  window->m_realPosition->value().y,
+                  window->m_realSize->value().x,
+                  window->m_realSize->value().y,
+                  renderWidth,
+                  renderHeight);
+}
+
+void render_preview_window(PHLMONITOR monitor, PHLWINDOW window) {
+    if (!g_renderWindow)
+        return;
+
+    g_pHyprOpenGL->pushMonitorTransformEnabled(false);
+    g_renderWindow(g_pHyprRenderer.get(), window, monitor, std::chrono::steady_clock::now(), false, RENDER_PASS_MAIN, false, false);
+    g_pHyprOpenGL->popMonitorTransformEnabled();
+}
+
+void log_preview_rendered(PHLMONITOR monitor, const Target& target, const WindowPreview& preview,
+                          int renderWidth, int renderHeight, int contentWidth, int contentHeight) {
+    const auto key = "overview_window_preview_rendered_" + std::to_string(monitor->m_id)
+        + "_" + std::to_string(reinterpret_cast<uintptr_t>(preview_key(target.window)));
+    if (!should_log(key))
+        return;
+
+    spdlog::debug("overview_window_preview_rendered: monitor={} workspace={} window={} size=({}, {}) content=({}, {}) original=({}, {}, {}, {})",
+                  monitor->m_id,
+                  target.workspaceId,
+                  preview_key(target.window),
+                  renderWidth,
+                  renderHeight,
+                  contentWidth,
+                  contentHeight,
+                  preview.originalPos.x,
+                  preview.originalPos.y,
+                  preview.originalSize.x,
+                  preview.originalSize.y);
+}
+
 void update_window_preview_texture(PHLMONITOR monitor, const Target& target) {
     if (!monitor || !target.window || target.type != TargetType::Window)
         return;
@@ -181,137 +374,30 @@ void update_window_preview_texture(PHLMONITOR monitor, const Target& target) {
     preview.originalSize = window->m_realSize->value();
     preview.capturedSize = Vector2D(contentWidth, contentHeight);
 
-    if (!preview.fb.isAllocated() || static_cast<int>(preview.fb.m_size.x) != renderWidth ||
-        static_cast<int>(preview.fb.m_size.y) != renderHeight) {
-        spdlog::debug("overview_window_preview_resize: monitor={} workspace={} window={} size=({}, {}) content=({}, {}) target_box=({}, {}, {}, {}) allocated={}",
-                      monitor->m_id,
-                      target.workspaceId,
-                      preview_key(window),
-                      renderWidth,
-                      renderHeight,
-                      contentWidth,
-                      contentHeight,
-                      target.box.x,
-                      target.box.y,
-                      target.box.w,
-                      target.box.h,
-                      preview.fb.isAllocated());
-        preview.fb.release();
-        if (!preview.fb.alloc(renderWidth, renderHeight)) {
-            spdlog::warn("overview_window_preview_alloc_failed: workspace={} window={} size=({}, {})",
-                         target.workspaceId,
-                         preview_key(window),
-                         renderWidth,
-                         renderHeight);
-            return;
-        }
-    }
+    if (!ensure_preview_framebuffer(preview, monitor, target, renderWidth, renderHeight, contentWidth, contentHeight))
+        return;
 
     CRegion damage(CBox(0, 0, renderWidth, renderHeight));
-    g_renderingOverview = true;
-    if (g_pHyprRenderer->beginRender(monitor, damage, RENDER_MODE_FULL_FAKE, nullptr, &preview.fb)) {
-        g_pHyprOpenGL->clear(CHyprColor(0.F, 0.F, 0.F, 0.F));
-        const auto previousBlockSurfaceFeedback = g_pHyprRenderer->m_bBlockSurfaceFeedback;
-        const auto previousWorkspace = window->m_workspace;
-        const auto previousRealPosition = window->m_realPosition->value();
-        const auto previousRealSize = window->m_realSize->value();
-        g_pHyprRenderer->m_bBlockSurfaceFeedback = true;
-        if (monitor->m_activeWorkspace)
-            window->m_workspace = monitor->m_activeWorkspace;
-        ScopedUprightMonitorCapture uprightCaptureGuard(monitor);
-        window->m_realPosition->setValue(captureSpace.origin);
-        if (should_log("overview_window_preview_call_" + std::to_string(monitor->m_id) + "_" +
-                       std::to_string(reinterpret_cast<uintptr_t>(preview_key(window))))) {
-            spdlog::debug("overview_window_preview_call: phase=before monitor={} orientation={} capture_orientation={} transform={} scale={} window={} mapped={} workspace={} active_workspace={} "
-                          "monitor_pos=({}, {}) monitor_size=({}, {}) pixel_size=({}, {}) transformed_size=({}, {}) capture_transformed_size=({}, {}) "
-                          "window_pos=({}, {}) window_size=({}, {}) capture_pos=({}, {}) capture_size=({}, {}) fb=({}, {})",
-                          monitor->m_id,
-                          orientation_name(renderSpace.orientation()),
-                          orientation_name(captureSpace.orientation()),
-                          static_cast<int>(renderSpace.transform),
-                          monitor->m_scale,
-                          preview_key(window),
-                          window->m_isMapped,
-                          window->workspaceID(),
-                          monitor->m_activeWorkspace ? monitor->m_activeWorkspace->m_id : WORKSPACE_INVALID,
-                          monitor->m_position.x,
-                          monitor->m_position.y,
-                          monitor->m_size.x,
-                          monitor->m_size.y,
-                          renderSpace.pixelSize.x,
-                          renderSpace.pixelSize.y,
-                          renderSpace.transformedSize.x,
-                          renderSpace.transformedSize.y,
-                          captureSpace.transformedSize.x,
-                          captureSpace.transformedSize.y,
-                          previousRealPosition.x,
-                          previousRealPosition.y,
-                          previousRealSize.x,
-                          previousRealSize.y,
-                          window->m_realPosition->value().x,
-                          window->m_realPosition->value().y,
-                          window->m_realSize->value().x,
-                          window->m_realSize->value().y,
-                          renderWidth,
-                          renderHeight);
-        }
-        if (g_renderWindow) {
-            g_pHyprOpenGL->pushMonitorTransformEnabled(false);
-            g_renderWindow(g_pHyprRenderer.get(), window, monitor, std::chrono::steady_clock::now(), false, RENDER_PASS_MAIN, false, false);
-            g_pHyprOpenGL->popMonitorTransformEnabled();
-        }
-        g_pHyprOpenGL->m_renderData.blockScreenShader = true;
-        if (should_log("overview_window_preview_call_after_" + std::to_string(monitor->m_id) + "_" +
-                       std::to_string(reinterpret_cast<uintptr_t>(preview_key(window))))) {
-            spdlog::debug("overview_window_preview_call: phase=after monitor={} orientation={} capture_orientation={} transform={} scale={} window={} mapped={} workspace={} active_workspace={} "
-                          "window_pos=({}, {}) window_size=({}, {}) capture_pos=({}, {}) capture_size=({}, {}) fb=({}, {})",
-                          monitor->m_id,
-                          orientation_name(renderSpace.orientation()),
-                          orientation_name(captureSpace.orientation()),
-                          static_cast<int>(renderSpace.transform),
-                          monitor->m_scale,
-                          preview_key(window),
-                          window->m_isMapped,
-                          window->workspaceID(),
-                          monitor->m_activeWorkspace ? monitor->m_activeWorkspace->m_id : WORKSPACE_INVALID,
-                          previousRealPosition.x,
-                          previousRealPosition.y,
-                          previousRealSize.x,
-                          previousRealSize.y,
-                          window->m_realPosition->value().x,
-                          window->m_realPosition->value().y,
-                          window->m_realSize->value().x,
-                          window->m_realSize->value().y,
-                          renderWidth,
-                          renderHeight);
-        }
-        window->m_realPosition->setValue(previousRealPosition);
-        window->m_workspace = previousWorkspace;
-        g_pHyprRenderer->m_bBlockSurfaceFeedback = previousBlockSurfaceFeedback;
-        g_pHyprRenderer->endRender();
-        if (should_log("overview_window_preview_rendered_" + std::to_string(monitor->m_id) + "_" + std::to_string(reinterpret_cast<uintptr_t>(preview_key(window))))) {
-            spdlog::debug("overview_window_preview_rendered: monitor={} workspace={} window={} size=({}, {}) content=({}, {}) original=({}, {}, {}, {})",
-                          monitor->m_id,
-                          target.workspaceId,
-                          preview_key(window),
-                          renderWidth,
-                          renderHeight,
-                          contentWidth,
-                          contentHeight,
-                          preview.originalPos.x,
-                          preview.originalPos.y,
-                          preview.originalSize.x,
-                          preview.originalSize.y);
-        }
-    } else {
+    ScopedOverviewRendering overviewGuard;
+    if (!g_pHyprRenderer->beginRender(monitor, damage, RENDER_MODE_FULL_FAKE, nullptr, &preview.fb)) {
         spdlog::warn("overview_window_preview_begin_render_failed: monitor={} workspace={} window={} size=({}, {})",
                      monitor->m_id,
                      target.workspaceId,
                      preview_key(window),
                      renderWidth,
                      renderHeight);
+        return;
     }
-    g_renderingOverview = false;
+
+    g_pHyprOpenGL->clear(CHyprColor(0.F, 0.F, 0.F, 0.F));
+    ScopedPreviewCapture capture(monitor, window, captureSpace);
+    log_preview_capture("before", monitor, window, renderSpace, captureSpace, capture, renderWidth, renderHeight);
+    render_preview_window(monitor, window);
+    g_pHyprOpenGL->m_renderData.blockScreenShader = true;
+    log_preview_capture("after", monitor, window, renderSpace, captureSpace, capture, renderWidth, renderHeight);
+    capture.restore();
+    g_pHyprRenderer->endRender();
+    log_preview_rendered(monitor, target, preview, renderWidth, renderHeight, contentWidth, contentHeight);
 }
 
 void update_preview_textures_for_monitor(PHLMONITOR monitor) {

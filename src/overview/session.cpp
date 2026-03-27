@@ -91,6 +91,61 @@ bool execute_accept_plan(const std::vector<OverviewLogic::AcceptAction>& plan, P
     return true;
 }
 
+const MonitorRegion* initial_empty_region(const Model& model) {
+    if (model.monitors().empty())
+        return nullptr;
+
+    const auto cursorMonitor = g_pCompositor->getMonitorFromCursor();
+    if (!cursorMonitor)
+        return &model.monitors().front();
+
+    const auto* region = model.regionForMonitor(cursorMonitor->m_id);
+    return region ? region : &model.monitors().front();
+}
+
+Target initial_empty_target(const Model& model, const MonitorRegion& region) {
+    return makeEmptyTarget(model.nextWorkspaceId(),
+                           region.monitorId,
+                           {region.box.x + region.box.w * 0.16,
+                            region.box.y + region.box.h * 0.16,
+                            region.box.w * 0.68,
+                            region.box.h * 0.68},
+                           true);
+}
+
+bool try_select_origin_window(Model& model) {
+    const auto originWindow = model.origin().window;
+    if (!originWindow)
+        return false;
+
+    const auto ref = model.findByWindow(originWindow);
+    if (!ref)
+        return false;
+
+    model.setSelection(*ref);
+    return true;
+}
+
+bool try_select_origin_workspace(Model& model) {
+    const auto originWorkspace = model.origin().workspaceId;
+    if (originWorkspace == WORKSPACE_INVALID)
+        return false;
+
+    const auto ref = model.findByWorkspace(originWorkspace);
+    if (!ref)
+        return false;
+
+    model.setSelection(*ref);
+    return true;
+}
+
+void focus_workspace_target(PHLWORKSPACE workspace, WORKSPACEID workspaceId, int monitorId, const char* context) {
+    const auto acceptPlan = workspace
+        ? OverviewLogic::buildWorkspaceAcceptPlan(monitorId, workspace->m_id, workspace->m_isSpecialWorkspace)
+        : OverviewLogic::buildEmptyAcceptPlan(monitorId, workspaceId);
+    execute_accept_plan(acceptPlan, workspace, context);
+}
+
 } // namespace
 
 bool Session::active() const {
@@ -121,36 +176,19 @@ void Session::clear() {
 bool Session::selectInitialTarget() {
     const auto& targetGraph = model_.targetGraph();
     if (targetGraph.empty()) {
-        if (model_.monitors().empty())
+        const auto* region = initial_empty_region(model_);
+        if (!region)
             return false;
 
-        const auto* region = model_.regionForMonitor(g_pCompositor->getMonitorFromCursor() ? g_pCompositor->getMonitorFromCursor()->m_id : model_.monitors().front().monitorId);
-        if (!region)
-            region = &model_.monitors().front();
-
-        model_.setSyntheticSelection(makeEmptyTarget(model_.nextWorkspaceId(),
-                                                     region->monitorId,
-                                                     {region->box.x + region->box.w * 0.16,
-                                                      region->box.y + region->box.h * 0.16,
-                                                      region->box.w * 0.68,
-                                                      region->box.h * 0.68},
-                                                     true));
+        model_.setSyntheticSelection(initial_empty_target(model_, *region));
         return true;
     }
 
-    if (const auto originWindow = model_.origin().window; originWindow) {
-        if (const auto ref = model_.findByWindow(originWindow)) {
-            model_.setSelection(*ref);
-            return true;
-        }
-    }
+    if (try_select_origin_window(model_))
+        return true;
 
-    if (const auto originWorkspace = model_.origin().workspaceId; originWorkspace != WORKSPACE_INVALID) {
-        if (const auto ref = model_.findByWorkspace(originWorkspace)) {
-            model_.setSelection(*ref);
-            return true;
-        }
-    }
+    if (try_select_origin_workspace(model_))
+        return true;
 
     if (const auto ref = model_.firstTarget()) {
         model_.setSelection(*ref);
@@ -304,9 +342,7 @@ void Session::acceptSelection() {
     const auto monitorId = resolved_monitor_id(workspace, selection->window, selection->monitorId);
 
     if (selection->type == TargetType::EmptyWorkspace) {
-        const auto acceptPlan = workspace ? OverviewLogic::buildWorkspaceAcceptPlan(monitorId, workspace->m_id, workspace->m_isSpecialWorkspace)
-                                          : OverviewLogic::buildEmptyAcceptPlan(monitorId, selection->workspaceId);
-        execute_accept_plan(acceptPlan, workspace, "overview_accept_empty");
+        focus_workspace_target(workspace, selection->workspaceId, monitorId, "overview_accept_empty");
         spdlog::info("overview_accept_empty: workspace={} monitor={} synthetic={}",
                      selection->workspaceId,
                      monitorId,
@@ -321,8 +357,7 @@ void Session::acceptSelection() {
         return;
     }
 
-    const auto acceptPlan = OverviewLogic::buildWorkspaceAcceptPlan(monitorId, workspace->m_id, workspace->m_isSpecialWorkspace);
-    execute_accept_plan(acceptPlan, workspace, "overview_accept_window");
+    focus_workspace_target(workspace, workspace->m_id, monitorId, "overview_accept_window");
     CanvasLayoutInternal::switch_to_window(selection->window, true);
     spdlog::info("overview_accept_window: workspace={} window={} special={}",
                  selection->workspaceId,
@@ -335,8 +370,7 @@ void Session::restoreOrigin() {
     const auto monitorId = resolved_monitor_id(workspace, model_.origin().window, model_.origin().monitorId);
 
     if (model_.origin().window && model_.origin().window->m_isMapped && workspace) {
-        const auto acceptPlan = OverviewLogic::buildWorkspaceAcceptPlan(monitorId, workspace->m_id, workspace->m_isSpecialWorkspace);
-        execute_accept_plan(acceptPlan, workspace, "overview_restore_origin_window");
+        focus_workspace_target(workspace, workspace->m_id, monitorId, "overview_restore_origin_window");
         CanvasLayoutInternal::switch_to_window(model_.origin().window, false);
         spdlog::info("overview_restore_origin_window: workspace={} monitor={} window={}",
                      workspace->m_id,
@@ -348,8 +382,7 @@ void Session::restoreOrigin() {
     if (!workspace)
         return;
 
-    const auto acceptPlan = OverviewLogic::buildWorkspaceAcceptPlan(monitorId, workspace->m_id, workspace->m_isSpecialWorkspace);
-    execute_accept_plan(acceptPlan, workspace, "overview_restore_origin_workspace");
+    focus_workspace_target(workspace, workspace->m_id, monitorId, "overview_restore_origin_workspace");
     spdlog::info("overview_restore_origin_workspace: workspace={} monitor={} special={}",
                  workspace->m_id,
                  monitorId,

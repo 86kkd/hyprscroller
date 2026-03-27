@@ -173,8 +173,6 @@ private:
     void focusAdjacentLane(int workspace, Direction direction, ListNode<Lane *> *sourceLaneNode, PHLMONITOR sourceMonitor, ListNode<Lane *> *targetLaneNode);
     // Create a temporary empty lane used when focus moves into blank space.
     void createEphemeralLaneForFocus(int workspace, Direction direction, PHLMONITOR sourceMonitor, Mode mode, ListNode<Lane *> *anchor);
-    // Route focus movement that leaves the current lane into adjacent lanes, monitors, or a new empty lane.
-    void routeMoveFocusAcrossLanesOrCreate(int workspace, Direction direction, PHLWINDOW sourceWindow, PHLMONITOR sourceMonitor, WORKSPACEID sourceActiveWorkspaceId, WORKSPACEID sourceSpecialWorkspaceId, ListNode<Lane *> *sourceLaneNode, Mode mode, bool allowCreate);
     // Finish a successful local focus movement by logging and switching focus.
     void finalizeLocalFocusMove(int workspace, Direction direction, Lane *lane, const char *moveResultName);
     // Drop an empty lane and resolve a valid replacement active lane.
