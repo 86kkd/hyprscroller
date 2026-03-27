@@ -109,11 +109,60 @@ CBox to_monitor_local_box(PHLMONITOR monitor, const ScrollerCore::Box& box) {
     };
 }
 
-CBox to_monitor_scaled_box(PHLMONITOR monitor, const ScrollerCore::Box& box) {
+CBox transform_box_to_render_space(const CBox& box, wl_output_transform transform, double renderWidth, double renderHeight) {
+    auto renderBox = box;
+
+    switch (transform) {
+        case WL_OUTPUT_TRANSFORM_NORMAL:
+            break;
+        case WL_OUTPUT_TRANSFORM_90:
+            renderBox = {box.y, renderHeight - (box.x + box.w), box.h, box.w};
+            break;
+        case WL_OUTPUT_TRANSFORM_180:
+            renderBox = {renderWidth - (box.x + box.w), renderHeight - (box.y + box.h), box.w, box.h};
+            break;
+        case WL_OUTPUT_TRANSFORM_270:
+            renderBox = {renderWidth - (box.y + box.h), box.x, box.h, box.w};
+            break;
+        case WL_OUTPUT_TRANSFORM_FLIPPED:
+            renderBox = {renderWidth - (box.x + box.w), box.y, box.w, box.h};
+            break;
+        case WL_OUTPUT_TRANSFORM_FLIPPED_90:
+            renderBox = {box.y, box.x, box.h, box.w};
+            break;
+        case WL_OUTPUT_TRANSFORM_FLIPPED_180:
+            renderBox = {box.x, renderHeight - (box.y + box.h), box.w, box.h};
+            break;
+        case WL_OUTPUT_TRANSFORM_FLIPPED_270:
+            renderBox = {renderWidth - (box.y + box.h), renderHeight - (box.x + box.w), box.h, box.w};
+            break;
+        default:
+            break;
+    }
+
+    renderBox.round();
+    return renderBox;
+}
+
+CBox to_monitor_render_box(PHLMONITOR monitor, const ScrollerCore::Box& box) {
     auto localBox = to_monitor_local_box(monitor, box);
-    localBox.scale(monitor->m_scale);
-    localBox.round();
-    return localBox;
+    if (!monitor) {
+        localBox.round();
+        return localBox;
+    }
+
+    const auto renderWidth = monitor->m_pixelSize.x;
+    const auto renderHeight = monitor->m_pixelSize.y;
+    return transform_box_to_render_space(localBox, monitor->m_transform, renderWidth, renderHeight);
+}
+
+CBox captured_source_box(PHLMONITOR monitor, const Vector2D& captureSize, const Vector2D& framebufferSize) {
+    (void)monitor;
+    (void)framebufferSize;
+
+    CBox captureLocalBox{0, 0, captureSize.x, captureSize.y};
+    captureLocalBox.round();
+    return captureLocalBox;
 }
 
 double lerp(double from, double to, double progress) {
@@ -132,7 +181,7 @@ CBox lerp_box(const CBox& from, const CBox& to, double progress) {
 }
 
 CBox animated_target_box(PHLMONITOR monitor, const Target& target) {
-    auto targetBox = to_monitor_scaled_box(monitor, target.box);
+    auto targetBox = to_monitor_render_box(monitor, target.box);
     if (target.type != TargetType::Window || !target.window)
         return targetBox;
 
@@ -146,7 +195,7 @@ CBox animated_target_box(PHLMONITOR monitor, const Target& target) {
         it->second.originalSize.x,
         it->second.originalSize.y,
     };
-    const auto sourceBox = to_monitor_scaled_box(monitor, sourceBoxLogical);
+    const auto sourceBox = to_monitor_render_box(monitor, sourceBoxLogical);
     return lerp_box(sourceBox, targetBox, open_progress(monitor));
 }
 
@@ -188,8 +237,8 @@ void update_window_preview_texture(PHLMONITOR monitor, const Target& target) {
     const auto renderSize = window->m_realSize->value();
     const auto contentWidth = std::max(1, static_cast<int>(std::round(renderSize.x * monitor->m_scale)));
     const auto contentHeight = std::max(1, static_cast<int>(std::round(renderSize.y * monitor->m_scale)));
-    const auto renderWidth = std::max(contentWidth, std::max(1, static_cast<int>(std::round(monitor->m_pixelSize.x))));
-    const auto renderHeight = std::max(contentHeight, std::max(1, static_cast<int>(std::round(monitor->m_pixelSize.y))));
+    const auto renderWidth = contentWidth;
+    const auto renderHeight = contentHeight;
     auto& preview = g_windowPreviews[preview_key(window)];
     preview.window = window;
     preview.originalPos = window->m_realPosition->value();
@@ -229,17 +278,78 @@ void update_window_preview_texture(PHLMONITOR monitor, const Target& target) {
         const auto previousBlockSurfaceFeedback = g_pHyprRenderer->m_bBlockSurfaceFeedback;
         const auto previousWorkspace = window->m_workspace;
         const auto previousRealPosition = window->m_realPosition->value();
+        const auto previousRealSize = window->m_realSize->value();
+        const auto previousMonitorTransform = monitor->m_transform;
+        const auto previousTransformedSize = monitor->m_transformedSize;
         g_pHyprRenderer->m_bBlockSurfaceFeedback = true;
         if (monitor->m_activeWorkspace)
             window->m_workspace = monitor->m_activeWorkspace;
+        monitor->m_transform = WL_OUTPUT_TRANSFORM_NORMAL;
+        monitor->m_transformedSize = monitor->m_pixelSize;
         window->m_realPosition->setValue(monitor->m_position);
-        g_pHyprOpenGL->pushMonitorTransformEnabled(false);
-        if (g_renderWindow)
+        if (should_log("overview_window_preview_call_" + std::to_string(monitor->m_id) + "_" +
+                       std::to_string(reinterpret_cast<uintptr_t>(preview_key(window))))) {
+            spdlog::debug("overview_window_preview_call: phase=before monitor={} transform={} scale={} window={} mapped={} workspace={} active_workspace={} "
+                          "monitor_pos=({}, {}) monitor_size=({}, {}) pixel_size=({}, {}) transformed_size=({}, {}) "
+                          "window_pos=({}, {}) window_size=({}, {}) capture_pos=({}, {}) capture_size=({}, {}) fb=({}, {})",
+                          monitor->m_id,
+                          static_cast<int>(monitor->m_transform),
+                          monitor->m_scale,
+                          preview_key(window),
+                          window->m_isMapped,
+                          window->workspaceID(),
+                          monitor->m_activeWorkspace ? monitor->m_activeWorkspace->m_id : WORKSPACE_INVALID,
+                          monitor->m_position.x,
+                          monitor->m_position.y,
+                          monitor->m_size.x,
+                          monitor->m_size.y,
+                          monitor->m_pixelSize.x,
+                          monitor->m_pixelSize.y,
+                          monitor->m_transformedSize.x,
+                          monitor->m_transformedSize.y,
+                          previousRealPosition.x,
+                          previousRealPosition.y,
+                          previousRealSize.x,
+                          previousRealSize.y,
+                          window->m_realPosition->value().x,
+                          window->m_realPosition->value().y,
+                          window->m_realSize->value().x,
+                          window->m_realSize->value().y,
+                          renderWidth,
+                          renderHeight);
+        }
+        if (g_renderWindow) {
+            g_pHyprOpenGL->pushMonitorTransformEnabled(false);
             g_renderWindow(g_pHyprRenderer.get(), window, monitor, std::chrono::steady_clock::now(), false, RENDER_PASS_MAIN, false, false);
-        g_pHyprOpenGL->popMonitorTransformEnabled();
+            g_pHyprOpenGL->popMonitorTransformEnabled();
+        }
         g_pHyprOpenGL->m_renderData.blockScreenShader = true;
+        if (should_log("overview_window_preview_call_after_" + std::to_string(monitor->m_id) + "_" +
+                       std::to_string(reinterpret_cast<uintptr_t>(preview_key(window))))) {
+            spdlog::debug("overview_window_preview_call: phase=after monitor={} transform={} scale={} window={} mapped={} workspace={} active_workspace={} "
+                          "window_pos=({}, {}) window_size=({}, {}) capture_pos=({}, {}) capture_size=({}, {}) fb=({}, {})",
+                          monitor->m_id,
+                          static_cast<int>(monitor->m_transform),
+                          monitor->m_scale,
+                          preview_key(window),
+                          window->m_isMapped,
+                          window->workspaceID(),
+                          monitor->m_activeWorkspace ? monitor->m_activeWorkspace->m_id : WORKSPACE_INVALID,
+                          previousRealPosition.x,
+                          previousRealPosition.y,
+                          previousRealSize.x,
+                          previousRealSize.y,
+                          window->m_realPosition->value().x,
+                          window->m_realPosition->value().y,
+                          window->m_realSize->value().x,
+                          window->m_realSize->value().y,
+                          renderWidth,
+                          renderHeight);
+        }
         window->m_realPosition->setValue(previousRealPosition);
         window->m_workspace = previousWorkspace;
+        monitor->m_transform = previousMonitorTransform;
+        monitor->m_transformedSize = previousTransformedSize;
         g_pHyprRenderer->m_bBlockSurfaceFeedback = previousBlockSurfaceFeedback;
         g_pHyprRenderer->endRender();
         if (should_log("overview_window_preview_rendered_" + std::to_string(monitor->m_id) + "_" + std::to_string(reinterpret_cast<uintptr_t>(preview_key(window))))) {
@@ -377,11 +487,25 @@ void compose_window_preview(PHLMONITOR monitor, const Target& target) {
         return;
     }
 
+    const auto targetLocalBox = to_monitor_local_box(monitor, target.box);
+    const auto targetRenderBox = to_monitor_render_box(monitor, target.box);
     const auto box = animated_target_box(monitor, target);
     CRegion damage{0, 0, INT16_MAX, INT16_MAX};
+    const auto sourceBox = captured_source_box(monitor, previewIt->second.capturedSize, previewIt->second.fb.m_size);
+    const ScrollerCore::Box sourceLogicalBox{
+        previewIt->second.originalPos.x,
+        previewIt->second.originalPos.y,
+        previewIt->second.originalSize.x,
+        previewIt->second.originalSize.y,
+    };
+    const auto sourceLocalBox = to_monitor_local_box(monitor, sourceLogicalBox);
+    const auto sourceRenderBox = to_monitor_render_box(monitor, sourceLogicalBox);
+    const auto uvTopLeft = Vector2D(
+        std::clamp(sourceBox.x / std::max(1.0, previewIt->second.fb.m_size.x), 0.0, 1.0),
+        std::clamp(sourceBox.y / std::max(1.0, previewIt->second.fb.m_size.y), 0.0, 1.0));
     const auto uvBottomRight = Vector2D(
-        std::clamp(previewIt->second.capturedSize.x / std::max(1.0, previewIt->second.fb.m_size.x), 0.0, 1.0),
-        std::clamp(previewIt->second.capturedSize.y / std::max(1.0, previewIt->second.fb.m_size.y), 0.0, 1.0));
+        std::clamp((sourceBox.x + sourceBox.w) / std::max(1.0, previewIt->second.fb.m_size.x), 0.0, 1.0),
+        std::clamp((sourceBox.y + sourceBox.h) / std::max(1.0, previewIt->second.fb.m_size.y), 0.0, 1.0));
 
     CHyprOpenGLImpl::STextureRenderData data;
     data.damage = &damage;
@@ -392,22 +516,64 @@ void compose_window_preview(PHLMONITOR monitor, const Target& target) {
     data.allowCustomUV = true;
     const auto previousUVTopLeft = g_pHyprOpenGL->m_renderData.primarySurfaceUVTopLeft;
     const auto previousUVBottomRight = g_pHyprOpenGL->m_renderData.primarySurfaceUVBottomRight;
-    g_pHyprOpenGL->m_renderData.primarySurfaceUVTopLeft = Vector2D(0, 0);
+    g_pHyprOpenGL->m_renderData.primarySurfaceUVTopLeft = uvTopLeft;
     g_pHyprOpenGL->m_renderData.primarySurfaceUVBottomRight = uvBottomRight;
     if (monitor && should_log("overview_window_compose_" + std::to_string(monitor->m_id) + "_" +
                               std::to_string(reinterpret_cast<uintptr_t>(preview_key(target.window))))) {
-        spdlog::debug("overview_window_compose: monitor={} transform={} window={} box=({}, {}, {}, {}) fb=({}, {}) content=({}, {}) uv=({}, {})",
+        spdlog::debug("overview_window_compose: monitor={} transform={} scale={} window={} monitor_pos=({}, {}) monitor_size=({}, {}) pixel_size=({}, {}) transformed_size=({}, {}) "
+                      "target_global=({}, {}, {}, {}) target_local=({}, {}, {}, {}) target_render=({}, {}, {}, {}) animated=({}, {}, {}, {}) "
+                      "source_global=({}, {}, {}, {}) source_local=({}, {}, {}, {}) source_render=({}, {}, {}, {}) "
+                      "fb=({}, {}) content=({}, {}) src=({}, {}, {}, {}) uv=({}, {})-({}, {})",
                       monitor->m_id,
                       static_cast<int>(monitor->m_transform),
+                      monitor->m_scale,
                       preview_key(target.window),
+                      monitor->m_position.x,
+                      monitor->m_position.y,
+                      monitor->m_size.x,
+                      monitor->m_size.y,
+                      monitor->m_pixelSize.x,
+                      monitor->m_pixelSize.y,
+                      monitor->m_transformedSize.x,
+                      monitor->m_transformedSize.y,
+                      target.box.x,
+                      target.box.y,
+                      target.box.w,
+                      target.box.h,
+                      targetLocalBox.x,
+                      targetLocalBox.y,
+                      targetLocalBox.w,
+                      targetLocalBox.h,
+                      targetRenderBox.x,
+                      targetRenderBox.y,
+                      targetRenderBox.w,
+                      targetRenderBox.h,
                       box.x,
                       box.y,
                       box.w,
                       box.h,
+                      sourceLogicalBox.x,
+                      sourceLogicalBox.y,
+                      sourceLogicalBox.w,
+                      sourceLogicalBox.h,
+                      sourceLocalBox.x,
+                      sourceLocalBox.y,
+                      sourceLocalBox.w,
+                      sourceLocalBox.h,
+                      sourceRenderBox.x,
+                      sourceRenderBox.y,
+                      sourceRenderBox.w,
+                      sourceRenderBox.h,
                       previewIt->second.fb.m_size.x,
                       previewIt->second.fb.m_size.y,
                       previewIt->second.capturedSize.x,
                       previewIt->second.capturedSize.y,
+                      sourceBox.x,
+                      sourceBox.y,
+                      sourceBox.w,
+                      sourceBox.h,
+                      uvTopLeft.x,
+                      uvTopLeft.y,
                       uvBottomRight.x,
                       uvBottomRight.y);
     }
