@@ -78,44 +78,9 @@ bool should_log(const std::string& key, std::chrono::milliseconds interval = std
     return true;
 }
 
-double open_progress(PHLMONITOR monitor) {
-    if (!monitor)
-        return 1.0;
-
-    const auto it = g_overviewOpenedAt.find(monitor->m_id);
-    if (it == g_overviewOpenedAt.end())
-        return 1.0;
-
-    constexpr auto kOpenDuration = std::chrono::milliseconds(180);
-    const auto elapsed = std::chrono::steady_clock::now() - it->second;
-    const auto progress = std::clamp(std::chrono::duration<double>(elapsed).count() /
-                                         std::chrono::duration<double>(kOpenDuration).count(),
-                                     0.0,
-                                     1.0);
-    if (progress < 1.0)
-        g_pHyprRenderer->damageMonitor(monitor);
-
-    return progress;
-}
-
-double lerp(double from, double to, double progress) {
-    return from + (to - from) * progress;
-}
-
-CBox lerp_box(const CBox& from, const CBox& to, double progress) {
-    CBox box{
-        lerp(from.x, to.x, progress),
-        lerp(from.y, to.y, progress),
-        lerp(from.w, to.w, progress),
-        lerp(from.h, to.h, progress),
-    };
-    box.round();
-    return box;
-}
-
-CBox animated_target_box(PHLMONITOR monitor, const Target& target) {
+CBox preview_target_box(PHLMONITOR monitor, const Target& target) {
     const auto renderSpace = MonitorSpace::fromMonitor(monitor);
-    auto       targetBox = renderSpace.toRenderBox(target.box);
+    auto       targetBox = renderSpace.toLocalBox(target.box);
     if (target.type != TargetType::Window || !target.window)
         return targetBox;
 
@@ -129,8 +94,7 @@ CBox animated_target_box(PHLMONITOR monitor, const Target& target) {
         it->second.originalSize.x,
         it->second.originalSize.y,
     };
-    const auto sourceBox = renderSpace.toRenderBox(sourceBoxLogical);
-    return lerp_box(sourceBox, targetBox, open_progress(monitor));
+    return renderSpace.toLocalBox(sourceBoxLogical);
 }
 
 void draw_monitor_backdrop(PHLMONITOR monitor) {
@@ -149,7 +113,7 @@ void draw_selection_overlay(PHLMONITOR monitor) {
     if (!selection || selection->monitorId != monitor->m_id)
         return;
 
-    const auto box = animated_target_box(monitor, *selection);
+    const auto box = preview_target_box(monitor, *selection);
 
     CHyprOpenGLImpl::SRectRenderData data;
     data.round = static_cast<int>(std::round(18.0 * monitor->m_scale));
@@ -433,7 +397,7 @@ void update_preview_textures_for_monitor(PHLMONITOR monitor) {
 }
 
 void compose_empty_target(PHLMONITOR monitor, const Target& target) {
-    const auto box = animated_target_box(monitor, target);
+    const auto box = preview_target_box(monitor, target);
 
     CHyprOpenGLImpl::SRectRenderData data;
     data.round = static_cast<int>(std::round(18.0 * monitor->m_scale));
@@ -453,7 +417,7 @@ void compose_empty_target(PHLMONITOR monitor, const Target& target) {
     if (originalSize.x <= 0.0 || originalSize.y <= 0.0)
         return;
 
-    const auto box = animated_target_box(monitor, target);
+    const auto box = preview_target_box(monitor, target);
     const auto currentWorkspace = window->m_workspace;
     const auto currentFullscreen = window->m_fullscreenState;
     const auto currentPinned = window->m_pinned;
@@ -513,12 +477,9 @@ void compose_window_preview(PHLMONITOR monitor, const Target& target) {
     }
 
     const auto renderSpace = MonitorSpace::fromMonitor(monitor);
-    const auto captureSpace = MonitorSpace::uprightCapture(monitor);
     const auto targetLocalBox = renderSpace.toLocalBox(target.box);
-    const auto targetRenderBox = renderSpace.toRenderBox(target.box);
-    const auto box = animated_target_box(monitor, target);
+    const auto box = preview_target_box(monitor, target);
     CRegion damage{0, 0, INT16_MAX, INT16_MAX};
-    const auto sourceBox = captureSpace.captureSourceBox(previewIt->second.capturedSize, previewIt->second.fb.m_size);
     const ScrollerCore::Box sourceLogicalBox{
         previewIt->second.originalPos.x,
         previewIt->second.originalPos.y,
@@ -526,13 +487,6 @@ void compose_window_preview(PHLMONITOR monitor, const Target& target) {
         previewIt->second.originalSize.y,
     };
     const auto sourceLocalBox = renderSpace.toLocalBox(sourceLogicalBox);
-    const auto sourceRenderBox = renderSpace.toRenderBox(sourceLogicalBox);
-    const auto uvTopLeft = Vector2D(
-        std::clamp(sourceBox.x / std::max(1.0, previewIt->second.fb.m_size.x), 0.0, 1.0),
-        std::clamp(sourceBox.y / std::max(1.0, previewIt->second.fb.m_size.y), 0.0, 1.0));
-    const auto uvBottomRight = Vector2D(
-        std::clamp((sourceBox.x + sourceBox.w) / std::max(1.0, previewIt->second.fb.m_size.x), 0.0, 1.0),
-        std::clamp((sourceBox.y + sourceBox.h) / std::max(1.0, previewIt->second.fb.m_size.y), 0.0, 1.0));
 
     CHyprOpenGLImpl::STextureRenderData data;
     data.damage = &damage;
@@ -540,20 +494,14 @@ void compose_window_preview(PHLMONITOR monitor, const Target& target) {
     data.round = static_cast<int>(std::round(18.0 * monitor->m_scale));
     data.roundingPower = 2.0F;
     data.blockBlurOptimization = true;
-    data.allowCustomUV = true;
-    const auto previousUVTopLeft = g_pHyprOpenGL->m_renderData.primarySurfaceUVTopLeft;
-    const auto previousUVBottomRight = g_pHyprOpenGL->m_renderData.primarySurfaceUVBottomRight;
-    g_pHyprOpenGL->m_renderData.primarySurfaceUVTopLeft = uvTopLeft;
-    g_pHyprOpenGL->m_renderData.primarySurfaceUVBottomRight = uvBottomRight;
     if (monitor && should_log("overview_window_compose_" + std::to_string(monitor->m_id) + "_" +
                               std::to_string(reinterpret_cast<uintptr_t>(preview_key(target.window))))) {
-        spdlog::debug("overview_window_compose: monitor={} orientation={} capture_orientation={} transform={} scale={} window={} monitor_pos=({}, {}) monitor_size=({}, {}) pixel_size=({}, {}) transformed_size=({}, {}) "
-                      "target_global=({}, {}, {}, {}) target_local=({}, {}, {}, {}) target_render=({}, {}, {}, {}) animated=({}, {}, {}, {}) "
-                      "source_global=({}, {}, {}, {}) source_local=({}, {}, {}, {}) source_render=({}, {}, {}, {}) "
-                      "fb=({}, {}) content=({}, {}) src=({}, {}, {}, {}) uv=({}, {})-({}, {})",
+        spdlog::debug("overview_window_compose: monitor={} orientation={} transform={} scale={} window={} monitor_pos=({}, {}) monitor_size=({}, {}) pixel_size=({}, {}) transformed_size=({}, {}) "
+                      "target_global=({}, {}, {}, {}) target_local=({}, {}, {}, {}) draw_box=({}, {}, {}, {}) "
+                      "source_global=({}, {}, {}, {}) source_local=({}, {}, {}, {}) "
+                      "fb=({}, {}) content=({}, {})",
                       monitor->m_id,
                       orientation_name(renderSpace.orientation()),
-                      orientation_name(captureSpace.orientation()),
                       static_cast<int>(renderSpace.transform),
                       monitor->m_scale,
                       preview_key(target.window),
@@ -573,10 +521,6 @@ void compose_window_preview(PHLMONITOR monitor, const Target& target) {
                       targetLocalBox.y,
                       targetLocalBox.w,
                       targetLocalBox.h,
-                      targetRenderBox.x,
-                      targetRenderBox.y,
-                      targetRenderBox.w,
-                      targetRenderBox.h,
                       box.x,
                       box.y,
                       box.w,
@@ -589,29 +533,15 @@ void compose_window_preview(PHLMONITOR monitor, const Target& target) {
                       sourceLocalBox.y,
                       sourceLocalBox.w,
                       sourceLocalBox.h,
-                      sourceRenderBox.x,
-                      sourceRenderBox.y,
-                      sourceRenderBox.w,
-                      sourceRenderBox.h,
                       previewIt->second.fb.m_size.x,
                       previewIt->second.fb.m_size.y,
                       previewIt->second.capturedSize.x,
-                      previewIt->second.capturedSize.y,
-                      sourceBox.x,
-                      sourceBox.y,
-                      sourceBox.w,
-                      sourceBox.h,
-                      uvTopLeft.x,
-                      uvTopLeft.y,
-                      uvBottomRight.x,
-                      uvBottomRight.y);
+                      previewIt->second.capturedSize.y);
     }
     if (g_renderTextureInternal)
         g_renderTextureInternal(g_pHyprOpenGL.get(), texture, box, data);
     else
         g_pHyprOpenGL->renderTexture(texture, box, data);
-    g_pHyprOpenGL->m_renderData.primarySurfaceUVTopLeft = previousUVTopLeft;
-    g_pHyprOpenGL->m_renderData.primarySurfaceUVBottomRight = previousUVBottomRight;
 }
 
 void render_monitor_overview(PHLMONITOR monitor, const MonitorRegion* region) {

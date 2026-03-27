@@ -17,8 +17,6 @@ namespace {
 
 using ScrollerCore::Box;
 
-constexpr double kWorkspacePreviewGap = 24.0;
-
 PHLMONITOR monitor_for_workspace(PHLWORKSPACE workspace) {
     if (!workspace)
         return nullptr;
@@ -31,25 +29,6 @@ PHLMONITOR monitor_for_workspace(PHLWORKSPACE workspace) {
 
 bool is_tiled_overview_window(PHLWINDOW window) {
     return window && window->m_isMapped && !window->m_isFloating;
-}
-
-Box union_box(const std::vector<Target>& targets) {
-    if (targets.empty())
-        return {};
-
-    auto left = targets.front().box.x;
-    auto top = targets.front().box.y;
-    auto right = targets.front().box.x + targets.front().box.w;
-    auto bottom = targets.front().box.y + targets.front().box.h;
-
-    for (const auto& target : targets) {
-        left = std::min(left, target.box.x);
-        top = std::min(top, target.box.y);
-        right = std::max(right, target.box.x + target.box.w);
-        bottom = std::max(bottom, target.box.y + target.box.h);
-    }
-
-    return {left, top, right - left, bottom - top};
 }
 
 Box inset_box(const Box& box, double ratio, double minimumInset = 18.0) {
@@ -116,38 +95,11 @@ WorkspaceNode build_workspace_node(const CanvasOverviewSnapshot& snapshot, int m
     return node;
 }
 
-void scale_workspace_targets(WorkspaceNode& node) {
-    if (node.targets.empty())
-        return;
-
-    const auto sourceBounds = union_box(node.targets);
-    const auto usableWidth = std::max(1.0, node.box.w - kWorkspacePreviewGap);
-    const auto usableHeight = std::max(1.0, node.box.h - kWorkspacePreviewGap);
-    const auto sourceWidth = std::max(1.0, sourceBounds.w);
-    const auto sourceHeight = std::max(1.0, sourceBounds.h);
-    const auto scale = std::min(usableWidth / sourceWidth, usableHeight / sourceHeight);
-    const auto offsetX = node.box.x + (node.box.w - sourceWidth * scale) / 2.0;
-    const auto offsetY = node.box.y + (node.box.h - sourceHeight * scale) / 2.0;
-
-    for (auto& target : node.targets) {
-        const auto relativeX = target.box.x - sourceBounds.x;
-        const auto relativeY = target.box.y - sourceBounds.y;
-        target.box = {
-            offsetX + relativeX * scale,
-            offsetY + relativeY * scale,
-            std::max(24.0, target.box.w * scale),
-            std::max(24.0, target.box.h * scale),
-        };
-    }
-}
-
 void finalize_workspace_targets(WorkspaceNode& node) {
-    if (node.targets.empty()) {
-        node.targets.push_back(makeEmptyTarget(node.workspaceId, node.monitorId, node.box, false));
+    if (!node.targets.empty())
         return;
-    }
 
-    scale_workspace_targets(node);
+    node.targets.push_back(makeEmptyTarget(node.workspaceId, node.monitorId, node.box, false));
 }
 
 void layout_workspace_grid(MonitorRegion& region) {
