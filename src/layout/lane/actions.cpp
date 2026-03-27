@@ -11,9 +11,11 @@
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/helpers/Monitor.hpp>
 
+#include "../../core/layout_profile.h"
+
 // Insert a new window into the active lane, respecting the current lane mode.
 void Lane::add_active_window(PHLWINDOW window) {
-    if (mode == Mode::Column && active != nullptr) {
+    if (ScrollerCore::mode_adds_windows_into_active_stack(mode) && active != nullptr) {
         const auto windowCountBefore = active->data()->size();
         active->data()->add_active_window(window, 0.5 * max.h);
         rememberWindowStack(window, active->data());
@@ -67,7 +69,7 @@ bool Lane::remove_window(PHLWINDOW window) {
         return true;
     }
 
-    if (mode == Mode::Column) {
+    if (ScrollerCore::mode_uses_window_expansion(mode)) {
         if (col->size() <= 2)
             col->fit_size(FitSize::All, calculate_gap_x(c), gap);
         else
@@ -108,13 +110,13 @@ bool Lane::active_item_at_edge(Direction direction) const {
 
     switch (direction) {
     case Direction::Left:
-        return mode == Mode::Row && active == stacks.first();
+        return ScrollerCore::local_item_backward_direction(mode) == Direction::Left && active == stacks.first();
     case Direction::Right:
-        return mode == Mode::Row && active == stacks.last();
+        return ScrollerCore::local_item_forward_direction(mode) == Direction::Right && active == stacks.last();
     case Direction::Up:
-        return mode == Mode::Column && active->data()->active_at_edge(Direction::Up);
+        return ScrollerCore::local_item_backward_direction(mode) == Direction::Up && active->data()->active_at_edge(Direction::Up);
     case Direction::Down:
-        return mode == Mode::Column && active->data()->active_at_edge(Direction::Down);
+        return ScrollerCore::local_item_forward_direction(mode) == Direction::Down && active->data()->active_at_edge(Direction::Down);
     default:
         return false;
     }
@@ -212,7 +214,7 @@ void Lane::resize_active_stack(int step) {
     if (active->data()->maximized())
         return;
 
-    if (mode == Mode::Column) {
+    if (ScrollerCore::mode_uses_window_expansion(mode)) {
         active->data()->cycle_size_active_window(step, calculate_gap_x(active), gap);
         return;
     }
@@ -266,7 +268,7 @@ void Lane::align_stack(Direction dir) {
         active->data()->set_geom_pos(max.x + max.w - active->data()->get_geom_w(), max.y);
         break;
     case Direction::Center:
-        if (mode == Mode::Column) {
+        if (ScrollerCore::mode_uses_window_expansion(mode)) {
             active->data()->align_window(Direction::Center, gap);
             active->data()->recalculate_stack_geometry(calculate_gap_x(active), gap);
         } else {
@@ -380,7 +382,7 @@ void Lane::expel_window_right() {
 
 // Fit stack/window sizes to the requested visible range.
 void Lane::fit_size(FitSize fitsize) {
-    if (mode == Mode::Column) {
+    if (ScrollerCore::mode_uses_window_expansion(mode)) {
         active->data()->fit_size(fitsize, calculate_gap_x(active), gap);
         return;
     }

@@ -5,13 +5,15 @@
 
 #include <hyprland/src/Compositor.hpp>
 
+#include "../../core/layout_profile.h"
+
 Lane::Lane(PHLWINDOW window)
     : overview(false), ephemeral(false), gap(0), reorder(Reorder::Auto), mode(Mode::Row), active(nullptr) {
     const auto monitor = g_pCompositor->getMonitorFromID(window->monitorID());
     if (!monitor)
         return;
 
-    mode = monitor->m_size.x >= monitor->m_size.y ? Mode::Row : Mode::Column;
+    mode = ScrollerCore::default_mode_for_extent(monitor->m_size.x, monitor->m_size.y);
     update_sizes(monitor);
 }
 
@@ -26,7 +28,7 @@ Lane::Lane(Stack *stack)
     const auto window = stack ? stack->get_active_window() : nullptr;
     const auto monitor = window ? g_pCompositor->getMonitorFromID(window->monitorID()) : nullptr;
     if (monitor) {
-        mode = monitor->m_size.x >= monitor->m_size.y ? Mode::Row : Mode::Column;
+        mode = ScrollerCore::default_mode_for_extent(monitor->m_size.x, monitor->m_size.y);
         update_sizes(monitor);
     }
 
@@ -228,7 +230,7 @@ void Lane::insert_window_payload(ActiveWindowPayload payload, Direction directio
         return;
 
     reorder = Reorder::Auto;
-    if (mode == Mode::Column && active) {
+    if (ScrollerCore::mode_adds_windows_into_active_stack(mode) && active) {
         auto window = payload.release_window();
         const auto compositorWindow = window ? window->ptr().lock() : nullptr;
         const auto windowCountBefore = active->data()->size();
@@ -272,14 +274,14 @@ void Lane::insert_window_payload(ActiveWindowPayload payload, Direction directio
     }
 
     auto current = active;
-    if (mode == Mode::Row && current->data()->expanded())
+    if (ScrollerCore::mode_uses_stack_fullscreen(mode) && current->data()->expanded())
         (void)current->data()->toggle_fullscreen(max, mode);
 
     auto inserted = stacks.emplace_after(current, stack);
     if (direction == Direction::Left || direction == Direction::Up || direction == Direction::Begin)
         stacks.move_before(current, inserted);
 
-    if (mode == Mode::Row) {
+    if (ScrollerCore::mode_uses_stack_fullscreen(mode)) {
         auto *currentStack = current->data();
         const auto currentWidth = currentStack->get_geom_w();
         const auto insertedWidth = stack->get_geom_w();

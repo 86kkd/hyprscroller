@@ -1,27 +1,15 @@
 #include "route_logic.h"
 
+#include "../../core/layout_profile.h"
+
 namespace CanvasLayoutInternal {
 
 bool direction_moves_between_lanes(Mode mode, Direction direction) {
-    switch (mode) {
-    case Mode::Row:
-        return direction == Direction::Up || direction == Direction::Down;
-    case Mode::Column:
-        return direction == Direction::Left || direction == Direction::Right;
-    }
-
-    return false;
+    return ScrollerCore::direction_moves_between_lanes(mode, direction);
 }
 
 bool direction_inserts_before_current(Mode mode, Direction direction) {
-    switch (mode) {
-    case Mode::Row:
-        return direction == Direction::Up || direction == Direction::Begin;
-    case Mode::Column:
-        return direction == Direction::Left || direction == Direction::Begin;
-    }
-
-    return false;
+    return ScrollerCore::direction_inserts_before_current(mode, direction);
 }
 
 DirectionalHandoffRoute choose_directional_handoff_route(bool betweenLanes, bool hasAdjacentLane, bool hasTargetMonitor, bool allowCreate) {

@@ -23,6 +23,7 @@
 
 #include "../../core/interval.h"
 #include "../../core/layout_math.h"
+#include "../../core/layout_profile.h"
 #include "../canvas/internal.h"
 
 namespace {
@@ -182,10 +183,7 @@ void Lane::center_active_stack() {
 
 // Predict the initial size for a new window inserted into this lane.
 Vector2D Lane::predict_window_size() const {
-    if (mode == Mode::Column)
-        return Vector2D(max.w, 0.5 * max.h);
-
-    return Vector2D(0.5 * max.w, max.h);
+    return ScrollerCore::predict_window_size(mode, max);
 }
 
 // Refresh lane bounds from the monitor workarea and gap configuration.

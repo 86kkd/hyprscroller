@@ -9,6 +9,7 @@
 #include "core/direction.h"
 #include "core/interval.h"
 #include "core/layout_math.h"
+#include "core/layout_profile.h"
 #include "overview/logic.h"
 #include "overview/orientation_math.h"
 #include "layout/canvas/dispatch_logic.h"
@@ -154,6 +155,56 @@ void test_overview_projection() {
     expect_near(degenerateProjection.scale, 1.0, 1e-9, "degenerate projection keeps scale at 1");
     expect_near(degenerateProjection.offset.x, 50.0, 1e-9, "degenerate projection preserves raw x offset");
     expect_near(degenerateProjection.offset.y, 10.0, 1e-9, "degenerate projection preserves raw y offset");
+}
+
+void test_layout_profile() {
+    expect_eq(ScrollerCore::layout_orientation_for_extent(1920.0, 1080.0),
+              ScrollerCore::LayoutOrientation::Landscape,
+              "wide extents map to landscape");
+    expect_eq(ScrollerCore::layout_orientation_for_extent(1080.0, 1920.0),
+              ScrollerCore::LayoutOrientation::Portrait,
+              "tall extents map to portrait");
+    expect_eq(ScrollerCore::default_mode_for_extent(1920.0, 1080.0),
+              Mode::Row,
+              "landscape extents default to row mode");
+    expect_eq(ScrollerCore::default_mode_for_extent(1080.0, 1920.0),
+              Mode::Column,
+              "portrait extents default to column mode");
+
+    expect_true(ScrollerCore::mode_uses_stack_fullscreen(Mode::Row),
+                "row mode uses stack fullscreen");
+    expect_true(ScrollerCore::mode_uses_window_expansion(Mode::Column),
+                "column mode uses per-window expansion");
+    expect_true(ScrollerCore::mode_adds_windows_into_active_stack(Mode::Column),
+                "column mode adds windows into the active stack");
+    expect_true(ScrollerCore::mode_pages_lanes_vertically(Mode::Row),
+                "row mode pages lanes vertically");
+
+    expect_eq(ScrollerCore::local_item_backward_direction(Mode::Row),
+              Direction::Left,
+              "row mode local backward direction is left");
+    expect_eq(ScrollerCore::local_item_forward_direction(Mode::Column),
+              Direction::Down,
+              "column mode local forward direction is down");
+    expect_eq(ScrollerCore::lane_backward_direction(Mode::Row),
+              Direction::Up,
+              "row mode lane backward direction is up");
+    expect_eq(ScrollerCore::lane_forward_direction(Mode::Column),
+              Direction::Right,
+              "column mode lane forward direction is right");
+
+    expect_true(ScrollerCore::direction_targets_local_item(Mode::Row, Direction::Left),
+                "row mode treats left as local item movement");
+    expect_true(ScrollerCore::direction_moves_between_lanes(Mode::Row, Direction::Down),
+                "row mode treats down as cross-lane movement");
+    expect_true(ScrollerCore::direction_moves_between_lanes(Mode::Column, Direction::Left),
+                "column mode treats left as cross-lane movement");
+    expect_true(ScrollerCore::direction_inserts_before_current(Mode::Column, Direction::Left),
+                "column mode inserts before current on left");
+
+    const auto portraitPrediction = ScrollerCore::predict_window_size(Mode::Column, {0.0, 0.0, 800.0, 600.0});
+    expect_near(portraitPrediction.x, 800.0, 1e-9, "column mode prediction keeps full width");
+    expect_near(portraitPrediction.y, 300.0, 1e-9, "column mode prediction halves height");
 }
 
 void test_monitor_space_orientation() {
@@ -374,6 +425,7 @@ int main() {
     test_parse_helpers();
     test_anchor_selection();
     test_overview_projection();
+    test_layout_profile();
     test_monitor_space_orientation();
     test_handoff_state();
     test_route_logic();

@@ -29,6 +29,7 @@ add_library(hyprscroller SHARED
             src/core/core.cpp
             src/core/direction.cpp
             src/core/layout_math.cpp
+            src/core/layout_profile.cpp
             src/list.h
             src/overview/logic.h
             src/overview/logic.cpp
@@ -86,6 +87,7 @@ if(BUILD_TESTING)
                    tests/logic_tests.cpp
                    src/core/direction.cpp
                    src/core/layout_math.cpp
+                   src/core/layout_profile.cpp
                    src/overview/logic.cpp
                    src/overview/orientation_math.cpp
                    src/layout/canvas/dispatch_logic.cpp

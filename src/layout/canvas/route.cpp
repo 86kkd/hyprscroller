@@ -2,6 +2,7 @@
 
 #include <hyprland/src/Compositor.hpp>
 
+#include "../../core/layout_profile.h"
 #include "internal.h"
 
 namespace {
@@ -22,21 +23,10 @@ ListNode<Lane *> *adjacent_lane(ListNode<Lane *> *current, Mode mode, Direction 
     if (!current)
         return nullptr;
 
-    switch (mode) {
-    case Mode::Row:
-        if (direction == Direction::Up)
-            return current->prev();
-        if (direction == Direction::Down)
-            return current->next();
-        break;
-    case Mode::Column:
-        if (direction == Direction::Left)
-            return current->prev();
-        if (direction == Direction::Right)
-            return current->next();
-        break;
-    }
-
+    if (direction == ScrollerCore::lane_backward_direction(mode))
+        return current->prev();
+    if (direction == ScrollerCore::lane_forward_direction(mode))
+        return current->next();
     return nullptr;
 }
 

@@ -19,6 +19,7 @@
 #include <spdlog/spdlog.h>
 
 #include "../../core/core.h"
+#include "../../core/layout_profile.h"
 #include "../lane/lane.h"
 #include "layout.h"
 #include "internal.h"
@@ -370,11 +371,11 @@ void CanvasLayout::relayoutCanvas(PHLMONITOR monitor, bool honor_fullscreen) {
         Box laneBox = max;
         if (paged) {
             const auto delta = static_cast<double>(index) - static_cast<double>(activeIndex);
-            if (mode == Mode::Row)
+            if (ScrollerCore::mode_pages_lanes_vertically(mode))
                 laneBox = Box(max.x, max.y + delta * full.h, max.w, max.h);
             else
                 laneBox = Box(max.x + delta * full.w, max.y, max.w, max.h);
-        } else if (mode == Mode::Row) {
+        } else if (ScrollerCore::mode_pages_lanes_vertically(mode)) {
             const auto unit = max.h / count;
             const auto y = max.y + unit * index;
             const auto h = index + 1 == lanes.size() ? max.y + max.h - y : unit;

@@ -23,6 +23,7 @@
 #include <hyprland/src/layout/target/Target.hpp>
 
 #include "../core/interval.h"
+#include "../core/layout_profile.h"
 #include "../core/layout_math.h"
 
 extern HANDLE PHANDLE;
@@ -267,7 +268,7 @@ bool Stack::toggle_fullscreen(const ScrollerCore::Box &fullbbox, Mode mode) {
     if (!active)
         return false;
 
-    if (mode == Mode::Row) {
+    if (ScrollerCore::mode_uses_stack_fullscreen(mode)) {
         fullscreened = !fullscreened;
         if (fullscreened) {
             mem.geom = geom;
@@ -278,7 +279,7 @@ bool Stack::toggle_fullscreen(const ScrollerCore::Box &fullbbox, Mode mode) {
         return fullscreened;
     }
 
-    return active->data()->toggle_expand(fullbbox.h);
+    return ScrollerCore::mode_uses_window_expansion(mode) ? active->data()->toggle_expand(fullbbox.h) : false;
 }
 
 // Cache the fullscreen bounding box used by fullscreen-aware relayout.
