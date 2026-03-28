@@ -233,9 +233,9 @@ void Lane::insert_window_payload(ActiveWindowPayload payload, Direction directio
         auto window = payload.release_window();
         const auto compositorWindow = window ? window->ptr().lock() : nullptr;
         const auto windowCountBefore = active->data()->size();
-        active->data()->admit_window(std::move(window));
+        const bool restoredExpanded = active->data()->admit_window(std::move(window));
         rememberWindowStack(compositorWindow, active->data());
-        if (windowCountBefore == 1) {
+        if (windowCountBefore == 1 || restoredExpanded) {
             active->data()->fit_size(FitSize::All, calculate_gap_x(active), gap);
         } else {
             active->data()->recalculate_stack_geometry(calculate_gap_x(active), gap);

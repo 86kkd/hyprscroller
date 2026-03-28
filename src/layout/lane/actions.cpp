@@ -17,9 +17,9 @@
 void Lane::add_active_window(PHLWINDOW window) {
     if (ScrollerCore::mode_adds_windows_into_active_stack(mode) && active != nullptr) {
         const auto windowCountBefore = active->data()->size();
-        active->data()->add_active_window(window, 0.5 * max.h);
+        const bool restoredExpanded = active->data()->add_active_window(window, 0.5 * max.h);
         rememberWindowStack(window, active->data());
-        if (windowCountBefore == 1) {
+        if (windowCountBefore == 1 || restoredExpanded) {
             active->data()->fit_size(FitSize::All, calculate_gap_x(active), gap);
         } else {
             active->data()->recalculate_stack_geometry(calculate_gap_x(active), gap);
@@ -346,6 +346,7 @@ void Lane::admit_window_left() {
     const auto movedWindow = w ? w->ptr().lock() : nullptr;
     forgetWindowStack(movedWindow);
     auto prev = active->prev();
+    const auto windowCountBefore = prev->data()->size();
     if (active->data()->size() == 0) {
         auto *doomed = active->data();
         auto *emptyNode = active;
@@ -354,10 +355,12 @@ void Lane::admit_window_left() {
         delete doomed;
     }
     active = prev;
-    active->data()->admit_window(std::move(w));
+    const bool restoredExpanded = active->data()->admit_window(std::move(w));
     rememberWindowStack(movedWindow, active->data());
 
     reorder = Reorder::Auto;
+    if (windowCountBefore == 1 || restoredExpanded)
+        active->data()->fit_size(FitSize::All, calculate_gap_x(active), gap);
     recalculate_lane_geometry();
     debugVerifyStackCache();
 }

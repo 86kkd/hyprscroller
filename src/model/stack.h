@@ -151,8 +151,9 @@ public:
                 std::forward<Fn>(fn)(window);
         }
     }
-    // Insert a new window and make it active.
-    void add_active_window(PHLWINDOW window, double maxh);
+    // Insert a new window and make it active. Returns true when portrait
+    // expanded state had to be restored before insertion.
+    bool add_active_window(PHLWINDOW window, double maxh);
     // Remove a window and keep active pointer coherent.
     void remove_window(PHLWINDOW window);
     // Move active pointer to the matching model window.
@@ -199,7 +200,8 @@ public:
     FocusMoveResult move_focus_down(bool focus_wrap);
 
     // Insert a model window whose ownership has been transferred to this stack.
-    void admit_window(std::unique_ptr<Window> window);
+    // Returns true when portrait expanded state had to be restored first.
+    bool admit_window(std::unique_ptr<Window> window);
     // Remove the active model window and transfer ownership to the caller as a unique owner.
     std::unique_ptr<Window> expel_active(double gap);
     // Move active window toward viewport edges/center inside the current stack.

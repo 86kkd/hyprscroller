@@ -175,21 +175,23 @@ bool Stack::swap_windows(PHLWINDOW a, PHLWINDOW b) {
     return true;
 }
 
-void Stack::add_active_window(PHLWINDOW window, double maxh) {
+bool Stack::add_active_window(PHLWINDOW window, double maxh) {
     reorder = Reorder::Auto;
     const auto previous = active;
+    const bool restoredExpanded = previous && previous->data()->expanded();
     // Portrait fullscreen is a temporary active-window expansion. Collapse it
     // before inserting so the new window inherits the restored size instead of
     // the full monitor height.
-    if (previous && previous->data()->expanded())
+    if (restoredExpanded)
         (void)previous->data()->toggle_expand(geom.h);
     const auto new_height = previous ? previous->data()->get_geom_h() : maxh;
     active = windows.emplace_after(active, new Window(window, new_height));
 
     if (!previous)
-        return;
+        return false;
 
     active->data()->set_geom_y(previous->data()->get_geom_y() + previous->data()->get_geom_h());
+    return restoredExpanded;
 }
 
 void Stack::remove_window(PHLWINDOW window) {
@@ -500,15 +502,16 @@ FocusMoveResult Stack::move_focus_down(bool focus_wrap) {
 }
 
 // Insert an extracted window into the current stack next to the active window.
-void Stack::admit_window(std::unique_ptr<Window> window) {
+bool Stack::admit_window(std::unique_ptr<Window> window) {
     reorder = Reorder::Auto;
     if (!window) {
-        return;
+        return false;
     }
 
+    const bool restoredExpanded = active && active->data()->expanded();
     // Moving a window into an expanded portrait stack should restore the stack
     // first; otherwise the admitted window inherits fullscreen geometry.
-    if (active && active->data()->expanded())
+    if (restoredExpanded)
         (void)active->data()->toggle_expand(geom.h);
 
     if (active) {
@@ -521,6 +524,7 @@ void Stack::admit_window(std::unique_ptr<Window> window) {
     }
 
     active = windows.emplace_after(active, window.release());
+    return restoredExpanded;
 }
 
 // Remove and return the active model window from this stack.
