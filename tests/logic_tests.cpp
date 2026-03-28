@@ -175,8 +175,8 @@ void test_layout_profile() {
                 "row mode uses stack fullscreen");
     expect_true(ScrollerCore::mode_uses_window_expansion(Mode::Column),
                 "column mode uses per-window expansion");
-    expect_true(ScrollerCore::mode_adds_windows_into_active_stack(Mode::Column),
-                "column mode adds windows into the active stack");
+    expect_true(!ScrollerCore::mode_adds_windows_into_active_stack(Mode::Column),
+                "column mode creates a new peer stack on window creation");
     expect_true(ScrollerCore::mode_pages_lanes_vertically(Mode::Row),
                 "row mode pages lanes vertically");
 

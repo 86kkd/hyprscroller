@@ -1,23 +1,29 @@
 /**
  * @file layout_profile.cpp
- * @brief Shared landscape/portrait behavior helpers for scroller modes.
+ * @brief Centralized policy table for row/column layout behavior.
+ *
+ * The code in this file deliberately stays small and declarative. It answers
+ * "which strategy should be used?" questions, while lane/stack/canvas code is
+ * responsible for actually mutating geometry.
  */
 #include "layout_profile.h"
 
 namespace ScrollerCore {
 
-// Monitor shape decides which orientation semantics the rest of the layout
-// helpers should use.
+// A monitor is treated as landscape when width dominates height; otherwise it
+// uses portrait semantics.
 LayoutOrientation layout_orientation_for_extent(double width, double height) {
     return width >= height ? LayoutOrientation::Landscape : LayoutOrientation::Portrait;
 }
 
-// Row mode behaves like landscape; column mode behaves like portrait.
+// Runtime mode is just another spelling of the same policy choice: row means
+// landscape-style behavior, column means portrait-style behavior.
 LayoutOrientation layout_orientation_for_mode(Mode mode) {
     return mode == Mode::Row ? LayoutOrientation::Landscape : LayoutOrientation::Portrait;
 }
 
-// Keep orientation names centralized so debug logs use the same wording.
+// Keep human-readable orientation names in one place so logs and debug output
+// do not drift between modules.
 std::string_view layout_orientation_name(LayoutOrientation orientation) {
     switch (orientation) {
         case LayoutOrientation::Portrait:
@@ -28,69 +34,81 @@ std::string_view layout_orientation_name(LayoutOrientation orientation) {
     }
 }
 
-// New lanes default to row mode on wide monitors and column mode on tall ones.
+// New lanes inherit their default mode directly from the monitor shape.
 Mode default_mode_for_extent(double width, double height) {
     return layout_orientation_for_extent(width, height) == LayoutOrientation::Landscape ? Mode::Row : Mode::Column;
 }
 
-// Landscape/row mode fullscreen acts on the whole stack.
+// In row mode, scroller fullscreen widens the active stack/column itself.
 bool mode_uses_stack_fullscreen(Mode mode) {
     return mode == Mode::Row;
 }
 
-// Portrait/column mode fullscreen is implemented as active-window expansion.
+// In column mode, scroller fullscreen does not fullscreen the whole stack; it
+// only stretches the active window vertically inside that stack.
 bool mode_uses_window_expansion(Mode mode) {
     return mode == Mode::Column;
 }
 
-// Portrait/column mode keeps adding windows into the active vertical stack.
+// Ordinary window creation always starts a fresh peer stack. Explicit window
+// move commands are responsible for merging windows into an existing stack.
 bool mode_adds_windows_into_active_stack(Mode mode) {
-    return mode == Mode::Column;
+    (void)mode;
+    return false;
 }
 
-// Row mode treats lanes as vertical pages; column mode treats them as horizontal pages.
+// Row mode treats lanes as a vertical sequence of pages; column mode treats
+// lanes as a horizontal sequence.
 bool mode_pages_lanes_vertically(Mode mode) {
     return mode == Mode::Row;
 }
 
-// Local traversal means left/right in row mode and up/down in column mode.
+// "Backward inside the lane" is left in row mode and up in column mode.
 Direction local_item_backward_direction(Mode mode) {
     return mode == Mode::Row ? Direction::Left : Direction::Up;
 }
 
+// "Forward inside the lane" is right in row mode and down in column mode.
 Direction local_item_forward_direction(Mode mode) {
     return mode == Mode::Row ? Direction::Right : Direction::Down;
 }
 
+// Moving to the previous lane is vertical in row mode and horizontal in column
+// mode because the lane axis flips with the orientation profile.
 Direction lane_backward_direction(Mode mode) {
     return mode == Mode::Row ? Direction::Up : Direction::Left;
 }
 
+// Moving to the next lane follows the opposite lane axis direction.
 Direction lane_forward_direction(Mode mode) {
     return mode == Mode::Row ? Direction::Down : Direction::Right;
 }
 
-// Classify whether a dispatcher direction should stay within the current lane.
+// Dispatcher code uses this helper to decide whether a direction should stay
+// within the current lane instead of attempting a lane-to-lane move.
 bool direction_targets_local_item(Mode mode, Direction direction) {
     return direction == local_item_backward_direction(mode) ||
            direction == local_item_forward_direction(mode);
 }
 
-// Classify whether a dispatcher direction should cross into another lane.
+// Dispatcher code uses this helper to decide whether a direction should cross
+// into another lane/page.
 bool direction_moves_between_lanes(Mode mode, Direction direction) {
     return direction == lane_backward_direction(mode) ||
            direction == lane_forward_direction(mode);
 }
 
-// "Begin" is treated as an insertion before the current lane in both modes.
+// Inserts to the "backward lane direction" or explicit "begin" both mean the
+// new lane should be placed before the current one.
 bool direction_inserts_before_current(Mode mode, Direction direction) {
     return direction == lane_backward_direction(mode) || direction == Direction::Begin;
 }
 
-// Column mode starts windows full-width and half-height; row mode starts them
-// half-width and full-height.
+// Predict the initial logical size for a just-created tiled window. Row mode
+// starts as a half-width peer stack; column mode starts as a full-width,
+// half-height peer stack.
 Hyprutils::Math::Vector2D predict_window_size(Mode mode, const Box& bounds) {
-    if (mode_adds_windows_into_active_stack(mode))
+    if (mode == Mode::Column)
         return {bounds.w, 0.5 * bounds.h};
 
     return {0.5 * bounds.w, bounds.h};
