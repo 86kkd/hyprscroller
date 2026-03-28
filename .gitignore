@@ -6,3 +6,6 @@ compile_commands.json
 build/
 .nvmrc
 hypr.conf
+Hyprspace
+hyprview
+hyprland-plugins
