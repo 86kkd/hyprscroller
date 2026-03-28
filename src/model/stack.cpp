@@ -350,7 +350,10 @@ bool Stack::toggle_fullscreen(const ScrollerCore::Box &fullbbox, Mode mode) {
         fullscreened = !fullscreened;
         if (fullscreened) {
             mem.geom = geom;
-            geom.w = fullbbox.w;
+            if (mode == Mode::Column)
+                geom.h = fullbbox.h;
+            else
+                geom.w = fullbbox.w;
         } else {
             geom = mem.geom;
         }

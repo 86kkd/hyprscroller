@@ -203,6 +203,26 @@ void Lane::center_active_stack() {
     if (stack->maximized())
         return;
 
+    if (mode == Mode::Column) {
+        switch (stack->get_width()) {
+        case StackWidth::OneThird:
+            stack->set_geom_pos(max.x, max.y + max.h / 3.0);
+            break;
+        case StackWidth::OneHalf:
+            stack->set_geom_pos(max.x, max.y + max.h / 4.0);
+            break;
+        case StackWidth::TwoThirds:
+            stack->set_geom_pos(max.x, max.y + max.h / 6.0);
+            break;
+        case StackWidth::Free:
+            stack->set_geom_pos(max.x, max.y + 0.5 * (max.h - stack->get_geom_h()));
+            break;
+        default:
+            break;
+        }
+        return;
+    }
+
     switch (stack->get_width()) {
     case StackWidth::OneThird:
         stack->set_geom_pos(max.x + max.w / 3.0, max.y);

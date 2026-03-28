@@ -46,11 +46,11 @@ enum class LayoutOrientation {
     /**
      * Tall-monitor / column-mode profile.
      *
-     * - Local movement is up/down
-     * - Lane movement is left/right
-     * - New windows still create peer stacks by default
-     * - Fullscreen stretches only the active window; sibling windows still
-     *   belong to the same stack and can be restored afterward
+ * - Local movement is up/down
+ * - Lane movement is left/right
+ * - New windows still create peer stacks by default
+ * - Fullscreen still expands the active stack as a whole; the stack axis is
+ *   vertical instead of horizontal
      */
     Portrait,
 };
@@ -73,7 +73,7 @@ Mode                      default_mode_for_extent(double width, double height);
 bool                      mode_uses_stack_fullscreen(Mode mode);
 
 // Return true when fullscreen should only stretch the active window inside its
-// current stack. This is the portrait/column-mode behavior.
+// current stack. The built-in row/column modes no longer use this path.
 bool                      mode_uses_window_expansion(Mode mode);
 
 // Return true when a newly created window should be inserted into the current

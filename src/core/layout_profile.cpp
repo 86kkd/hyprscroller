@@ -39,15 +39,17 @@ Mode default_mode_for_extent(double width, double height) {
     return layout_orientation_for_extent(width, height) == LayoutOrientation::Landscape ? Mode::Row : Mode::Column;
 }
 
-// In row mode, scroller fullscreen widens the active stack/column itself.
+// Built-in row and column modes both fullscreen the active stack; only the
+// stack's primary axis changes with the orientation profile.
 bool mode_uses_stack_fullscreen(Mode mode) {
-    return mode == Mode::Row;
+    (void)mode;
+    return true;
 }
 
-// In column mode, scroller fullscreen does not fullscreen the whole stack; it
-// only stretches the active window vertically inside that stack.
+// The current built-in modes do not use per-window expansion anymore.
 bool mode_uses_window_expansion(Mode mode) {
-    return mode == Mode::Column;
+    (void)mode;
+    return false;
 }
 
 // Ordinary window creation always starts a fresh peer stack. Explicit window

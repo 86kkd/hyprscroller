@@ -354,6 +354,7 @@ void Lane::admit_window_left() {
     const auto movedWindow = w ? w->ptr().lock() : nullptr;
     forgetWindowStack(movedWindow);
     auto prev = active->prev();
+    const auto windowCountBefore = prev->data()->size();
     if (active->data()->size() == 0) {
         auto *doomed = active->data();
         auto *emptyNode = active;
@@ -366,6 +367,8 @@ void Lane::admit_window_left() {
     rememberWindowStack(movedWindow, active->data());
 
     reorder = Reorder::Auto;
+    if (windowCountBefore == 1)
+        active->data()->fit_size(FitSize::All, calculate_gap_x(active), gap);
     recalculate_lane_geometry();
     debugVerifyStackCache();
 }
