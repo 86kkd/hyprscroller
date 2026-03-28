@@ -100,6 +100,10 @@ bool Lane::active_item_at_edge(Direction direction) const {
     return false;
 }
 
+bool Lane::active_stack_has_multiple_windows() const {
+    return active && active->data()->size() > 1;
+}
+
 // Execute directional focus movement inside this lane.
 FocusMoveResult Lane::move_focus(Direction dir, bool focus_wrap) {
     if (!active)
@@ -309,6 +313,106 @@ void Lane::move_active_stack(Direction dir) {
 
     reorder = Reorder::Auto;
     recalculate_lane_geometry();
+}
+
+void Lane::move_active_window_to_adjacent_stack(Direction dir) {
+    if (!active)
+        return;
+
+    const auto backward = ScrollerCore::local_item_backward_direction(mode);
+    const auto forward = ScrollerCore::local_item_forward_direction(mode);
+    if (dir != backward && dir != forward)
+        return;
+
+    if (active->data()->maximized() ||
+        active->data()->fullscreen() ||
+        active->data()->expanded())
+        return;
+
+    auto *target = dir == backward ? active->prev() : active->next();
+    if (!target)
+        return;
+
+    auto *sourceNode = active;
+    auto *sourceStack = sourceNode->data();
+    auto w = sourceStack->expel_active(gap);
+    const auto movedWindow = w ? w->ptr().lock() : nullptr;
+    forgetWindowStack(movedWindow);
+
+    const auto targetWindowCountBefore = target->data()->size();
+    if (sourceStack->size() == 0) {
+        forgetStackWindows(sourceStack);
+        stacks.erase(sourceNode);
+        delete sourceStack;
+    } else {
+        sourceStack->fit_size(FitSize::All, calculate_gap_x(sourceNode), gap);
+    }
+
+    active = target;
+    active->data()->admit_window(std::move(w));
+    rememberWindowStack(movedWindow, active->data());
+
+    reorder = Reorder::Auto;
+    if (targetWindowCountBefore == 1)
+        active->data()->fit_size(FitSize::All, calculate_gap_x(active), gap);
+    recalculate_lane_geometry();
+    debugVerifyStackCache();
+}
+
+void Lane::move_active_window_to_new_stack(Direction dir) {
+    if (!active)
+        return;
+
+    const auto backward = ScrollerCore::local_item_backward_direction(mode);
+    const auto forward = ScrollerCore::local_item_forward_direction(mode);
+    if (dir != backward && dir != forward)
+        return;
+
+    if (active->data()->maximized() ||
+        active->data()->fullscreen() ||
+        active->data()->expanded() ||
+        active->data()->size() == 1)
+        return;
+
+    auto *sourceNode = active;
+    auto *sourceStack = sourceNode->data();
+    auto w = sourceStack->expel_active(gap);
+    const auto movedWindow = w ? w->ptr().lock() : nullptr;
+    forgetWindowStack(movedWindow);
+
+    const auto width = sourceStack->get_width();
+    const auto carriedPrimarySpan = width == StackWidth::Free
+        ? (mode == Mode::Column ? sourceStack->get_geom_h() : sourceStack->get_geom_w())
+        : (mode == Mode::Column ? max.h : max.w);
+    auto *stack = new Stack(std::move(w),
+                            width,
+                            mode == Mode::Column ? max.w : carriedPrimarySpan,
+                            mode == Mode::Column ? carriedPrimarySpan : max.h,
+                            mode);
+
+    ListNode<Stack *> *inserted = nullptr;
+    if (dir == backward) {
+        inserted = stacks.emplace_before(sourceNode, stack);
+        if (mode == Mode::Column) {
+            stack->set_geom_pos(max.x, sourceStack->get_geom_y() - stack->get_geom_h());
+        } else {
+            stack->set_geom_pos(sourceStack->get_geom_x() - stack->get_geom_w(), max.y);
+        }
+    } else {
+        inserted = stacks.emplace_after(sourceNode, stack);
+        if (mode == Mode::Column) {
+            stack->set_geom_pos(max.x, sourceStack->get_geom_y() + sourceStack->get_geom_h());
+        } else {
+            stack->set_geom_pos(sourceStack->get_geom_x() + sourceStack->get_geom_w(), max.y);
+        }
+    }
+
+    sourceStack->fit_size(FitSize::All, calculate_gap_x(sourceNode), gap);
+    active = inserted;
+    rememberWindowStack(movedWindow, stack);
+    reorder = Reorder::Auto;
+    recalculate_lane_geometry();
+    debugVerifyStackCache();
 }
 
 // Move the active window into the previous stack.

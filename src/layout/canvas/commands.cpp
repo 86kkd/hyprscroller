@@ -148,18 +148,41 @@ void CanvasLayout::handleMoveWindowWithinLane(int workspace, Direction direction
     if (!lane)
         return;
 
-    const auto targetMonitor = directionalMoveTargetMonitor(sourceMonitor, direction);
-    if (!lane->active_item_at_edge(direction) || !targetMonitor) {
+    const auto mode = lane->get_mode();
+    const auto backward = ScrollerCore::local_item_backward_direction(mode);
+    const auto forward = ScrollerCore::local_item_forward_direction(mode);
+    const bool movesBetweenStacks = direction == backward || direction == forward;
+    if (!movesBetweenStacks) {
         lane->move_active_stack(direction);
         CanvasLayoutInternal::switch_to_window(lane->get_active_window());
         return;
     }
 
-    if (handoffMoveWindowAcrossMonitor(workspace, direction, lane, currentWindow, sourceMonitor, targetMonitor))
-        return;
+    const auto targetMonitor = directionalMoveTargetMonitor(sourceMonitor, direction);
+    const bool sourceStackHasMultipleWindows = lane->active_stack_has_multiple_windows();
+    if (sourceStackHasMultipleWindows) {
+        if (lane->active_item_at_edge(direction) && targetMonitor) {
+            if (!handoffMoveWindowAcrossMonitor(workspace, direction, lane, currentWindow, sourceMonitor, targetMonitor))
+                CanvasLayoutInternal::dispatch_directional_builtin("movewindow", direction);
+            return;
+        }
 
-    lane->move_active_stack(direction);
-    CanvasLayoutInternal::switch_to_window(lane->get_active_window());
+        lane->move_active_window_to_new_stack(direction);
+        CanvasLayoutInternal::switch_to_window(lane->get_active_window());
+        return;
+    }
+
+    if (!lane->active_item_at_edge(direction)) {
+        lane->move_active_window_to_adjacent_stack(direction);
+        CanvasLayoutInternal::switch_to_window(lane->get_active_window());
+        return;
+    }
+
+    if (targetMonitor) {
+        if (!handoffMoveWindowAcrossMonitor(workspace, direction, lane, currentWindow, sourceMonitor, targetMonitor))
+            CanvasLayoutInternal::dispatch_directional_builtin("movewindow", direction);
+        return;
+    }
 }
 
 void CanvasLayout::handleMoveWindowAcrossLanes(int workspace, Direction direction, Lane *lane,

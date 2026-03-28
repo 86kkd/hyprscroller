@@ -84,6 +84,7 @@ public:
     bool swapWindows(PHLWINDOW a, PHLWINDOW b);
     void focus_window(PHLWINDOW window);
     bool active_item_at_edge(Direction direction) const;
+    bool active_stack_has_multiple_windows() const;
     FocusMoveResult move_focus(Direction dir, bool focus_wrap);
 
     // Command-facing stack and window operations.
@@ -92,6 +93,8 @@ public:
     void set_mode(Mode m);
     void align_stack(Direction dir);
     void move_active_stack(Direction dir);
+    void move_active_window_to_adjacent_stack(Direction dir);
+    void move_active_window_to_new_stack(Direction dir);
     void admit_window_left();
     void expel_window_right();
     Vector2D predict_window_size() const;
