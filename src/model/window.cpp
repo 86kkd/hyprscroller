@@ -48,24 +48,6 @@ void Window::pop_geom() {
     box_y = mem.box_y;
 }
 
-bool Window::toggle_expand(double maxh) {
-    // Expand only affects logical height; callers are responsible for relayout.
-    if (is_expanded) {
-        pop_geom();
-        is_expanded = false;
-        return false;
-    }
-
-    push_geom();
-    box_h = maxh;
-    is_expanded = true;
-    return true;
-}
-
-bool Window::expanded() const {
-    return is_expanded;
-}
-
 WindowHeight Window::get_height() const {
     return height;
 }

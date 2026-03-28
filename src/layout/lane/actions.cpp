@@ -13,21 +13,8 @@
 
 #include "../../core/layout_profile.h"
 
-// Insert a new window into the active lane, respecting the current lane mode.
+// Insert a new window into the active lane as a peer stack.
 void Lane::add_active_window(PHLWINDOW window) {
-    if (ScrollerCore::mode_adds_windows_into_active_stack(mode) && active != nullptr) {
-        const auto windowCountBefore = active->data()->size();
-        active->data()->add_active_window(window, 0.5 * max.h, calculate_gap_x(active), gap);
-        rememberWindowStack(window, active->data());
-        if (windowCountBefore == 1) {
-            active->data()->fit_size(FitSize::All, calculate_gap_x(active), gap);
-        } else {
-            active->data()->recalculate_stack_geometry(calculate_gap_x(active), gap);
-        }
-        debugVerifyStackCache();
-        return;
-    }
-
     const bool singleWindowWorkspace = stacks.size() == 1 && stacks.first()->data()->size() == 1;
     if (singleWindowWorkspace)
         stacks.first()->data()->update_width(StackWidth::OneHalf, max.w, max.h);
@@ -70,17 +57,7 @@ bool Lane::remove_window(PHLWINDOW window) {
         return true;
     }
 
-    if (!ScrollerCore::mode_uses_window_expansion(mode)) {
-        col->recalculate_stack_geometry(calculate_gap_x(c), gap);
-        debugVerifyStackCache();
-        return true;
-    }
-
-    if (col->size() <= 2)
-        col->fit_size(FitSize::All, calculate_gap_x(c), gap);
-    else
-        col->recalculate_stack_geometry(calculate_gap_x(c), gap);
-
+    col->recalculate_stack_geometry(calculate_gap_x(c), gap);
     debugVerifyStackCache();
     return true;
 }
@@ -207,18 +184,13 @@ void Lane::move_focus_end() {
     active = stacks.last();
 }
 
-// Cycle the active stack width or active window height, depending on mode.
+// Cycle the active stack span preset along the lane's primary axis.
 void Lane::resize_active_stack(int step) {
     if (!active)
         return;
 
     if (active->data()->maximized())
         return;
-
-    if (ScrollerCore::mode_uses_window_expansion(mode)) {
-        active->data()->cycle_size_active_window(step, calculate_gap_x(active), gap);
-        return;
-    }
 
     StackWidth width = active->data()->get_width();
     if (width == StackWidth::Free) {
@@ -363,7 +335,7 @@ void Lane::admit_window_left() {
         delete doomed;
     }
     active = prev;
-    active->data()->admit_window(std::move(w), calculate_gap_x(active), gap);
+    active->data()->admit_window(std::move(w));
     rememberWindowStack(movedWindow, active->data());
 
     reorder = Reorder::Auto;
@@ -407,14 +379,12 @@ void Lane::expel_window_right() {
     debugVerifyStackCache();
 }
 
-// Fit stack/window sizes to the requested visible range.
+// Fit stack sizes to the requested visible range along the lane's primary axis.
 void Lane::fit_size(FitSize fitsize) {
-    if (ScrollerCore::mode_uses_window_expansion(mode)) {
-        active->data()->fit_size(fitsize, calculate_gap_x(active), gap);
-        return;
-    }
     ListNode<Stack *> *from = nullptr;
     ListNode<Stack *> *to = nullptr;
+    const auto visibleStart = mode == Mode::Column ? max.y : max.x;
+    const auto visibleEnd = mode == Mode::Column ? max.y + max.h : max.x + max.w;
     switch (fitsize) {
     case FitSize::Active:
         from = to = active;
@@ -422,22 +392,22 @@ void Lane::fit_size(FitSize fitsize) {
     case FitSize::Visible:
         for (auto c = stacks.first(); c != nullptr; c = c->next()) {
             Stack *col = c->data();
-            auto c0 = col->get_geom_x();
-            auto c1 = col->get_geom_x() + col->get_geom_w();
-            if ((c0 < max.x + max.w && c0 >= max.x) ||
-                (c1 > max.x && c1 <= max.x + max.w) ||
-                (c0 < max.x && c1 >= max.x + max.w)) {
+            const auto c0 = mode == Mode::Column ? col->get_geom_y() : col->get_geom_x();
+            const auto c1 = c0 + (mode == Mode::Column ? col->get_geom_h() : col->get_geom_w());
+            if ((c0 < visibleEnd && c0 >= visibleStart) ||
+                (c1 > visibleStart && c1 <= visibleEnd) ||
+                (c0 < visibleStart && c1 >= visibleEnd)) {
                 from = c;
                 break;
             }
         }
         for (auto c = stacks.last(); c != nullptr; c = c->prev()) {
             Stack *col = c->data();
-            auto c0 = col->get_geom_x();
-            auto c1 = col->get_geom_x() + col->get_geom_w();
-            if ((c0 < max.x + max.w && c0 >= max.x) ||
-                (c1 > max.x && c1 <= max.x + max.w) ||
-                (c0 < max.x && c1 >= max.x + max.w)) {
+            const auto c0 = mode == Mode::Column ? col->get_geom_y() : col->get_geom_x();
+            const auto c1 = c0 + (mode == Mode::Column ? col->get_geom_h() : col->get_geom_w());
+            if ((c0 < visibleEnd && c0 >= visibleStart) ||
+                (c1 > visibleStart && c1 <= visibleEnd) ||
+                (c0 < visibleStart && c1 >= visibleEnd)) {
                 to = c;
                 break;
             }
@@ -462,14 +432,17 @@ void Lane::fit_size(FitSize fitsize) {
     if (from != nullptr && to != nullptr) {
         double total = 0.0;
         for (auto c = from; c != to->next(); c = c->next())
-            total += c->data()->get_geom_w();
+            total += mode == Mode::Column ? c->data()->get_geom_h() : c->data()->get_geom_w();
         if (total <= 0.0)
             return;
 
         for (auto c = from; c != to->next(); c = c->next()) {
             Stack *col = c->data();
             col->set_width_free();
-            col->set_geom_w(col->get_geom_w() / total * max.w);
+            if (mode == Mode::Column)
+                col->set_geom_h(col->get_geom_h() / total * max.h);
+            else
+                col->set_geom_w(col->get_geom_w() / total * max.w);
         }
         from->data()->set_geom_pos(max.x, max.y);
         adjust_stacks(from);

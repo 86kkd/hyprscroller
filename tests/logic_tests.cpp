@@ -171,14 +171,6 @@ void test_layout_profile() {
               Mode::Column,
               "portrait extents default to column mode");
 
-    expect_true(ScrollerCore::mode_uses_stack_fullscreen(Mode::Row),
-                "row mode uses stack fullscreen");
-    expect_true(ScrollerCore::mode_uses_stack_fullscreen(Mode::Column),
-                "column mode also uses stack fullscreen");
-    expect_true(!ScrollerCore::mode_uses_window_expansion(Mode::Column),
-                "column mode no longer uses per-window expansion");
-    expect_true(!ScrollerCore::mode_adds_windows_into_active_stack(Mode::Column),
-                "column mode creates a new peer stack on window creation");
     expect_true(ScrollerCore::mode_pages_lanes_vertically(Mode::Row),
                 "row mode pages lanes vertically");
 

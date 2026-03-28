@@ -272,7 +272,7 @@ void Lane::toggle_fullscreen_active_window() {
         return;
 
     Stack *stack = active->data();
-    (void)stack->toggle_fullscreen(max, mode);
+    (void)stack->toggle_fullscreen(max);
     recalculate_lane_geometry();
 }
 

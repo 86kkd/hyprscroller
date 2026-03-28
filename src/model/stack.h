@@ -65,8 +65,8 @@ enum class Reorder {
  *
  * `Window` stores the logical vertical geometry used by the scrolling model.
  * It intentionally does not own lane/canvas placement concerns; its job is to
- * remember the per-window height policy, temporary expanded state, and the
- * logical Y/H values that stack relayout operates on.
+ * remember the per-window height policy and the logical Y/H values that stack
+ * relayout operates on.
  */
 class Window {
 public:
@@ -86,10 +86,6 @@ public:
     void push_geom();
     // Restore geometry values from the undo buffer.
     void pop_geom();
-    // Toggle window-specific expanded state used by portrait scroller fullscreen.
-    bool toggle_expand(double maxh);
-    // Return whether this window is currently expanded by scroller.
-    bool expanded() const;
     // Current height mode used for cycle logic.
     WindowHeight get_height() const;
     // Change height mode and sync the logical height for this mode.
@@ -112,8 +108,6 @@ private:
     double box_y;
     // Logical height inside the owning stack.
     double box_h;
-    // Portrait-only expanded flag used by scroller fullscreen behavior.
-    bool is_expanded = false;
     // Last saved logical geometry.
     Memory mem;
 };
@@ -151,9 +145,6 @@ public:
                 std::forward<Fn>(fn)(window);
         }
     }
-    // Insert a new window and make it active, restoring portrait-expanded
-    // geometry before switching the active anchor when needed.
-    void add_active_window(PHLWINDOW window, double maxh, const Vector2D &gap_x, double gap);
     // Remove a window and keep active pointer coherent.
     void remove_window(PHLWINDOW window);
     // Move active pointer to the matching model window.
@@ -173,10 +164,10 @@ public:
     // Apply relative scale to all windows in this stack.
     void scale(const Vector2D &bmin, const Vector2D &start, double scale, double gap);
     // Toggle fullscreen state request and report the target fullscreen flag.
-    bool toggle_fullscreen(const ScrollerCore::Box &fullbbox, Mode mode);
+    bool toggle_fullscreen(const ScrollerCore::Box &fullbbox);
     // Set fullscreen target bbox for internal bookkeeping.
     void set_fullscreen(const ScrollerCore::Box &fullbbox);
-    // Return true when scroller-specific expansion is active.
+    // Return true when stack-managed fullscreen is active.
     bool expanded() const;
     // Snapshot/restore geometry for minimize-disruptive transforms.
     void push_geom();
@@ -202,9 +193,8 @@ public:
     // Focus movement with wrap behavior across monitor edges.
     FocusMoveResult move_focus(Direction direction, bool focus_wrap);
 
-    // Insert a model window whose ownership has been transferred to this stack,
-    // restoring portrait-expanded geometry before switching the active anchor.
-    void admit_window(std::unique_ptr<Window> window, const Vector2D &gap_x, double gap);
+    // Insert a model window whose ownership has been transferred to this stack.
+    void admit_window(std::unique_ptr<Window> window);
     // Remove the active model window and transfer ownership to the caller as a unique owner.
     std::unique_ptr<Window> expel_active(double gap);
     // Move active window toward viewport edges/center inside the current stack.
@@ -222,8 +212,6 @@ public:
     void update_width(StackWidth cwidth, double maxw, double maxh);
     // Resize a window range (all/visible/active/to ends) to fill available height.
     void fit_size(FitSize fitsize, const Vector2D &gap_x, double gap);
-    // Cycle active window logical height and recompute geometry.
-    void cycle_size_active_window(int step, const Vector2D &gap_x, double gap);
     // Resize width and optional active height if height delta is valid.
     void resize_active_window(double maxw, const Vector2D &gap_x, double gap, const Vector2D &delta);
 

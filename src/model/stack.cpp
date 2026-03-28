@@ -42,10 +42,6 @@ double stack_cross_span(const ScrollerCore::Box &geom, Mode mode) {
     return mode == Mode::Column ? geom.h : geom.w;
 }
 
-double window_expand_extent(const ScrollerCore::Box &fullbbox, Mode mode) {
-    return mode == Mode::Column ? fullbbox.w : fullbbox.h;
-}
-
 double stack_primary_span(const ScrollerCore::Box &geom, Mode mode) {
     return mode == Mode::Column ? geom.h : geom.w;
 }
@@ -226,26 +222,6 @@ bool Stack::swap_windows(PHLWINDOW a, PHLWINDOW b) {
     return true;
 }
 
-void Stack::add_active_window(PHLWINDOW window, double maxh, const Vector2D &gap_x, double gap) {
-    reorder = Reorder::Auto;
-    const auto previous = active;
-    // Portrait fullscreen is a temporary active-window expansion. Collapse it
-    // and restore the old stack anchor before inserting, so the new window
-    // inherits the pre-fullscreen size and the rest of the stack keeps its
-    // original relative placement.
-    if (previous && previous->data()->expanded()) {
-        (void)previous->data()->toggle_expand(stack_local_span(geom, mode));
-        adjust_windows(previous, gap_x, gap);
-    }
-    const auto new_height = previous ? previous->data()->get_geom_h() : maxh;
-    active = windows.emplace_after(active, new Window(window, new_height));
-
-    if (!previous)
-        return;
-
-    active->data()->set_geom_y(previous->data()->get_geom_y() + previous->data()->get_geom_h());
-}
-
 void Stack::remove_window(PHLWINDOW window) {
     reorder = Reorder::Auto;
     auto *win = findWindowNode(window);
@@ -341,26 +317,22 @@ void Stack::scale(const Vector2D &bmin, const Vector2D &start, double scale, dou
 }
 
 // Toggle scroller-managed fullscreen/expanded behavior for the active window/stack.
-bool Stack::toggle_fullscreen(const ScrollerCore::Box &fullbbox, Mode mode) {
+bool Stack::toggle_fullscreen(const ScrollerCore::Box &fullbbox) {
     full = fullbbox;
     if (!active)
         return false;
 
-    if (ScrollerCore::mode_uses_stack_fullscreen(mode)) {
-        fullscreened = !fullscreened;
-        if (fullscreened) {
-            mem.geom = geom;
-            if (mode == Mode::Column)
-                geom.h = fullbbox.h;
-            else
-                geom.w = fullbbox.w;
-        } else {
-            geom = mem.geom;
-        }
-        return fullscreened;
+    fullscreened = !fullscreened;
+    if (fullscreened) {
+        mem.geom = geom;
+        if (mode == Mode::Column)
+            geom.h = fullbbox.h;
+        else
+            geom.w = fullbbox.w;
+    } else {
+        geom = mem.geom;
     }
-
-    return ScrollerCore::mode_uses_window_expansion(mode) ? active->data()->toggle_expand(window_expand_extent(fullbbox, mode)) : false;
+    return fullscreened;
 }
 
 // Cache the fullscreen bounding box used by fullscreen-aware relayout.
@@ -417,7 +389,7 @@ bool Stack::fullscreen() const {
 
 // Return whether either scroller fullscreen or portrait expansion is active.
 bool Stack::expanded() const {
-    return fullscreened || (active && active->data()->expanded());
+    return fullscreened;
 }
 
 // Return whether stack-level maximize mode is active.
@@ -612,19 +584,10 @@ FocusMoveResult Stack::move_focus(Direction direction, bool focus_wrap) {
 }
 
 // Insert an extracted window into the current stack next to the active window.
-void Stack::admit_window(std::unique_ptr<Window> window, const Vector2D &gap_x, double gap) {
+void Stack::admit_window(std::unique_ptr<Window> window) {
     reorder = Reorder::Auto;
-    if (!window) {
+    if (!window)
         return;
-    }
-
-    // Moving a window into an expanded portrait stack should restore the stack
-    // first; otherwise the admitted window inherits fullscreen geometry and the
-    // rest of the stack stays shifted to the fullscreen layout.
-    if (active && active->data()->expanded()) {
-        (void)active->data()->toggle_expand(stack_local_span(geom, mode));
-        adjust_windows(active, gap_x, gap);
-    }
 
     if (active) {
         const auto activeWindow = active->data();
@@ -789,20 +752,6 @@ void Stack::fit_size(FitSize fitsize, const Vector2D &gap_x, double gap) {
         from->data()->set_geom_y(stack_local_origin(geom, mode));
         adjust_windows(from, gap_x, gap);
     }
-}
-
-// Cycle the active window height preset.
-void Stack::cycle_size_active_window(int step, const Vector2D &gap_x, double gap) {
-    reorder = Reorder::Auto;
-    WindowHeight height = active->data()->get_height();
-    if (height == WindowHeight::Free) {
-        height = WindowHeight::One;
-    } else {
-        int number = static_cast<int>(WindowHeight::Number);
-        height = static_cast<WindowHeight>((number + static_cast<int>(height) + step) % number);
-    }
-    active->data()->update_height(height, stack_local_span(geom, mode));
-    recalculate_stack_geometry(gap_x, gap);
 }
 
 // Shift windows around the anchor window and then write the resulting geometry

@@ -39,26 +39,6 @@ Mode default_mode_for_extent(double width, double height) {
     return layout_orientation_for_extent(width, height) == LayoutOrientation::Landscape ? Mode::Row : Mode::Column;
 }
 
-// Built-in row and column modes both fullscreen the active stack; only the
-// stack's primary axis changes with the orientation profile.
-bool mode_uses_stack_fullscreen(Mode mode) {
-    (void)mode;
-    return true;
-}
-
-// The current built-in modes do not use per-window expansion anymore.
-bool mode_uses_window_expansion(Mode mode) {
-    (void)mode;
-    return false;
-}
-
-// Ordinary window creation always starts a fresh peer stack. Explicit window
-// move commands are responsible for merging windows into an existing stack.
-bool mode_adds_windows_into_active_stack(Mode mode) {
-    (void)mode;
-    return false;
-}
-
 // Row mode treats lanes as a vertical sequence of pages; column mode treats
 // lanes as a horizontal sequence.
 bool mode_pages_lanes_vertically(Mode mode) {

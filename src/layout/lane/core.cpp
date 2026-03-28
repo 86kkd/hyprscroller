@@ -231,21 +231,6 @@ void Lane::insert_window_payload(ActiveWindowPayload payload, Direction directio
         return;
 
     reorder = Reorder::Auto;
-    if (ScrollerCore::mode_adds_windows_into_active_stack(mode) && active) {
-        auto window = payload.release_window();
-        const auto compositorWindow = window ? window->ptr().lock() : nullptr;
-        const auto windowCountBefore = active->data()->size();
-        active->data()->admit_window(std::move(window), calculate_gap_x(active), gap);
-        rememberWindowStack(compositorWindow, active->data());
-        if (windowCountBefore == 1) {
-            active->data()->fit_size(FitSize::All, calculate_gap_x(active), gap);
-        } else {
-            active->data()->recalculate_stack_geometry(calculate_gap_x(active), gap);
-        }
-        debugVerifyStackCache();
-        return;
-    }
-
     const bool singleWindowLane = stacks.size() == 1 && stacks.first()->data()->size() == 1;
     if (singleWindowLane)
         stacks.first()->data()->update_width(StackWidth::OneHalf, max.w, max.h);
@@ -280,14 +265,14 @@ void Lane::insert_window_payload(ActiveWindowPayload payload, Direction directio
 
     auto *current = active;
     auto *currentStack = current->data();
-    if (ScrollerCore::mode_uses_stack_fullscreen(mode) && currentStack->expanded())
-        (void)currentStack->toggle_fullscreen(max, mode);
+    if (currentStack->expanded())
+        (void)currentStack->toggle_fullscreen(max);
 
     auto inserted = stacks.emplace_after(current, stack);
     if (direction == Direction::Left || direction == Direction::Up || direction == Direction::Begin)
         stacks.move_before(current, inserted);
 
-    if (ScrollerCore::mode_uses_stack_fullscreen(mode)) {
+    if (mode == Mode::Row) {
         const auto currentWidth = currentStack->get_geom_w();
         const auto insertedWidth = stack->get_geom_w();
         const auto totalWidth = currentWidth + insertedWidth;

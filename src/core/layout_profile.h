@@ -7,11 +7,8 @@
  * these helpers questions such as:
  *
  * - Should this monitor default to row mode or column mode?
- * - Does fullscreen mean "expand the whole stack" or "stretch only the active
- *   window"?
  * - Does a direction stay inside the current lane, or should it cross into a
  *   neighboring lane?
- * - Should a new window join the current stack, or start a new peer stack?
  *
  * In practice the policy is:
  *
@@ -67,20 +64,6 @@ std::string_view          layout_orientation_name(LayoutOrientation orientation)
 // Pick the default lane mode for a monitor shape: row on wide monitors,
 // column on tall monitors.
 Mode                      default_mode_for_extent(double width, double height);
-
-// Return true when fullscreen should resize the owning stack itself. This is
-// the landscape/row-mode behavior.
-bool                      mode_uses_stack_fullscreen(Mode mode);
-
-// Return true when fullscreen should only stretch the active window inside its
-// current stack. The built-in row/column modes no longer use this path.
-bool                      mode_uses_window_expansion(Mode mode);
-
-// Return true when a newly created window should be inserted into the current
-// active stack instead of creating a new peer stack. This is now false for the
-// built-in row and column policies; stack merges happen through explicit move
-// commands instead of ordinary window creation.
-bool                      mode_adds_windows_into_active_stack(Mode mode);
 
 // Return true when moving between lanes/pages should happen on the vertical
 // axis rather than the horizontal axis.
