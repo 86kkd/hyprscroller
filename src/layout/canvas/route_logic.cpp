@@ -70,6 +70,10 @@ CrossLaneMoveWindowAction decide_cross_lane_move_window_action(bool hasCurrentWi
     return CrossLaneMoveWindowAction::NoOp;
 }
 
+bool should_cross_monitor_from_empty_lane(bool laneEmpty, bool betweenLanes, bool hasTargetMonitor) {
+    return laneEmpty && !betweenLanes && hasTargetMonitor;
+}
+
 bool should_mark_special_ephemeral_lane_for_restore(bool workspaceIsSpecial, bool workspaceVisible, bool activeLaneIsEphemeral, bool activeLaneEmpty) {
     return workspaceIsSpecial && !workspaceVisible && activeLaneIsEphemeral && activeLaneEmpty;
 }

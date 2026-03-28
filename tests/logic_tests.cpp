@@ -308,6 +308,12 @@ void test_route_logic() {
     expect_eq(decide_move_focus_route(false, false, false, FocusMoveResult::NoOp, DirectionalHandoffRoute::NoOp),
               MoveFocusRouteAction::DispatchBuiltin,
               "move_focus falls back to builtin routing when no lane exists");
+    expect_true(should_cross_monitor_from_empty_lane(true, false, true),
+                "empty lanes can cross monitors on local directions when a monitor exists");
+    expect_true(!should_cross_monitor_from_empty_lane(true, true, true),
+                "empty lanes keep lane-axis routing priority when moving between lanes");
+    expect_true(!should_cross_monitor_from_empty_lane(true, false, false),
+                "empty lanes do not force cross-monitor handoff without a target monitor");
 
     expect_eq(decide_cross_lane_move_window_action(true, true, DirectionalHandoffRoute::AdjacentLane),
               CrossLaneMoveWindowAction::AdjacentLaneTransfer,

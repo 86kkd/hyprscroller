@@ -418,7 +418,21 @@ void CanvasLayout::move_focus(int workspace, Direction direction)
     const auto mode = lane->get_mode();
     const auto betweenLanes = CanvasLayoutInternal::direction_moves_between_lanes(mode, direction);
     const auto laneEmpty = lane->empty();
+    const auto emptyLaneTargetMonitor = laneEmpty
+        ? CanvasLayoutInternal::resolve_monitor_in_direction(beforeMonitor, direction)
+        : nullptr;
     const auto moveResult = laneEmpty ? FocusMoveResult::NoOp : lane->move_focus(direction, **focus_wrap != 0);
+    if (CanvasLayoutInternal::should_cross_monitor_from_empty_lane(laneEmpty, betweenLanes, emptyLaneTargetMonitor != nullptr)) {
+        handoffFocusAcrossMonitor(workspace,
+                                  direction,
+                                  before,
+                                  beforeMonitor,
+                                  beforeActiveWorkspaceId,
+                                  beforeSpecialWorkspaceId,
+                                  sourceLaneNode,
+                                  emptyLaneTargetMonitor);
+        return;
+    }
     const auto handoffPlan = betweenLanes
         ? CanvasLayoutInternal::plan_directional_handoff(
               lanes, activeLane, beforeMonitor, mode, direction, !laneEmpty, CanvasLayoutInternal::resolve_monitor_in_direction)
