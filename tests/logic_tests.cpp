@@ -186,6 +186,12 @@ void test_layout_profile() {
     expect_eq(ScrollerCore::local_item_forward_direction(Mode::Column),
               Direction::Down,
               "column mode local forward direction is down");
+    expect_eq(ScrollerCore::stack_item_backward_direction(Mode::Row),
+              Direction::Up,
+              "row mode stack backward direction is up");
+    expect_eq(ScrollerCore::stack_item_forward_direction(Mode::Column),
+              Direction::Right,
+              "column mode stack forward direction is right");
     expect_eq(ScrollerCore::lane_backward_direction(Mode::Row),
               Direction::Up,
               "row mode lane backward direction is up");

@@ -17,9 +17,9 @@
 void Lane::add_active_window(PHLWINDOW window) {
     if (ScrollerCore::mode_adds_windows_into_active_stack(mode) && active != nullptr) {
         const auto windowCountBefore = active->data()->size();
-        const bool restoredExpanded = active->data()->add_active_window(window, 0.5 * max.h);
+        active->data()->add_active_window(window, 0.5 * max.h, calculate_gap_x(active), gap);
         rememberWindowStack(window, active->data());
-        if (windowCountBefore == 1 || restoredExpanded) {
+        if (windowCountBefore == 1) {
             active->data()->fit_size(FitSize::All, calculate_gap_x(active), gap);
         } else {
             active->data()->recalculate_stack_geometry(calculate_gap_x(active), gap);
@@ -32,7 +32,7 @@ void Lane::add_active_window(PHLWINDOW window) {
     if (singleWindowWorkspace)
         stacks.first()->data()->update_width(StackWidth::OneHalf, max.w, max.h);
 
-    active = stacks.emplace_after(active, new Stack(window, max.w, max.h));
+    active = stacks.emplace_after(active, new Stack(window, max.w, max.h, mode));
     rememberWindowStack(window, active->data());
     if (singleWindowWorkspace)
         active->data()->update_width(StackWidth::OneHalf, max.w, max.h);
@@ -112,18 +112,15 @@ bool Lane::active_item_at_edge(Direction direction) const {
     if (!active)
         return false;
 
-    switch (direction) {
-    case Direction::Left:
-        return ScrollerCore::local_item_backward_direction(mode) == Direction::Left && active == stacks.first();
-    case Direction::Right:
-        return ScrollerCore::local_item_forward_direction(mode) == Direction::Right && active == stacks.last();
-    case Direction::Up:
-        return ScrollerCore::local_item_backward_direction(mode) == Direction::Up && active->data()->active_at_edge(Direction::Up);
-    case Direction::Down:
-        return ScrollerCore::local_item_forward_direction(mode) == Direction::Down && active->data()->active_at_edge(Direction::Down);
-    default:
-        return false;
-    }
+    if (direction == ScrollerCore::local_item_backward_direction(mode))
+        return active == stacks.first();
+    if (direction == ScrollerCore::local_item_forward_direction(mode))
+        return active == stacks.last();
+    if (direction == ScrollerCore::stack_item_backward_direction(mode) ||
+        direction == ScrollerCore::stack_item_forward_direction(mode))
+        return active->data()->active_at_edge(direction);
+
+    return false;
 }
 
 // Execute directional focus movement inside this lane.
@@ -134,18 +131,6 @@ FocusMoveResult Lane::move_focus(Direction dir, bool focus_wrap) {
     reorder = Reorder::Auto;
     FocusMoveResult result = FocusMoveResult::NoOp;
     switch (dir) {
-    case Direction::Left:
-        result = move_focus_left(focus_wrap);
-        break;
-    case Direction::Right:
-        result = move_focus_right(focus_wrap);
-        break;
-    case Direction::Up:
-        result = active->data()->move_focus_up(focus_wrap);
-        break;
-    case Direction::Down:
-        result = active->data()->move_focus_down(focus_wrap);
-        break;
     case Direction::Begin:
         if (active != stacks.first()) {
             move_focus_begin();
@@ -159,7 +144,17 @@ FocusMoveResult Lane::move_focus(Direction dir, bool focus_wrap) {
         }
         break;
     default:
-        return FocusMoveResult::NoOp;
+        if (dir == ScrollerCore::local_item_backward_direction(mode)) {
+            result = move_focus_backward_stack(dir, focus_wrap);
+        } else if (dir == ScrollerCore::local_item_forward_direction(mode)) {
+            result = move_focus_forward_stack(dir, focus_wrap);
+        } else if (dir == ScrollerCore::stack_item_backward_direction(mode) ||
+                   dir == ScrollerCore::stack_item_forward_direction(mode)) {
+            result = active->data()->move_focus(dir, focus_wrap);
+        } else {
+            return FocusMoveResult::NoOp;
+        }
+        break;
     }
     if (result != FocusMoveResult::Moved)
         return result;
@@ -169,9 +164,10 @@ FocusMoveResult Lane::move_focus(Direction dir, bool focus_wrap) {
 }
 
 // Move focus to the previous stack, wrapping or crossing monitor when needed.
-FocusMoveResult Lane::move_focus_left(bool focus_wrap) {
+FocusMoveResult Lane::move_focus_backward_stack(Direction direction, bool focus_wrap) {
     if (active == stacks.first()) {
-        PHLMONITOR monitor = g_pCompositor->getMonitorInDirection(Math::fromChar('l'));
+        const auto monitor = g_pCompositor->getMonitorInDirection(
+            direction == Direction::Up ? Math::fromChar('u') : Math::fromChar('l'));
         if (monitor == nullptr) {
             auto previous = active;
             if (focus_wrap)
@@ -185,9 +181,10 @@ FocusMoveResult Lane::move_focus_left(bool focus_wrap) {
 }
 
 // Move focus to the next stack, wrapping or crossing monitor when needed.
-FocusMoveResult Lane::move_focus_right(bool focus_wrap) {
+FocusMoveResult Lane::move_focus_forward_stack(Direction direction, bool focus_wrap) {
     if (active == stacks.last()) {
-        PHLMONITOR monitor = g_pCompositor->getMonitorInDirection(Math::fromChar('r'));
+        const auto monitor = g_pCompositor->getMonitorInDirection(
+            direction == Direction::Down ? Math::fromChar('d') : Math::fromChar('r'));
         if (monitor == nullptr) {
             auto previous = active;
             if (focus_wrap)
@@ -251,7 +248,14 @@ void Lane::resize_active_window(const Vector2D &delta) {
 
 // Change the lane traversal mode used by focus and insertion logic.
 void Lane::set_mode(Mode m) {
+    if (mode == m)
+        return;
+
     mode = m;
+    for (auto stack = stacks.first(); stack != nullptr; stack = stack->next())
+        stack->data()->set_mode(mode, max.w, max.h);
+    reorder = Reorder::Auto;
+    recalculate_lane_geometry();
 }
 
 // Align the active stack or active window against the current lane viewport.
@@ -264,21 +268,25 @@ void Lane::align_stack(Direction dir) {
         active->data()->expanded())
         return;
 
-    switch (dir) {
-    case Direction::Left:
+    if (dir == ScrollerCore::local_item_backward_direction(mode)) {
         active->data()->set_geom_pos(max.x, max.y);
-        break;
-    case Direction::Right:
-        active->data()->set_geom_pos(max.x + max.w - active->data()->get_geom_w(), max.y);
-        break;
+    } else if (dir == ScrollerCore::local_item_forward_direction(mode)) {
+        if (mode == Mode::Column)
+            active->data()->set_geom_pos(max.x, max.y + max.h - active->data()->get_geom_h());
+        else
+            active->data()->set_geom_pos(max.x + max.w - active->data()->get_geom_w(), max.y);
+    } else {
+        switch (dir) {
     case Direction::Center:
-        if (ScrollerCore::mode_uses_window_expansion(mode)) {
+        if (mode == Mode::Column) {
             active->data()->align_window(Direction::Center, gap);
             active->data()->recalculate_stack_geometry(calculate_gap_x(active), gap);
         } else {
             center_active_stack();
         }
         break;
+    case Direction::Left:
+    case Direction::Right:
     case Direction::Up:
     case Direction::Down:
         active->data()->align_window(dir, gap);
@@ -286,6 +294,7 @@ void Lane::align_stack(Direction dir) {
         break;
     default:
         return;
+        }
     }
     reorder = Reorder::Lazy;
     recalculate_lane_geometry();
@@ -296,25 +305,21 @@ void Lane::move_active_stack(Direction dir) {
     if (!active)
         return;
 
-    switch (dir) {
-    case Direction::Right:
+    if (dir == ScrollerCore::local_item_forward_direction(mode)) {
         if (active != stacks.last()) {
             auto next = active->next();
             stacks.swap(active, next);
         }
-        break;
-    case Direction::Left:
+    } else if (dir == ScrollerCore::local_item_backward_direction(mode)) {
         if (active != stacks.first()) {
             auto prev = active->prev();
             stacks.swap(active, prev);
         }
-        break;
-    case Direction::Up:
-        active->data()->move_active_up();
-        break;
-    case Direction::Down:
-        active->data()->move_active_down();
-        break;
+    } else if (dir == ScrollerCore::stack_item_backward_direction(mode) ||
+               dir == ScrollerCore::stack_item_forward_direction(mode)) {
+        active->data()->move_active(dir);
+    } else {
+        switch (dir) {
     case Direction::Begin:
         if (active != stacks.first())
             stacks.move_before(stacks.first(), active);
@@ -325,6 +330,9 @@ void Lane::move_active_stack(Direction dir) {
         break;
     case Direction::Center:
         return;
+        default:
+            return;
+        }
     }
 
     reorder = Reorder::Auto;
@@ -346,7 +354,6 @@ void Lane::admit_window_left() {
     const auto movedWindow = w ? w->ptr().lock() : nullptr;
     forgetWindowStack(movedWindow);
     auto prev = active->prev();
-    const auto windowCountBefore = prev->data()->size();
     if (active->data()->size() == 0) {
         auto *doomed = active->data();
         auto *emptyNode = active;
@@ -355,12 +362,10 @@ void Lane::admit_window_left() {
         delete doomed;
     }
     active = prev;
-    const bool restoredExpanded = active->data()->admit_window(std::move(w));
+    active->data()->admit_window(std::move(w), calculate_gap_x(active), gap);
     rememberWindowStack(movedWindow, active->data());
 
     reorder = Reorder::Auto;
-    if (windowCountBefore == 1 || restoredExpanded)
-        active->data()->fit_size(FitSize::All, calculate_gap_x(active), gap);
     recalculate_lane_geometry();
     debugVerifyStackCache();
 }
@@ -377,10 +382,22 @@ void Lane::expel_window_right() {
     const auto movedWindow = w ? w->ptr().lock() : nullptr;
     forgetWindowStack(movedWindow);
     StackWidth width = active->data()->get_width();
-    double maxw = width == StackWidth::Free ? active->data()->get_geom_w() : max.w;
-    active = stacks.emplace_after(active, new Stack(std::move(w), width, maxw, max.h));
+    double maxw = width == StackWidth::Free
+        ? (mode == Mode::Column ? active->data()->get_geom_h() : active->data()->get_geom_w())
+        : (mode == Mode::Column ? max.h : max.w);
+    active = stacks.emplace_after(
+        active,
+        new Stack(std::move(w),
+                  width,
+                  mode == Mode::Column ? max.w : maxw,
+                  mode == Mode::Column ? maxw : max.h,
+                  mode));
     rememberWindowStack(movedWindow, active->data());
-    active->data()->set_geom_pos(active->prev()->data()->get_geom_x() + active->prev()->data()->get_geom_w(), max.y);
+    if (mode == Mode::Column) {
+        active->data()->set_geom_pos(max.x, active->prev()->data()->get_geom_y() + active->prev()->data()->get_geom_h());
+    } else {
+        active->data()->set_geom_pos(active->prev()->data()->get_geom_x() + active->prev()->data()->get_geom_w(), max.y);
+    }
 
     reorder = Reorder::Auto;
     recalculate_lane_geometry();

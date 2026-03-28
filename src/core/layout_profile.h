@@ -92,6 +92,12 @@ Direction                 local_item_backward_direction(Mode mode);
 // Direction that means "next local item inside the current lane".
 Direction                 local_item_forward_direction(Mode mode);
 
+// Direction that means "previous window inside the current stack".
+Direction                 stack_item_backward_direction(Mode mode);
+
+// Direction that means "next window inside the current stack".
+Direction                 stack_item_forward_direction(Mode mode);
+
 // Direction that means "previous lane".
 Direction                 lane_backward_direction(Mode mode);
 

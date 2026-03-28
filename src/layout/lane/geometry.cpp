@@ -27,15 +27,47 @@
 #include "../canvas/internal.h"
 
 namespace {
+double stack_primary_origin(const Stack *stack, Mode mode) {
+    return mode == Mode::Column ? stack->get_geom_y() : stack->get_geom_x();
+}
+
+double stack_primary_span(const Stack *stack, Mode mode) {
+    return mode == Mode::Column ? stack->get_geom_h() : stack->get_geom_w();
+}
+
+double visible_primary_origin(const ScrollerCore::Box &visible_box, Mode mode) {
+    return mode == Mode::Column ? visible_box.y : visible_box.x;
+}
+
+double visible_primary_span(const ScrollerCore::Box &visible_box, Mode mode) {
+    return mode == Mode::Column ? visible_box.h : visible_box.w;
+}
+
+double visible_primary_end(const ScrollerCore::Box &visible_box, Mode mode) {
+    return visible_primary_origin(visible_box, mode) + visible_primary_span(visible_box, mode);
+}
+
+void set_stack_primary_position(Stack *stack, Mode mode, const ScrollerCore::Box &visible_box, double primary_pos) {
+    if (!stack)
+        return;
+
+    if (mode == Mode::Column)
+        stack->set_geom_pos(visible_box.x, primary_pos);
+    else
+        stack->set_geom_pos(primary_pos, visible_box.y);
+}
+
 namespace viewport {
-// Return true when a stack would intersect the visible viewport at a projected X.
-bool projected_stack_intersects_visible_box(const Stack *stack, const double projected_x,
-                                            const ScrollerCore::Box &visible_box) {
+// Return true when a stack would intersect the visible viewport at a projected position.
+bool projected_stack_intersects_visible_box(const Stack *stack, const double projected_pos,
+                                            const ScrollerCore::Box &visible_box, Mode mode) {
     if (!stack)
         return false;
 
-    const auto right = projected_x + stack->get_geom_w();
-    return ScrollerCore::Interval::intersects(projected_x, right, visible_box.x, visible_box.x + visible_box.w);
+    const auto projected_end = projected_pos + stack_primary_span(stack, mode);
+    return ScrollerCore::Interval::intersects(projected_pos, projected_end,
+                                              visible_primary_origin(visible_box, mode),
+                                              visible_primary_end(visible_box, mode));
 }
 
 } // namespace viewport
@@ -51,7 +83,7 @@ const void* active_window_ptr(Stack *stack) {
 }
 
 // Summarize the stack list for row-relayout debugging logs.
-std::string summarize_stacks(List<Stack *>& stacks) {
+std::string summarize_stacks(List<Stack *>& stacks, Mode mode) {
     std::ostringstream out;
     for (auto col = stacks.first(); col != nullptr; col = col->next()) {
         if (col != stacks.first())
@@ -59,8 +91,10 @@ std::string summarize_stacks(List<Stack *>& stacks) {
 
         auto *data = col->data();
         out << active_window_ptr(data)
-            << "@x=" << (data ? data->get_geom_x() : 0.0)
-            << ",w=" << (data ? data->get_geom_w() : 0.0);
+            << (mode == Mode::Column ? "@y=" : "@x=")
+            << (data ? stack_primary_origin(data, mode) : 0.0)
+            << (mode == Mode::Column ? ",h=" : ",w=")
+            << (data ? stack_primary_span(data, mode) : 0.0);
 	}
 	return out.str();
 }
@@ -107,6 +141,7 @@ void apply_projection(List<Stack *>& stacks, const ScrollerCore::OverviewProject
         column->set_geom_pos(start.x + (column->get_geom_x() - projection.min.x) * projection.scale,
                              start.y + (height.x - projection.min.y) * projection.scale);
         column->set_geom_w(column->get_geom_w() * projection.scale);
+        column->set_geom_h(column->get_geom_h() * projection.scale);
         column->scale(projection.min, start, projection.scale, gap);
     }
 }
@@ -117,37 +152,42 @@ void restore_projection(List<Stack *>& stacks, ListNode<Stack *> *active, const 
         stack->data()->pop_geom();
 
     Stack *activeStack = active->data();
-    if (activeStack->get_geom_x() < visible_box.x) {
-        activeStack->set_geom_pos(visible_box.x, visible_box.y);
-    } else if (activeStack->get_geom_x() + activeStack->get_geom_w() > visible_box.x + visible_box.w) {
-        activeStack->set_geom_pos(visible_box.x + visible_box.w - activeStack->get_geom_w(), visible_box.y);
+    const auto mode = activeStack->get_mode();
+    const auto primaryOrigin = stack_primary_origin(activeStack, mode);
+    const auto primarySpan = stack_primary_span(activeStack, mode);
+    if (primaryOrigin < visible_primary_origin(visible_box, mode)) {
+        set_stack_primary_position(activeStack, mode, visible_box, visible_primary_origin(visible_box, mode));
+    } else if (primaryOrigin + primarySpan > visible_primary_end(visible_box, mode)) {
+        set_stack_primary_position(activeStack, mode, visible_box,
+                                   visible_primary_end(visible_box, mode) - primarySpan);
     }
 }
 } // namespace overview
 
 namespace recalc {
 // Initialize active-stack geometry when a stack is placed for the first time.
-double initialize_active_stack_geometry(ListNode<Stack *> *active, const ScrollerCore::Box &visible_box, double active_width) {
+double initialize_active_stack_geometry(ListNode<Stack *> *active, const ScrollerCore::Box &visible_box,
+                                        double active_span, Mode mode) {
     if (active->data()->get_init())
-        return active->data()->get_geom_x();
+        return stack_primary_origin(active->data(), mode);
 
-    double active_x;
+    double active_pos;
     if (active->prev()) {
         Stack *prev = active->prev()->data();
-        active_x = prev->get_geom_x() + prev->get_geom_w();
+        active_pos = stack_primary_origin(prev, mode) + stack_primary_span(prev, mode);
     } else if (active->next()) {
-        active_x = active->data()->get_geom_x();
+        active_pos = stack_primary_origin(active->data(), mode);
     } else {
-        active_x = visible_box.x + 0.5 * (visible_box.w - active_width);
+        active_pos = visible_primary_origin(visible_box, mode) + 0.5 * (visible_primary_span(visible_box, mode) - active_span);
     }
 
     active->data()->set_init();
-    return active_x;
+    return active_pos;
 }
 } // namespace recalc
 } // namespace
 
-// Compute the left/right gap pair a stack should use based on its neighbors.
+// Compute the gap pair on the axis orthogonal to the stack's local window flow.
 Vector2D Lane::calculate_gap_x(const ListNode<Stack *> *stack) const {
     auto gap0 = stack == stacks.first() ? 0.0 : gap;
     auto gap1 = stack == stacks.last() ? 0.0 : gap;
@@ -271,86 +311,91 @@ void Lane::recalculate_lane_geometry() {
         stack->update_width(stack->get_width(), max.w, max.h);
         stack->set_geom_pos(max.x, max.y);
         stack->set_geom_w(max.w);
+        stack->set_geom_h(max.h);
         stack->fit_size(FitSize::All, calculate_gap_x(active), gap);
         stack->recalculate_stack_geometry(calculate_gap_x(active), gap);
         spdlog::debug("lane_recalc_single: active_window={} stacks={}",
                       logging::active_window_ptr(stack),
-                      logging::summarize_stacks(stacks));
+                      logging::summarize_stacks(stacks, mode));
         return;
     }
 
-    auto a_w = active->data()->get_geom_w();
-    auto a_x = recalc::initialize_active_stack_geometry(active, max, a_w);
-    spdlog::debug("lane_recalc_input: active_window={} active_x={} active_w={} max=({}, {}, {}, {}) stacks_before={}",
+    auto activeSpan = stack_primary_span(active->data(), mode);
+    auto activePos = recalc::initialize_active_stack_geometry(active, max, activeSpan, mode);
+    spdlog::debug("lane_recalc_input: active_window={} active_pos={} active_span={} max=({}, {}, {}, {}) stacks_before={}",
                   logging::active_window_ptr(active->data()),
-                  a_x,
-                  a_w,
+                  activePos,
+                  activeSpan,
                   max.x,
                   max.y,
                   max.w,
                   max.h,
-                  logging::summarize_stacks(stacks));
-    if (a_x < max.x) {
-        a_x = max.x;
-        active->data()->set_geom_pos(max.x, max.y);
+                  logging::summarize_stacks(stacks, mode));
+    if (activePos < visible_primary_origin(max, mode)) {
+        activePos = visible_primary_origin(max, mode);
+        set_stack_primary_position(active->data(), mode, max, activePos);
         adjust_stacks(active);
-        spdlog::debug("lane_recalc_clamp_left: active_window={} active_x={} stacks_after={}",
+        spdlog::debug("lane_recalc_clamp_before: active_window={} active_pos={} stacks_after={}",
                       logging::active_window_ptr(active->data()),
-                      active->data()->get_geom_x(),
-                      logging::summarize_stacks(stacks));
+                      stack_primary_origin(active->data(), mode),
+                      logging::summarize_stacks(stacks, mode));
         return;
     }
-    if (std::round(a_x + a_w) > max.x + max.w) {
-        a_x = max.x + max.w - a_w;
-        active->data()->set_geom_pos(a_x, max.y);
+    if (std::round(activePos + activeSpan) > visible_primary_end(max, mode)) {
+        activePos = visible_primary_end(max, mode) - activeSpan;
+        set_stack_primary_position(active->data(), mode, max, activePos);
         adjust_stacks(active);
-        spdlog::debug("lane_recalc_clamp_right: active_window={} active_x={} stacks_after={}",
+        spdlog::debug("lane_recalc_clamp_after: active_window={} active_pos={} stacks_after={}",
                       logging::active_window_ptr(active->data()),
-                      active->data()->get_geom_x(),
-                      logging::summarize_stacks(stacks));
+                      stack_primary_origin(active->data(), mode),
+                      logging::summarize_stacks(stacks, mode));
         return;
     }
     if (reorder != Reorder::Auto) {
-        active->data()->set_geom_pos(a_x, max.y);
+        set_stack_primary_position(active->data(), mode, max, activePos);
         adjust_stacks(active);
-        spdlog::debug("lane_recalc_lazy: active_window={} active_x={} stacks_after={}",
+        spdlog::debug("lane_recalc_lazy: active_window={} active_pos={} stacks_after={}",
                       logging::active_window_ptr(active->data()),
-                      active->data()->get_geom_x(),
-                      logging::summarize_stacks(stacks));
+                      stack_primary_origin(active->data(), mode),
+                      logging::summarize_stacks(stacks, mode));
         return;
     }
 
     const Box active_window(max.x, max.y, max.w, max.h);
     const auto *prev = active->prev() ? active->prev()->data() : nullptr;
     const auto *next = active->next() ? active->next()->data() : nullptr;
-    const auto prev_x = prev ? a_x - prev->get_geom_w() : 0.0;
-    const auto next_x = a_x + a_w;
-    const bool prev_inside = viewport::projected_stack_intersects_visible_box(prev, prev_x, active_window);
-    const bool next_inside = viewport::projected_stack_intersects_visible_box(next, next_x, active_window);
+    const auto prevPos = prev ? activePos - stack_primary_span(prev, mode) : 0.0;
+    const auto nextPos = activePos + activeSpan;
+    const bool prev_inside = viewport::projected_stack_intersects_visible_box(prev, prevPos, active_window, mode);
+    const bool next_inside = viewport::projected_stack_intersects_visible_box(next, nextPos, active_window, mode);
     const bool keep_current = prev_inside || next_inside;
-    const auto prev_width = prev ? prev->get_geom_w() : 0.0;
-    const auto next_width = next ? next->get_geom_w() : 0.0;
-    const double new_x = keep_current
-        ? a_x
-        : ScrollerCore::choose_anchor_x(next != nullptr, prev != nullptr, a_w, next_width, prev_width, a_x, max);
-    active->data()->set_geom_pos(new_x, max.y);
+    const auto prevSpan = prev ? stack_primary_span(prev, mode) : 0.0;
+    const auto nextSpan = next ? stack_primary_span(next, mode) : 0.0;
+    const double newPos = keep_current
+        ? activePos
+        : (mode == Mode::Column
+               ? ScrollerCore::choose_anchor_y(next != nullptr, prev != nullptr, activeSpan, nextSpan, prevSpan, max)
+               : ScrollerCore::choose_anchor_x(next != nullptr, prev != nullptr, activeSpan, nextSpan, prevSpan, activePos, max));
+    set_stack_primary_position(active->data(), mode, max, newPos);
     adjust_stacks(active);
-    spdlog::debug("lane_recalc_auto: active_window={} keep_current={} prev_inside={} next_inside={} new_x={} stacks_after={}",
+    spdlog::debug("lane_recalc_auto: active_window={} keep_current={} prev_inside={} next_inside={} new_pos={} stacks_after={}",
                   logging::active_window_ptr(active->data()),
                   keep_current,
                   prev_inside,
                   next_inside,
-                  new_x,
-                  logging::summarize_stacks(stacks));
+                  newPos,
+                  logging::summarize_stacks(stacks, mode));
 }
 
 void Lane::adjust_stacks(ListNode<Stack *> *stack) {
     for (auto col = stack->prev(), prev = stack; col != nullptr; prev = col, col = col->prev()) {
-        col->data()->set_geom_pos(prev->data()->get_geom_x() - col->data()->get_geom_w(), max.y);
+        set_stack_primary_position(col->data(), mode, max,
+                                   stack_primary_origin(prev->data(), mode) - stack_primary_span(col->data(), mode));
         col->data()->set_init();
     }
     for (auto col = stack->next(), prev = stack; col != nullptr; prev = col, col = col->next()) {
-        col->data()->set_geom_pos(prev->data()->get_geom_x() + prev->data()->get_geom_w(), max.y);
+        set_stack_primary_position(col->data(), mode, max,
+                                   stack_primary_origin(prev->data(), mode) + stack_primary_span(prev->data(), mode));
         col->data()->set_init();
     }
 

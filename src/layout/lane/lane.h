@@ -118,8 +118,8 @@ private:
     // Calculate lateral gaps for a stack based on neighbor presence.
     Vector2D calculate_gap_x(const ListNode<Stack *> *stack) const;
 
-    FocusMoveResult move_focus_left(bool focus_wrap);
-    FocusMoveResult move_focus_right(bool focus_wrap);
+    FocusMoveResult move_focus_backward_stack(Direction direction, bool focus_wrap);
+    FocusMoveResult move_focus_forward_stack(Direction direction, bool focus_wrap);
     void move_focus_begin();
     void move_focus_end();
 

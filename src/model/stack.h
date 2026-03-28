@@ -129,9 +129,9 @@ private:
 class Stack {
 public:
     // Build a new stack from a compositor window with configuration defaults.
-    Stack(PHLWINDOW cwindow, double maxw, double maxh);
+    Stack(PHLWINDOW cwindow, double maxw, double maxh, Mode mode);
     // Build a new stack from an existing model window when splitting.
-    Stack(std::unique_ptr<Window> window, StackWidth width, double maxw, double maxh);
+    Stack(std::unique_ptr<Window> window, StackWidth width, double maxw, double maxh, Mode mode);
     // Destroy all windows in this stack.
     ~Stack();
 
@@ -151,9 +151,9 @@ public:
                 std::forward<Fn>(fn)(window);
         }
     }
-    // Insert a new window and make it active. Returns true when portrait
-    // expanded state had to be restored before insertion.
-    bool add_active_window(PHLWINDOW window, double maxh);
+    // Insert a new window and make it active, restoring portrait-expanded
+    // geometry before switching the active anchor when needed.
+    void add_active_window(PHLWINDOW window, double maxh, const Vector2D &gap_x, double gap);
     // Remove a window and keep active pointer coherent.
     void remove_window(PHLWINDOW window);
     // Move active pointer to the matching model window.
@@ -161,9 +161,12 @@ public:
 
     // Geometry accessors used by layout composition.
     double get_geom_x() const;
+    double get_geom_y() const;
     double get_geom_w() const;
+    double get_geom_h() const;
     // Mutate current stack width only; callers must recalc afterwards.
     void set_geom_w(double w);
+    void set_geom_h(double h);
     // Return vertical bounds (top of first and bottom of last rendered window).
     Vector2D get_height() const;
 
@@ -183,6 +186,8 @@ public:
 
     bool fullscreen() const;
     bool maximized() const;
+    Mode get_mode() const;
+    void set_mode(Mode mode, double maxw, double maxh);
     // Set absolute x/y placement of the stack.
     void set_geom_pos(double x, double y);
 
@@ -193,15 +198,13 @@ public:
     // Return whether the active model window is already at a stack edge.
     bool active_at_edge(Direction direction) const;
     // Move active model window inside the same stack list.
-    void move_active_up();
-    void move_active_down();
+    void move_active(Direction direction);
     // Focus movement with wrap behavior across monitor edges.
-    FocusMoveResult move_focus_up(bool focus_wrap);
-    FocusMoveResult move_focus_down(bool focus_wrap);
+    FocusMoveResult move_focus(Direction direction, bool focus_wrap);
 
-    // Insert a model window whose ownership has been transferred to this stack.
-    // Returns true when portrait expanded state had to be restored first.
-    bool admit_window(std::unique_ptr<Window> window);
+    // Insert a model window whose ownership has been transferred to this stack,
+    // restoring portrait-expanded geometry before switching the active anchor.
+    void admit_window(std::unique_ptr<Window> window, const Vector2D &gap_x, double gap);
     // Remove the active model window and transfer ownership to the caller as a unique owner.
     std::unique_ptr<Window> expel_active(double gap);
     // Move active window toward viewport edges/center inside the current stack.
@@ -237,6 +240,8 @@ private:
 
     // Current horizontal width mode of the stack.
     StackWidth width;
+    // Orientation profile used for stack-vs-window axis decisions.
+    Mode mode;
     // Height preset of the active window when cycling window sizes.
     WindowHeight height;
     // Auto/lazy reorder policy used by viewport adjustments.

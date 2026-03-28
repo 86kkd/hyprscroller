@@ -73,6 +73,16 @@ Direction local_item_forward_direction(Mode mode) {
     return mode == Mode::Row ? Direction::Right : Direction::Down;
 }
 
+// Stack-local window movement stays on the axis orthogonal to the lane's
+// stack axis: up/down in row mode, left/right in column mode.
+Direction stack_item_backward_direction(Mode mode) {
+    return mode == Mode::Row ? Direction::Up : Direction::Left;
+}
+
+Direction stack_item_forward_direction(Mode mode) {
+    return mode == Mode::Row ? Direction::Down : Direction::Right;
+}
+
 // Moving to the previous lane is vertical in row mode and horizontal in column
 // mode because the lane axis flips with the orientation profile.
 Direction lane_backward_direction(Mode mode) {
