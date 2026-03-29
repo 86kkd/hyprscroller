@@ -11,13 +11,13 @@
 
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/helpers/Monitor.hpp>
-#include <hyprland/src/managers/KeybindManager.hpp>
 #include <spdlog/spdlog.h>
 
 #include "../../core/direction.h"
 #include "internal.h"
 
 namespace {
+
 class HyprlandDispatcherRuntime final : public CanvasLayoutInternal::DispatcherRuntime {
 public:
     bool hasDispatcherRegistry() const override {
@@ -133,14 +133,10 @@ void focus_monitor_workspace(PHLMONITOR monitor, PHLWORKSPACE workspace, WORKSPA
         }
 
         if (switched) {
-            return;
-        }
-
-        if (workspace) {
-            spdlog::warn("{}: direct monitor workspace switch failed monitor={} workspace={}, using dispatcher fallback",
-                         ctx,
-                         monitor->m_name,
-                         targetWorkspaceId);
+            spdlog::debug("{}: monitor {} switched to workspace {} via direct API",
+                          ctx,
+                          monitor->m_name,
+                          targetWorkspaceId);
         }
     }
 
