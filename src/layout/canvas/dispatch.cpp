@@ -111,10 +111,42 @@ void focus_monitor_workspace(PHLMONITOR monitor, PHLWORKSPACE workspace, WORKSPA
     const auto *ctx = context ? context : "focus_monitor_workspace";
 
     if (monitor && !monitor->m_name.empty()) {
+        const auto targetWorkspaceId = workspace ? workspace->m_id : fallback_workspace_id;
         spdlog::debug("{}: focusing monitor={} workspace={}",
                       ctx,
                       monitor->m_name,
-                      workspace ? workspace->m_id : fallback_workspace_id);
+                      targetWorkspaceId);
+
+        bool switched = false;
+
+        if (workspace) {
+            if (workspace->m_isSpecialWorkspace)
+                monitor->changeWorkspace(workspace->m_id, false, false, false);
+            else
+                monitor->changeWorkspace(workspace, false, false, false);
+            switched = workspace->m_isSpecialWorkspace
+                ? monitor->activeSpecialWorkspaceID() == workspace->m_id
+                : monitor->activeWorkspaceID() == workspace->m_id;
+        } else if (fallback_workspace_id != WORKSPACE_INVALID) {
+            monitor->changeWorkspace(fallback_workspace_id, false, false, false);
+            switched = monitor->activeWorkspaceID() == fallback_workspace_id;
+        }
+
+        if (switched) {
+            return;
+        }
+
+        if (workspace) {
+            spdlog::warn("{}: direct monitor workspace switch failed monitor={} workspace={}, using dispatcher fallback",
+                         ctx,
+                         monitor->m_name,
+                         targetWorkspaceId);
+        }
+    }
+
+    // Dispatcher fallback keeps legacy behavior for cases where direct workspace
+    // switching is not available through direct monitor APIs.
+    if (monitor && !monitor->m_name.empty()) {
         (void)invoke_dispatcher("focusmonitor", monitor->m_name, ctx);
     }
 

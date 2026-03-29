@@ -435,6 +435,20 @@ void CanvasLayout::move_focus(int workspace, Direction direction)
         return;
     }
 
+    if (!laneEmpty && !betweenLanes && moveResult == FocusMoveResult::NoOp && targetMonitorFromDirection) {
+        spdlog::info("move_focus: blocked local move, attempting cross-monitor fallback workspace={} direction={}",
+                     workspace, ScrollerCore::direction_name(direction));
+        handoffFocusAcrossMonitor(workspace,
+                                  direction,
+                                  before,
+                                  sourceMonitor,
+                                  beforeActiveWorkspaceId,
+                                  beforeSpecialWorkspaceId,
+                                  sourceLaneNode,
+                                  targetMonitorFromDirection);
+        return;
+    }
+
     const auto handoffPlan = betweenLanes
         ? CanvasLayoutInternal::plan_directional_handoff(
               lanes, activeLane, sourceMonitor, mode, direction, !laneEmpty, CanvasLayoutInternal::resolve_monitor_in_direction)
