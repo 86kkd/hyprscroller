@@ -21,6 +21,7 @@
 
 #include "core/direction.h"
 #include "dispatchers.h"
+#include "layout/canvas/internal.h"
 #include "layout/canvas/layout.h"
 #include "overview/session.h"
 
@@ -153,7 +154,8 @@ namespace {
         int workspace;
         auto layout = layout_for_action(&workspace);
         if (!layout || workspace == -1) {
-            spdlog::warn("dispatch_movefocus: no layout for arg='{}'", arg);
+            spdlog::warn("dispatch_movefocus: no layout for arg='{}', fallback builtin", arg);
+            CanvasLayoutInternal::dispatch_builtin_movefocus(*direction);
             return;
         }
 

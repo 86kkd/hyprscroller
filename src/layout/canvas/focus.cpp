@@ -403,9 +403,9 @@ void CanvasLayout::move_focus(int workspace, Direction direction)
         syncActiveStateFromWorkspaceFocus();
     auto lane = getActiveLane();
     const auto before = lane ? lane->get_active_window() : nullptr;
-    const auto beforeMonitor = before ? g_pCompositor->getMonitorFromID(before->monitorID()) : monitorFromPointingOrCursor();
-    const auto beforeActiveWorkspaceId = beforeMonitor ? beforeMonitor->activeWorkspaceID() : WORKSPACE_INVALID;
-    const auto beforeSpecialWorkspaceId = beforeMonitor ? beforeMonitor->activeSpecialWorkspaceID() : WORKSPACE_INVALID;
+    const auto sourceMonitor = before ? g_pCompositor->getMonitorFromID(before->monitorID()) : monitorFromPointingOrCursor();
+    const auto beforeActiveWorkspaceId = sourceMonitor ? sourceMonitor->activeWorkspaceID() : WORKSPACE_INVALID;
+    const auto beforeSpecialWorkspaceId = sourceMonitor ? sourceMonitor->activeSpecialWorkspaceID() : WORKSPACE_INVALID;
     auto sourceLaneNode = activeLane;
     spdlog::info("move_focus: workspace={} direction={} lane_found={} before={}",
                  workspace, ScrollerCore::direction_name(direction), lane != nullptr,
@@ -418,24 +418,26 @@ void CanvasLayout::move_focus(int workspace, Direction direction)
     const auto mode = lane->get_mode();
     const auto betweenLanes = CanvasLayoutInternal::direction_moves_between_lanes(mode, direction);
     const auto laneEmpty = lane->empty();
+    const auto targetMonitorFromDirection = directionalMoveTargetMonitor(sourceMonitor, direction);
     const auto emptyLaneTargetMonitor = laneEmpty
-        ? CanvasLayoutInternal::resolve_monitor_in_direction(beforeMonitor, direction)
+        ? targetMonitorFromDirection
         : nullptr;
     const auto moveResult = laneEmpty ? FocusMoveResult::NoOp : lane->move_focus(direction, **focus_wrap != 0);
     if (CanvasLayoutInternal::should_cross_monitor_from_empty_lane(laneEmpty, betweenLanes, emptyLaneTargetMonitor != nullptr)) {
         handoffFocusAcrossMonitor(workspace,
                                   direction,
                                   before,
-                                  beforeMonitor,
+                                  sourceMonitor,
                                   beforeActiveWorkspaceId,
                                   beforeSpecialWorkspaceId,
                                   sourceLaneNode,
                                   emptyLaneTargetMonitor);
         return;
     }
+
     const auto handoffPlan = betweenLanes
         ? CanvasLayoutInternal::plan_directional_handoff(
-              lanes, activeLane, beforeMonitor, mode, direction, !laneEmpty, CanvasLayoutInternal::resolve_monitor_in_direction)
+              lanes, activeLane, sourceMonitor, mode, direction, !laneEmpty, CanvasLayoutInternal::resolve_monitor_in_direction)
         : CanvasLayoutInternal::DirectionalHandoffPlan{};
     const auto action = CanvasLayoutInternal::decide_move_focus_route(true, laneEmpty, betweenLanes, moveResult, handoffPlan.route);
 
@@ -446,17 +448,17 @@ void CanvasLayout::move_focus(int workspace, Direction direction)
     case CanvasLayoutInternal::MoveFocusRouteAction::NoOp:
         return;
     case CanvasLayoutInternal::MoveFocusRouteAction::AdjacentLane:
-        focusAdjacentLane(workspace, direction, sourceLaneNode, beforeMonitor, handoffPlan.targetLaneNode);
+        focusAdjacentLane(workspace, direction, sourceLaneNode, sourceMonitor, handoffPlan.targetLaneNode);
         return;
     case CanvasLayoutInternal::MoveFocusRouteAction::CrossMonitor: {
         const auto monitor = moveResult == FocusMoveResult::CrossMonitor
-            ? CanvasLayoutInternal::resolve_monitor_in_direction(beforeMonitor, direction)
+            ? CanvasLayoutInternal::resolve_monitor_in_direction(sourceMonitor, direction)
             : handoffPlan.targetMonitor;
-        handoffFocusAcrossMonitor(workspace, direction, before, beforeMonitor, beforeActiveWorkspaceId, beforeSpecialWorkspaceId, sourceLaneNode, monitor);
+        handoffFocusAcrossMonitor(workspace, direction, before, sourceMonitor, beforeActiveWorkspaceId, beforeSpecialWorkspaceId, sourceLaneNode, monitor);
         return;
     }
     case CanvasLayoutInternal::MoveFocusRouteAction::CreateLane:
-        createEphemeralLaneForFocus(workspace, direction, beforeMonitor, mode, handoffPlan.targetLaneNode);
+        createEphemeralLaneForFocus(workspace, direction, sourceMonitor, mode, handoffPlan.targetLaneNode);
         return;
     case CanvasLayoutInternal::MoveFocusRouteAction::FinalizeLocalMove:
         finalizeLocalFocusMove(workspace, direction, lane, focus_move_result_name(moveResult));
