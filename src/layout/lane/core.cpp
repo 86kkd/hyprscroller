@@ -298,6 +298,14 @@ void Lane::insert_window_payload(ActiveWindowPayload payload, Direction directio
 }
 
 void Lane::set_canvas_geometry(const Box &full_box, const Box &max_box, int gap_size) {
+    const auto previousLocalOrigin = mode == Mode::Column ? max.x : max.y;
+    const auto nextLocalOrigin = mode == Mode::Column ? max_box.x : max_box.y;
+    const auto localDelta = nextLocalOrigin - previousLocalOrigin;
+    if (localDelta != 0.0) {
+        for (auto stack = stacks.first(); stack != nullptr; stack = stack->next())
+            stack->data()->shift_local_geometry(localDelta);
+    }
+
     full = full_box;
     max = max_box;
     gap = gap_size;

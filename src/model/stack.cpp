@@ -413,6 +413,16 @@ void Stack::set_mode(Mode nextMode, double maxw, double maxh) {
     }
 }
 
+void Stack::shift_local_geometry(double delta) {
+    if (delta == 0.0)
+        return;
+
+    for (auto win = windows.first(); win != nullptr; win = win->next()) {
+        auto *window = win->data();
+        window->set_geom_y(window->get_geom_y() + delta);
+    }
+}
+
 // Set the absolute stack origin used by later relayout.
 void Stack::set_geom_pos(double x, double y) {
     geom.set_pos(x, y);

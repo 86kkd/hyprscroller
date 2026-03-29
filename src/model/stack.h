@@ -179,6 +179,7 @@ public:
     bool maximized() const;
     Mode get_mode() const;
     void set_mode(Mode mode, double maxw, double maxh);
+    void shift_local_geometry(double delta);
     // Set absolute x/y placement of the stack.
     void set_geom_pos(double x, double y);
 
