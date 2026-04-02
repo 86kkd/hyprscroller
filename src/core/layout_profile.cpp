@@ -96,6 +96,10 @@ bool direction_inserts_before_current(Mode mode, Direction direction) {
     return direction == lane_backward_direction(mode) || direction == Direction::Begin;
 }
 
+double stack_local_origin_for_window(Mode mode, const Hyprutils::Math::Vector2D& position) {
+    return mode == Mode::Column ? position.x : position.y;
+}
+
 // Predict the initial logical size for a just-created tiled window. Row mode
 // starts as a half-width peer stack; column mode starts as a full-width,
 // half-height peer stack.

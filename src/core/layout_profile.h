@@ -97,6 +97,9 @@ bool                      direction_moves_between_lanes(Mode mode, Direction dir
 // Return true when an insertion request means "place before the current lane".
 bool                      direction_inserts_before_current(Mode mode, Direction direction);
 
+// Return the logical origin of a window on the stack-local axis for this mode.
+double                    stack_local_origin_for_window(Mode mode, const Hyprutils::Math::Vector2D& position);
+
 // Predict the starting logical size for a new tiled window under this mode.
 Hyprutils::Math::Vector2D predict_window_size(Mode mode, const Box& bounds);
 

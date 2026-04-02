@@ -63,7 +63,8 @@ enum class Reorder {
 /**
  * @brief Lightweight model wrapper around a compositor window.
  *
- * `Window` stores the logical vertical geometry used by the scrolling model.
+ * `Window` stores the logical geometry on the stack-local axis used by the
+ * scrolling model.
  * It intentionally does not own lane/canvas placement concerns; its job is to
  * remember the per-window height policy and the logical Y/H values that stack
  * relayout operates on.
@@ -71,16 +72,16 @@ enum class Reorder {
 class Window {
 public:
     // Construct model wrapper for a backend window and its initial logical geometry.
-    Window(PHLWINDOW window, double box_h);
+    Window(PHLWINDOW window, double box_h, Mode mode);
     // Access original compositor window handle.
     PHLWINDOWREF ptr() const;
     // Return logical geometry height used by scroller model.
     double get_geom_h() const;
-    // Return logical geometry top position used by scroller model.
+    // Return logical geometry origin used by scroller model.
     double get_geom_y() const;
     // Store logical geometry height used by layout calculations.
     void set_geom_h(double geom_h);
-    // Store logical geometry top position used by layout calculations.
+    // Store logical geometry origin used by layout calculations.
     void set_geom_y(double geom_y);
     // Save current geometry values into a lightweight undo buffer.
     void push_geom();
@@ -104,7 +105,7 @@ private:
     PHLWINDOWREF window;
     // Current logical height preset for resize/cycle commands.
     WindowHeight height;
-    // Logical top position inside the owning stack.
+    // Logical origin inside the owning stack's local axis.
     double box_y;
     // Logical height inside the owning stack.
     double box_h;

@@ -210,6 +210,11 @@ void test_layout_profile() {
               Direction::Right,
               "column mode lane forward direction is right");
 
+    expect_near(ScrollerCore::stack_local_origin_for_window(Mode::Row, {10.0, 20.0}),
+                20.0, 1e-9, "row mode stack-local window origin uses y");
+    expect_near(ScrollerCore::stack_local_origin_for_window(Mode::Column, {10.0, 20.0}),
+                10.0, 1e-9, "column mode stack-local window origin uses x");
+
     expect_true(ScrollerCore::direction_targets_local_item(Mode::Row, Direction::Left),
                 "row mode treats left as local item movement");
     expect_true(ScrollerCore::direction_moves_between_lanes(Mode::Row, Direction::Down),

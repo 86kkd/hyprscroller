@@ -152,7 +152,7 @@ Stack::Stack(PHLWINDOW cwindow, double maxw, double maxh, Mode mode)
     width = preset.width;
     maxw = preset.maxw;
 
-    Window *window = new Window(cwindow, mode == Mode::Column ? maxw : maxh);
+    Window *window = new Window(cwindow, mode == Mode::Column ? maxw : maxh, mode);
     update_width(width, maxw, maxh);
     windows.push_back(window);
     active = windows.first();

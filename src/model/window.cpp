@@ -8,12 +8,14 @@
  */
 #include "stack.h"
 
+#include "../core/layout_profile.h"
+
 namespace ScrollerModel {
 
-Window::Window(PHLWINDOW window, double box_h)
+Window::Window(PHLWINDOW window, double box_h, Mode mode)
     : window(window),
       height(WindowHeight::One),
-      box_y(window ? window->m_position.y - window->getRealBorderSize() : 0.0),
+      box_y(window ? ScrollerCore::stack_local_origin_for_window(mode, window->m_position) - window->getRealBorderSize() : 0.0),
       box_h(box_h) {}
 
 PHLWINDOWREF Window::ptr() const {
