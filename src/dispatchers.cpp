@@ -215,13 +215,14 @@ namespace {
         if (!layout || workspace == -1)
             return;
 
-        Mode mode = Mode::Row;
-        if (arg == "r" || arg == "row") {
-            mode = Mode::Row;
-        } else if (arg == "c" || arg == "col" || arg == "column") {
-            mode = Mode::Column;
+        auto args = CVarList(arg);
+        const auto mode = ScrollerCore::parse_mode_arg(args[0]);
+        if (!mode) {
+            spdlog::warn("dispatch_setmode: unsupported arg='{}'", arg);
+            return;
         }
-        layout->set_mode(workspace, mode);
+
+        layout->set_mode(workspace, *mode);
     }
 
     // fitsize <active|visible|all|toend|tobeg>: resize visible windows so they

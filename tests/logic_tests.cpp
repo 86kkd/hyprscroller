@@ -111,6 +111,17 @@ void test_parse_helpers() {
 
     expect_true(!ScrollerCore::parse_fit_size_arg("largest").has_value(),
                 "parse_fit_size_arg rejects invalid input");
+
+    const auto rowMode = ScrollerCore::parse_mode_arg("row");
+    expect_true(rowMode.has_value() && *rowMode == Mode::Row,
+                "parse_mode_arg handles row");
+
+    const auto columnMode = ScrollerCore::parse_mode_arg("col");
+    expect_true(columnMode.has_value() && *columnMode == Mode::Column,
+                "parse_mode_arg handles col alias");
+
+    expect_true(!ScrollerCore::parse_mode_arg("grid").has_value(),
+                "parse_mode_arg rejects invalid input");
 }
 
 void test_anchor_selection() {
