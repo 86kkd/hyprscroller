@@ -185,7 +185,7 @@ void Stack::set_init() {
     initialized = true;
 }
 
-size_t Stack::size() {
+size_t Stack::size() const {
     return windows.size();
 }
 
@@ -609,6 +609,23 @@ void Stack::admit_window(std::unique_ptr<Window> window) {
     }
 
     active = windows.emplace_after(active, window.release());
+}
+
+void Stack::restore_window(std::unique_ptr<Window> window, bool insertBeforeActive) {
+    reorder = Reorder::Auto;
+    if (!window)
+        return;
+
+    if (!active) {
+        window->set_geom_h(stack_local_span(geom, mode));
+        window->set_geom_y(stack_local_origin(geom, mode));
+        active = windows.emplace_after(active, window.release());
+        return;
+    }
+
+    active = insertBeforeActive
+        ? windows.emplace_before(active, window.release())
+        : windows.emplace_after(active, window.release());
 }
 
 // Remove and return the active model window from this stack.

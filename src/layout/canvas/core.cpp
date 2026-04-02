@@ -683,7 +683,6 @@ void CanvasLayout::onEnable() {
     clear_lanes(lanes);
     activeLane = nullptr;
     laneByWindow.clear();
-    marks.reset();
     resetHandoffState();
     specialEphemeralLaneRestorePending = false;
     m_workspaceActiveCallback = nullptr;
@@ -743,7 +742,6 @@ void CanvasLayout::onDisable() {
     clear_lanes(lanes);
     activeLane = nullptr;
     laneByWindow.clear();
-    marks.reset();
     resetHandoffState();
     specialEphemeralLaneRestorePending = false;
     debugVerifyLaneCache();

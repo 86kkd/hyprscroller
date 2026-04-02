@@ -22,6 +22,7 @@ int failures = 0;
 
 struct FakeDispatcherRuntime final : CanvasLayoutInternal::DispatcherRegistryRuntime {
     bool registryAvailable = true;
+    bool invocationSucceeds = true;
     std::vector<std::string> knownDispatchers;
     mutable std::vector<std::pair<std::string, std::string>> invocations;
 
@@ -42,7 +43,7 @@ struct FakeDispatcherRuntime final : CanvasLayoutInternal::DispatcherRegistryRun
     }
 
     bool invokeDispatcher(const char *dispatcher, std::string_view arg) const override {
-        if (!hasDispatcher(dispatcher))
+        if (!hasDispatcher(dispatcher) || !invocationSucceeds)
             return false;
 
         invocations.emplace_back(dispatcher, std::string(arg));
@@ -362,6 +363,12 @@ void test_dispatch_logic() {
               "dispatcher helper keeps dispatcher name");
     expect_eq(runtime.invocations[0].second, std::string("l"),
               "dispatcher helper keeps dispatcher arg");
+
+    runtime.invocationSucceeds = false;
+    expect_true(!invoke_dispatcher(runtime, "movefocus", "l", "dispatch_test"),
+                "dispatcher helper propagates runtime invocation failures");
+    expect_eq(runtime.invocations.size(), std::size_t{1},
+              "dispatcher helper does not record failed invocations");
 }
 
 void test_overview_target_selection_across_monitors() {
