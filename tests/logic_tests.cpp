@@ -129,6 +129,11 @@ void test_anchor_selection() {
                 150.0, 1e-9, "choose_anchor_y positions after prev when it fits");
     expect_near(ScrollerCore::choose_anchor_y(false, true, 250.0, 0.0, 100.0, visible),
                 100.0, 1e-9, "choose_anchor_y aligns to bottom when only prev exists but cannot fit");
+
+    expect_near(ScrollerCore::center_span(100.0, 400.0, 150.0),
+                225.0, 1e-9, "center_span preserves the outer origin when centering");
+    expect_near(ScrollerCore::center_span(-320.0, 640.0, 320.0),
+                -160.0, 1e-9, "center_span handles non-zero negative origins");
 }
 
 void test_overview_projection() {

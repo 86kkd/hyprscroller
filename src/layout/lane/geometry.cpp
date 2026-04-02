@@ -215,7 +215,7 @@ void Lane::center_active_stack() {
             stack->set_geom_pos(max.x, max.y + max.h / 6.0);
             break;
         case StackWidth::Free:
-            stack->set_geom_pos(max.x, max.y + 0.5 * (max.h - stack->get_geom_h()));
+            stack->set_geom_pos(max.x, ScrollerCore::center_span(max.y, max.h, stack->get_geom_h()));
             break;
         default:
             break;
@@ -234,7 +234,7 @@ void Lane::center_active_stack() {
         stack->set_geom_pos(max.x + max.w / 6.0, max.y);
         break;
     case StackWidth::Free:
-        stack->set_geom_pos(0.5 * (max.w - stack->get_geom_w()), max.y);
+        stack->set_geom_pos(ScrollerCore::center_span(max.x, max.w, stack->get_geom_w()), max.y);
         break;
     default:
         break;

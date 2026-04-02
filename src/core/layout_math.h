@@ -32,6 +32,9 @@ double choose_anchor_x(bool has_next, bool has_prev, double active_width, double
 double choose_anchor_y(bool has_next, bool has_prev, double active_height, double next_height,
                        double prev_height, const Box &visible_box);
 
+// Center an inner span inside an outer span while preserving the outer origin.
+double center_span(double origin, double outer_span, double inner_span);
+
 // Compute the overview projection for a set of stack bounds inside the visible box.
 OverviewProjection compute_overview_projection(std::span<const OverviewRect> items,
                                                const Box &visible_box);
