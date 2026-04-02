@@ -100,6 +100,10 @@ double stack_local_origin_for_window(Mode mode, const Hyprutils::Math::Vector2D&
     return mode == Mode::Column ? position.x : position.y;
 }
 
+double stack_primary_span_limit(Mode mode, const Box& bounds) {
+    return mode == Mode::Column ? bounds.h : bounds.w;
+}
+
 // Predict the initial logical size for a just-created tiled window. Row mode
 // starts as a half-width peer stack; column mode starts as a full-width,
 // half-height peer stack.

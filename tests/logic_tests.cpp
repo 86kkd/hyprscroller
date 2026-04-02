@@ -214,6 +214,10 @@ void test_layout_profile() {
                 20.0, 1e-9, "row mode stack-local window origin uses y");
     expect_near(ScrollerCore::stack_local_origin_for_window(Mode::Column, {10.0, 20.0}),
                 10.0, 1e-9, "column mode stack-local window origin uses x");
+    expect_near(ScrollerCore::stack_primary_span_limit(Mode::Row, {100.0, 50.0, 640.0, 360.0}),
+                640.0, 1e-9, "row mode stack primary span limit uses workarea width");
+    expect_near(ScrollerCore::stack_primary_span_limit(Mode::Column, {100.0, 50.0, 640.0, 360.0}),
+                360.0, 1e-9, "column mode stack primary span limit uses workarea height");
 
     expect_true(ScrollerCore::direction_targets_local_item(Mode::Row, Direction::Left),
                 "row mode treats left as local item movement");

@@ -852,7 +852,7 @@ void Stack::adjust_windows(ListNode<Window *> *win, const Vector2D &gap_x, doubl
 
 // Resize stack width and, optionally, active window height while keeping
 // geometry valid.
-void Stack::resize_active_window(double maxw, const Vector2D &gap_x, double gap, const Vector2D &delta) {
+void Stack::resize_active_window(const ScrollerCore::Box &bounds, const Vector2D &gap_x, double gap, const Vector2D &delta) {
     if (!active)
         return;
 
@@ -865,7 +865,7 @@ void Stack::resize_active_window(double maxw, const Vector2D &gap_x, double gap,
     const auto windowDelta = mode == Mode::Column ? delta.x : delta.y;
     auto renderedStackSpan = stack_primary_span(geom, mode) + stackDelta - 2.0 * border - gap_x.x - gap_x.y;
     auto maxStackSpan = stack_primary_span(geom, mode) + stackDelta - 2.0 * (border + std::max(std::max(gap_x.x, gap_x.y), gap));
-    const auto maxPrimary = mode == Mode::Column ? full.h : maxw;
+    const auto maxPrimary = ScrollerCore::stack_primary_span_limit(mode, bounds);
     if (maxStackSpan <= 0.0 || renderedStackSpan >= maxPrimary)
         return;
 

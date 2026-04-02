@@ -218,7 +218,7 @@ void Lane::resize_active_window(const Vector2D &delta) {
         active->data()->expanded())
         return;
 
-    active->data()->resize_active_window(max.w, calculate_gap_x(active), gap, delta);
+    active->data()->resize_active_window(max, calculate_gap_x(active), gap, delta);
     recalculate_lane_geometry();
 }
 

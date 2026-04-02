@@ -217,7 +217,7 @@ public:
     // Resize a window range (all/visible/active/to ends) to fill available height.
     void fit_size(FitSize fitsize, const Vector2D &gap_x, double gap);
     // Resize width and optional active height if height delta is valid.
-    void resize_active_window(double maxw, const Vector2D &gap_x, double gap, const Vector2D &delta);
+    void resize_active_window(const ScrollerCore::Box &bounds, const Vector2D &gap_x, double gap, const Vector2D &delta);
 
 private:
     // Find the list node that owns a given compositor window.

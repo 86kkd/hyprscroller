@@ -100,6 +100,9 @@ bool                      direction_inserts_before_current(Mode mode, Direction 
 // Return the logical origin of a window on the stack-local axis for this mode.
 double                    stack_local_origin_for_window(Mode mode, const Hyprutils::Math::Vector2D& position);
 
+// Return the maximum available stack span along the lane-local axis for this mode.
+double                    stack_primary_span_limit(Mode mode, const Box& bounds);
+
 // Predict the starting logical size for a new tiled window under this mode.
 Hyprutils::Math::Vector2D predict_window_size(Mode mode, const Box& bounds);
 
