@@ -22,6 +22,7 @@ int failures = 0;
 
 struct FakeDispatcherRuntime final : CanvasLayoutInternal::DispatcherRegistryRuntime {
     bool registryAvailable = true;
+    bool invocationSucceeds = true;
     std::vector<std::string> knownDispatchers;
     mutable std::vector<std::pair<std::string, std::string>> invocations;
 
@@ -42,7 +43,7 @@ struct FakeDispatcherRuntime final : CanvasLayoutInternal::DispatcherRegistryRun
     }
 
     bool invokeDispatcher(const char *dispatcher, std::string_view arg) const override {
-        if (!hasDispatcher(dispatcher))
+        if (!hasDispatcher(dispatcher) || !invocationSucceeds)
             return false;
 
         invocations.emplace_back(dispatcher, std::string(arg));
@@ -110,6 +111,17 @@ void test_parse_helpers() {
 
     expect_true(!ScrollerCore::parse_fit_size_arg("largest").has_value(),
                 "parse_fit_size_arg rejects invalid input");
+
+    const auto rowMode = ScrollerCore::parse_mode_arg("row");
+    expect_true(rowMode.has_value() && *rowMode == Mode::Row,
+                "parse_mode_arg handles row");
+
+    const auto columnMode = ScrollerCore::parse_mode_arg("col");
+    expect_true(columnMode.has_value() && *columnMode == Mode::Column,
+                "parse_mode_arg handles col alias");
+
+    expect_true(!ScrollerCore::parse_mode_arg("grid").has_value(),
+                "parse_mode_arg rejects invalid input");
 }
 
 void test_anchor_selection() {
@@ -128,6 +140,11 @@ void test_anchor_selection() {
                 150.0, 1e-9, "choose_anchor_y positions after prev when it fits");
     expect_near(ScrollerCore::choose_anchor_y(false, true, 250.0, 0.0, 100.0, visible),
                 100.0, 1e-9, "choose_anchor_y aligns to bottom when only prev exists but cannot fit");
+
+    expect_near(ScrollerCore::center_span(100.0, 400.0, 150.0),
+                225.0, 1e-9, "center_span preserves the outer origin when centering");
+    expect_near(ScrollerCore::center_span(-320.0, 640.0, 320.0),
+                -160.0, 1e-9, "center_span handles non-zero negative origins");
 }
 
 void test_overview_projection() {
@@ -362,6 +379,12 @@ void test_dispatch_logic() {
               "dispatcher helper keeps dispatcher name");
     expect_eq(runtime.invocations[0].second, std::string("l"),
               "dispatcher helper keeps dispatcher arg");
+
+    runtime.invocationSucceeds = false;
+    expect_true(!invoke_dispatcher(runtime, "movefocus", "l", "dispatch_test"),
+                "dispatcher helper propagates runtime invocation failures");
+    expect_eq(runtime.invocations.size(), std::size_t{1},
+              "dispatcher helper does not record failed invocations");
 }
 
 void test_overview_target_selection_across_monitors() {

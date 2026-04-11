@@ -89,4 +89,12 @@ std::optional<FitSize> parse_fit_size_arg(std::string_view arg) {
     return std::nullopt;
 }
 
+std::optional<Mode> parse_mode_arg(std::string_view arg) {
+    if (arg == "r" || arg == "row")
+        return Mode::Row;
+    if (arg == "c" || arg == "col" || arg == "column")
+        return Mode::Column;
+    return std::nullopt;
+}
+
 } // namespace ScrollerCore

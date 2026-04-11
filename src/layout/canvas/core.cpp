@@ -477,10 +477,11 @@ void CanvasLayout::recalculate()
     relayoutCanvas(monitor, true);
 }
 
-// Placeholder for future layoutmsg support.
-std::expected<void, std::string> CanvasLayout::layoutMsg(const std::string_view&)
+// Explicitly reject layout messages until the plugin defines a supported protocol.
+std::expected<void, std::string> CanvasLayout::layoutMsg(const std::string_view& message)
 {
-    return {};
+    spdlog::warn("layoutMsg: unsupported message='{}'", message);
+    return std::unexpected("layout messages are not supported");
 }
 
 // Predict the size of a new tiled target using the active lane if present.
@@ -683,7 +684,6 @@ void CanvasLayout::onEnable() {
     clear_lanes(lanes);
     activeLane = nullptr;
     laneByWindow.clear();
-    marks.reset();
     resetHandoffState();
     specialEphemeralLaneRestorePending = false;
     m_workspaceActiveCallback = nullptr;
@@ -743,7 +743,6 @@ void CanvasLayout::onDisable() {
     clear_lanes(lanes);
     activeLane = nullptr;
     laneByWindow.clear();
-    marks.reset();
     resetHandoffState();
     specialEphemeralLaneRestorePending = false;
     debugVerifyLaneCache();

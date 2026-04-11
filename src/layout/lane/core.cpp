@@ -179,6 +179,22 @@ bool Lane::is_active(PHLWINDOW window) const {
     return get_active_window() == window;
 }
 
+ActiveWindowRestorePlan Lane::capture_active_window_restore_plan(Direction direction) const {
+    ActiveWindowRestorePlan plan;
+    plan.direction = direction;
+
+    if (!active)
+        return plan;
+
+    auto *stack = active->data();
+    if (!stack || stack->size() <= 1)
+        return plan;
+
+    plan.restoreIntoCurrentStack = true;
+    plan.insertBeforeCurrent = stack->active_at_edge(ScrollerCore::stack_item_backward_direction(mode));
+    return plan;
+}
+
 Stack *Lane::extract_active_stack() {
     if (!active)
         return nullptr;
@@ -293,6 +309,28 @@ void Lane::insert_window_payload(ActiveWindowPayload payload, Direction directio
 
     active = inserted;
     rememberWindowStack(compositorWindow, stack);
+    recalculate_lane_geometry();
+    debugVerifyStackCache();
+}
+
+void Lane::restore_active_window_payload(ActiveWindowPayload payload, const ActiveWindowRestorePlan &plan) {
+    if (!payload)
+        return;
+
+    if (!plan.restoreIntoCurrentStack || !active || !active->data()) {
+        insert_window_payload(std::move(payload), plan.direction);
+        return;
+    }
+
+    auto *stack = active->data();
+    auto window = payload.release_window();
+    const auto compositorWindow = window ? window->ptr().lock() : nullptr;
+
+    stack->restore_window(std::move(window), plan.insertBeforeCurrent);
+    if (compositorWindow)
+        rememberWindowStack(compositorWindow, stack);
+
+    reorder = Reorder::Auto;
     recalculate_lane_geometry();
     debugVerifyStackCache();
 }

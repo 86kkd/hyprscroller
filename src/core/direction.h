@@ -22,4 +22,7 @@ std::optional<Direction> parse_direction_arg(std::string_view arg);
 // Parse fitsize dispatcher arguments into a logical fit mode.
 std::optional<FitSize> parse_fit_size_arg(std::string_view arg);
 
+// Parse setmode dispatcher arguments into a layout mode.
+std::optional<Mode> parse_mode_arg(std::string_view arg);
+
 } // namespace ScrollerCore

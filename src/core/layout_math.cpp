@@ -40,6 +40,10 @@ double choose_anchor_y(bool has_next, bool has_prev, double active_height, doubl
     return base_y;
 }
 
+double center_span(double origin, double outer_span, double inner_span) {
+    return origin + 0.5 * (outer_span - inner_span);
+}
+
 OverviewProjection compute_overview_projection(std::span<const OverviewRect> items,
                                                const Box &visible_box) {
     if (items.empty())

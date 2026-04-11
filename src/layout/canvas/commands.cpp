@@ -10,6 +10,7 @@
 #include <utility>
 
 #include <hyprland/src/Compositor.hpp>
+#include <spdlog/spdlog.h>
 
 #include "../../core/direction.h"
 #include "../../core/layout_profile.h"
@@ -66,6 +67,7 @@ bool CanvasLayout::handoffMoveWindowAcrossMonitor(int workspace, Direction direc
         &targetLane,
         nullptr);
 
+    const auto restorePlan = sourceLane->capture_active_window_restore_plan(direction);
     auto payload = sourceLane->extract_active_window_payload();
     if (!payload)
         return true;
@@ -73,7 +75,17 @@ bool CanvasLayout::handoffMoveWindowAcrossMonitor(int workspace, Direction direc
     const auto insertDirection = ScrollerCore::opposite_direction(direction);
     targetLayout->rememberManualCrossMonitorInsertion(currentWindow);
 
-    CanvasLayoutInternal::invoke_dispatcher("movetoworkspacesilent", selector, "move_window_cross_monitor");
+    if (!CanvasLayoutInternal::invoke_dispatcher("movetoworkspacesilent", selector, "move_window_cross_monitor")) {
+        spdlog::warn("move_window_cross_monitor: dispatcher failed workspace={} direction={} window={}",
+                     workspace,
+                     ScrollerCore::direction_name(direction),
+                     static_cast<const void*>(currentWindow.get()));
+        targetLayout->forgetManualCrossMonitorInsertion(currentWindow);
+        sourceLane->restore_active_window_payload(std::move(payload), restorePlan);
+        debugVerifyLaneCache();
+        return false;
+    }
+
     targetLane = targetAnchorWindow ? targetLayout->getLaneForWindow(targetAnchorWindow) : nullptr;
     if (!targetLane)
         targetLane = targetLayout->getActiveLane();

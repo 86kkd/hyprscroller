@@ -47,6 +47,12 @@ struct ActiveWindowPayload {
     }
 };
 
+struct ActiveWindowRestorePlan {
+    Direction direction = Direction::End;
+    bool      restoreIntoCurrentStack = false;
+    bool      insertBeforeCurrent = false;
+};
+
 class Lane {
     // A lane owns the ordered stacks visible on one canvas strip.
 public:
@@ -72,11 +78,14 @@ public:
 
     // Window/stack membership changes.
     void add_active_window(PHLWINDOW window);
+    ActiveWindowRestorePlan capture_active_window_restore_plan(Direction direction) const;
     Stack *extract_active_stack();
     // Remove the active window and transfer ownership of its model payload to the caller.
     ActiveWindowPayload extract_active_window_payload();
     // Consume a previously extracted payload and transfer ownership into this lane.
     void insert_window_payload(ActiveWindowPayload payload, Direction direction);
+    // Restore a previously extracted payload back into this lane after a failed handoff.
+    void restore_active_window_payload(ActiveWindowPayload payload, const ActiveWindowRestorePlan &plan);
     void set_canvas_geometry(const Box &full_box, const Box &max_box, int gap_size);
 
     // Remove a window and re-adapt lanes and stacks, returning true on success.

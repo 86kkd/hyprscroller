@@ -133,7 +133,7 @@ public:
     bool get_init() const;
     void set_init();
     // Number of windows in this stack.
-    size_t size();
+    size_t size() const;
 
     // Window membership / reorder helpers.
     bool has_window(PHLWINDOW window) const;
@@ -196,6 +196,8 @@ public:
 
     // Insert a model window whose ownership has been transferred to this stack.
     void admit_window(std::unique_ptr<Window> window);
+    // Restore a previously extracted active window next to the current active one.
+    void restore_window(std::unique_ptr<Window> window, bool insertBeforeActive);
     // Remove the active model window and transfer ownership to the caller as a unique owner.
     std::unique_ptr<Window> expel_active(double gap);
     // Move active window toward viewport edges/center inside the current stack.
