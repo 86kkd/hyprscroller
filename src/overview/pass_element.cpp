@@ -31,10 +31,7 @@ std::optional<CBox> OverviewPassElement::boundingBox() {
 }
 
 CRegion OverviewPassElement::opaqueRegion() {
-    if (!monitor_)
-        return {};
-
-    return CRegion{CBox{{}, monitor_->m_size}};
+    return {};
 }
 
 } // namespace Overview

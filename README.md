@@ -231,13 +231,24 @@ columns or windows affected.
 
 ## Overview
 
-`scroller:toggleoverview` toggles a bird's eye view of the current workspace where
-all the windows are scaled to fit the current monitor. You can still interact
-with them normally (change focus, move windows, type in them etc.). When
-toggling back to normal mode, the original window sizes will be restored...so
-it is not wise to use *toggleoverview* for window resizing or creating new windows.
-Use it as a way to see where things are and move the active focus, or a window,
-anything beyond that will probably find bugs or **cause compositor crashes**.
+`scroller:toggleoverview` toggles a bird's eye overlay across the visible
+monitors. Overview is now a read-only navigation layer:
+
+1. Real window geometry is left untouched while overview is open.
+2. `scroller:movefocus` moves the logical overview selection instead of real focus.
+3. `scroller:toggleoverview accept` accepts the selected target.
+4. `scroller:toggleoverview cancel` or `scroller:canceloverview` restores the
+   original workspace/window.
+
+Overview can target:
+
+1. Existing tiled windows.
+2. Existing empty workspaces.
+3. Synthetic empty-workspace targets created by directional navigation.
+
+The renderer now draws stable workspace cards instead of live window previews,
+so overview should be used as a monitor/workspace/window picker, not as a mode
+for editing window state in place.
 
 
 ## Marks

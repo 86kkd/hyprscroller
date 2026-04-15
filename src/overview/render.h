@@ -1,6 +1,6 @@
 /**
  * @file render.h
- * @brief Hook-based overview preview renderer bootstrap.
+ * @brief Render-pass overview overlay bootstrap.
  */
 #pragma once
 

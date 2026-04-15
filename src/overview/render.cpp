@@ -1,6 +1,11 @@
 /**
  * @file render.cpp
- * @brief Overview preview rendering via a dedicated overview pass element.
+ * @brief Stable overview renderer built on top of Hyprland render passes.
+ *
+ * The overview renderer intentionally avoids symbol scanning, renderer hooks,
+ * and live window framebuffer capture. It draws a monitor-local overlay from
+ * the read-only overview session model so overview stays a navigation layer
+ * instead of mutating real window geometry during rendering.
  */
 #include "render.h"
 
@@ -9,11 +14,15 @@
 #include <cmath>
 #include <cstdint>
 #include <exception>
+#include <optional>
+#include <span>
 #include <string>
 #include <unordered_map>
-#include <unordered_set>
+#include <utility>
+#include <vector>
 
 #include <hyprland/src/Compositor.hpp>
+#include <hyprland/src/desktop/Workspace.hpp>
 #include <hyprland/src/event/EventBus.hpp>
 #include <hyprland/src/helpers/Color.hpp>
 #include <hyprland/src/plugins/PluginAPI.hpp>
@@ -21,591 +30,556 @@
 #include <hyprland/src/render/Renderer.hpp>
 #include <spdlog/spdlog.h>
 
-#include "monitor_space.h"
+#include "../core/layout_math.h"
 #include "pass_element.h"
 #include "session.h"
 
 namespace Overview {
 namespace {
 
-using RenderWorkspaceHookFn = void (*)(void* renderer, PHLMONITOR monitor, PHLWORKSPACE workspace, const Time::steady_tp& now, const CBox& geometry);
-using RenderWindowFn = void (*)(void* renderer, PHLWINDOW window, PHLMONITOR monitor, const Time::steady_tp& now, bool decorate, eRenderPassMode pass, bool ignorePosition, bool standalone);
-using RenderTextureInternalFn = void (*)(void* opengl, SP<CTexture> texture, const CBox& box, const CHyprOpenGLImpl::STextureRenderData& data);
+using ScrollerCore::Box;
+using ScrollerCore::OverviewProjection;
+using steady_tp = std::chrono::steady_clock::time_point;
 
-struct WindowPreview {
-    CFramebuffer fb;
-    PHLWINDOW    window = nullptr;
-    Vector2D     originalPos;
-    Vector2D     originalSize;
-    Vector2D     capturedSize;
+constexpr auto kOpenDuration = std::chrono::milliseconds(180);
+constexpr auto kCloseDuration = std::chrono::milliseconds(180);
+constexpr auto kSelectionDuration = std::chrono::milliseconds(120);
+
+struct SceneTarget {
+    TargetType type = TargetType::Window;
+    WORKSPACEID workspaceId = WORKSPACE_INVALID;
+    PHLWINDOW   window = nullptr;
+    Box         box;
+    bool        synthetic = false;
+    bool        selected = false;
+    std::string label;
 };
 
-CFunctionHook*                        g_renderWorkspaceHook = nullptr;
-RenderWorkspaceHookFn                 g_originalRenderWorkspace = nullptr;
-RenderWindowFn                        g_renderWindow = nullptr;
-RenderTextureInternalFn               g_renderTextureInternal = nullptr;
-CHyprSignalListener                   g_renderPreListener = nullptr;
-std::unordered_set<int>               g_renderedMonitors;
-std::unordered_set<int>               g_dirtyMonitors;
-std::unordered_map<void*, WindowPreview> g_windowPreviews;
-std::unordered_map<std::string, Time::steady_tp> g_logTimestamps;
-std::unordered_map<int, Time::steady_tp> g_overviewOpenedAt;
-bool                                  g_renderingOverview = false;
-bool                                  g_lastOverviewActive = false;
+struct SceneWorkspace {
+    WORKSPACEID             workspaceId = WORKSPACE_INVALID;
+    Box                     box;
+    Box                     contentBox;
+    bool                    selected = false;
+    bool                    special = false;
+    std::string             label;
+    std::vector<SceneTarget> targets;
+};
 
-void* preview_key(PHLWINDOW window) {
-    return window ? static_cast<void*>(window.get()) : nullptr;
+struct SceneMonitor {
+    int                         monitorId = MONITOR_INVALID;
+    std::string                 monitorName;
+    Box                         box;
+    std::vector<SceneWorkspace> workspaces;
+    std::optional<SceneTarget>  syntheticTarget;
+    std::optional<Box>          selectionBox;
+};
+
+struct ClosingScene {
+    SceneMonitor scene;
+    steady_tp    startedAt;
+};
+
+struct SelectionPulse {
+    Box      box;
+    steady_tp startedAt;
+};
+
+CHyprSignalListener                         g_renderPreListener = nullptr;
+std::unordered_map<int, steady_tp>         g_openedAt;
+std::unordered_map<int, ClosingScene>      g_closingScenes;
+std::unordered_map<int, SceneMonitor>      g_liveScenes;
+std::unordered_map<int, SelectionPulse>    g_selectionPulses;
+std::unordered_map<std::string, SP<CTexture>> g_textCache;
+bool                                       g_lastOverviewActive = false;
+
+double clamp01(double value) {
+    return std::clamp(value, 0.0, 1.0);
 }
 
-const MonitorRegion* region_for_monitor(const std::vector<MonitorRegion>& monitors, PHLMONITOR monitor) {
+double ease_out_cubic(double t) {
+    const auto clamped = clamp01(t);
+    const auto inv = 1.0 - clamped;
+    return 1.0 - inv * inv * inv;
+}
+
+int iround(double value) {
+    return static_cast<int>(std::lround(value));
+}
+
+bool approximately_equal(double a, double b, double epsilon = 0.5) {
+    return std::abs(a - b) <= epsilon;
+}
+
+bool boxes_match(const Box& a, const Box& b) {
+    return approximately_equal(a.x, b.x) && approximately_equal(a.y, b.y)
+        && approximately_equal(a.w, b.w) && approximately_equal(a.h, b.h);
+}
+
+Box inset_box(const Box& box, double insetX, double insetY) {
+    return {
+        box.x + insetX,
+        box.y + insetY,
+        std::max(1.0, box.w - insetX * 2.0),
+        std::max(1.0, box.h - insetY * 2.0),
+    };
+}
+
+Box center_scale_box(const Box& box, double scale) {
+    const auto scaledWidth = box.w * scale;
+    const auto scaledHeight = box.h * scale;
+    return {
+        box.x + (box.w - scaledWidth) * 0.5,
+        box.y + (box.h - scaledHeight) * 0.5,
+        scaledWidth,
+        scaledHeight,
+    };
+}
+
+Box localize_box(PHLMONITOR monitor, const Box& box) {
     if (!monitor)
-        return nullptr;
+        return box;
 
-    for (const auto& region : monitors) {
-        if (region.monitorId == monitor->m_id)
-            return &region;
-    }
-
-    return nullptr;
+    return {
+        box.x - monitor->m_position.x,
+        box.y - monitor->m_position.y,
+        box.w,
+        box.h,
+    };
 }
 
-bool should_log(const std::string& key, std::chrono::milliseconds interval = std::chrono::milliseconds(250)) {
-    const auto now = std::chrono::steady_clock::now();
-    const auto it = g_logTimestamps.find(key);
-    if (it != g_logTimestamps.end() && now - it->second < interval)
+CBox to_cbox(const Box& box) {
+    return CBox{
+        static_cast<double>(iround(box.x)),
+        static_cast<double>(iround(box.y)),
+        static_cast<double>(std::max(1, iround(box.w))),
+        static_cast<double>(std::max(1, iround(box.h))),
+    };
+}
+
+const MonitorRegion* region_for_monitor(const Model& model, int monitorId) {
+    return model.regionForMonitor(monitorId);
+}
+
+bool target_matches_selection(const Target& target, const Target* selection) {
+    if (!selection)
         return false;
 
-    g_logTimestamps[key] = now;
-    return true;
+    return target.type == selection->type
+        && target.workspaceId == selection->workspaceId
+        && target.monitorId == selection->monitorId
+        && target.window == selection->window
+        && target.synthetic == selection->synthetic;
 }
 
-CBox preview_target_box(PHLMONITOR monitor, const Target& target) {
-    const auto renderSpace = MonitorSpace::fromMonitor(monitor);
-    auto       targetBox = renderSpace.toLocalBox(target.box);
-    if (target.type != TargetType::Window || !target.window)
-        return targetBox;
+std::string workspace_label(PHLWORKSPACE workspace, WORKSPACEID workspaceId) {
+    if (!workspace)
+        return std::to_string(workspaceId);
 
-    const auto it = g_windowPreviews.find(preview_key(target.window));
-    if (it == g_windowPreviews.end())
-        return targetBox;
+    if (!workspace->m_name.empty())
+        return workspace->m_name;
 
-    const ScrollerCore::Box sourceBoxLogical{
-        it->second.originalPos.x,
-        it->second.originalPos.y,
-        it->second.originalSize.x,
-        it->second.originalSize.y,
+    return std::to_string(workspace->m_id);
+}
+
+std::string empty_target_label(const Target& target) {
+    return target.synthetic ? "new workspace " + std::to_string(target.workspaceId)
+                            : "empty workspace";
+}
+
+std::string window_target_label(PHLWINDOW window) {
+    if (!window)
+        return "window";
+
+    if (!window->m_title.empty())
+        return window->m_title;
+
+    return "window";
+}
+
+OverviewProjection compute_projection(std::span<const Box> items, const Box& visibleBox) {
+    std::vector<ScrollerCore::OverviewRect> rects;
+    rects.reserve(items.size());
+
+    for (const auto& item : items) {
+        rects.push_back({
+            .x0 = item.x,
+            .x1 = item.x + item.w,
+            .y0 = item.y,
+            .y1 = item.y + item.h,
+        });
+    }
+
+    return ScrollerCore::compute_overview_projection(rects, visibleBox);
+}
+
+Box apply_projection(const Box& source, const Box& visibleBox, const OverviewProjection& projection) {
+    if (projection.width <= 0.0 || projection.height <= 0.0)
+        return visibleBox;
+
+    return {
+        visibleBox.x + projection.offset.x + (source.x - projection.min.x) * projection.scale,
+        visibleBox.y + projection.offset.y + (source.y - projection.min.y) * projection.scale,
+        std::max(24.0, source.w * projection.scale),
+        std::max(24.0, source.h * projection.scale),
     };
-    return renderSpace.toLocalBox(sourceBoxLogical);
 }
 
-void draw_monitor_backdrop(PHLMONITOR monitor) {
-    if (!monitor)
-        return;
-
-    g_pHyprOpenGL->clear(CHyprColor(0.08F, 0.09F, 0.12F, 1.0F));
+SceneTarget build_empty_workspace_target(const WorkspaceNode& workspace, const Box& contentBox, const Target& target, const Target* selection) {
+    return {
+        .type = target.type,
+        .workspaceId = workspace.workspaceId,
+        .window = nullptr,
+        .box = inset_box(contentBox, std::max(12.0, contentBox.w * 0.12), std::max(12.0, contentBox.h * 0.14)),
+        .synthetic = target.synthetic,
+        .selected = target_matches_selection(target, selection),
+        .label = empty_target_label(target),
+    };
 }
 
-void draw_selection_overlay(PHLMONITOR monitor) {
-    if (!monitor)
-        return;
+std::vector<SceneTarget> build_projected_targets(PHLMONITOR monitor, const WorkspaceNode& workspace, const Box& contentBox, const Target* selection) {
+    std::vector<Box> sourceBoxes;
+    sourceBoxes.reserve(workspace.targets.size());
+    for (const auto& target : workspace.targets)
+        sourceBoxes.push_back(localize_box(monitor, target.box));
 
-    const auto& activeSession = session();
-    const auto* selection = activeSession.model().selection();
-    if (!selection || selection->monitorId != monitor->m_id)
-        return;
+    const auto projection = compute_projection(sourceBoxes, contentBox);
 
-    const auto box = preview_target_box(monitor, *selection);
+    std::vector<SceneTarget> targets;
+    targets.reserve(workspace.targets.size());
+    for (std::size_t index = 0; index < workspace.targets.size(); ++index) {
+        const auto& target = workspace.targets[index];
+        targets.push_back({
+            .type = target.type,
+            .workspaceId = target.workspaceId,
+            .window = target.window,
+            .box = apply_projection(sourceBoxes[index], contentBox, projection),
+            .synthetic = target.synthetic,
+            .selected = target_matches_selection(target, selection),
+            .label = target.type == TargetType::Window ? window_target_label(target.window) : empty_target_label(target),
+        });
+    }
 
-    CHyprOpenGLImpl::SRectRenderData data;
-    data.round = static_cast<int>(std::round(18.0 * monitor->m_scale));
-    data.roundingPower = 2.0F;
-    g_pHyprOpenGL->renderRect(box,
-                              selection->synthetic ? CHyprColor(0.18F, 0.72F, 0.98F, 0.20F)
-                                                   : CHyprColor(0.98F, 0.74F, 0.18F, 0.16F),
-                              data);
+    return targets;
 }
 
-struct ScopedOverviewRendering {
-    ScopedOverviewRendering() {
-        g_renderingOverview = true;
-    }
+std::optional<SceneMonitor> build_scene_for_monitor(PHLMONITOR monitor) {
+    if (!monitor || !session().active())
+        return std::nullopt;
 
-    ~ScopedOverviewRendering() {
-        g_renderingOverview = false;
-    }
-};
+    const auto& model = session().model();
+    const auto* region = region_for_monitor(model, monitor->m_id);
+    if (!region)
+        return std::nullopt;
 
-struct ScopedPreviewCapture {
-    ScopedPreviewCapture(PHLMONITOR monitor, PHLWINDOW window, const MonitorSpace& captureSpace)
-        : window_(window),
-          previousWorkspace_(window ? window->m_workspace : nullptr),
-          previousRealPosition_(window ? window->m_realPosition->value() : Vector2D{}),
-          previousRealSize_(window ? window->m_realSize->value() : Vector2D{}),
-          previousBlockSurfaceFeedback_(g_pHyprRenderer->m_bBlockSurfaceFeedback),
-          uprightCaptureGuard_(monitor) {
-        if (!window_)
-            return;
-
-        g_pHyprRenderer->m_bBlockSurfaceFeedback = true;
-        if (monitor->m_activeWorkspace)
-            window_->m_workspace = monitor->m_activeWorkspace;
-        window_->m_realPosition->setValue(captureSpace.origin);
-    }
-
-    ~ScopedPreviewCapture() {
-        restore();
-    }
-
-    void restore() {
-        if (!window_ || restored_)
-            return;
-
-        window_->m_realPosition->setValue(previousRealPosition_);
-        window_->m_workspace = previousWorkspace_;
-        g_pHyprRenderer->m_bBlockSurfaceFeedback = previousBlockSurfaceFeedback_;
-        restored_ = true;
-    }
-
-    const Vector2D& previousRealPosition() const {
-        return previousRealPosition_;
-    }
-
-    const Vector2D& previousRealSize() const {
-        return previousRealSize_;
-    }
-
-  private:
-    PHLWINDOW                    window_ = nullptr;
-    PHLWORKSPACE                 previousWorkspace_ = nullptr;
-    Vector2D                     previousRealPosition_;
-    Vector2D                     previousRealSize_;
-    bool                         previousBlockSurfaceFeedback_ = false;
-    bool                         restored_ = false;
-    ScopedUprightMonitorCapture  uprightCaptureGuard_;
-};
-
-bool ensure_preview_framebuffer(WindowPreview& preview, PHLMONITOR monitor, const Target& target,
-                                int renderWidth, int renderHeight, int contentWidth, int contentHeight) {
-    const auto sizeMatches = preview.fb.isAllocated()
-        && static_cast<int>(preview.fb.m_size.x) == renderWidth
-        && static_cast<int>(preview.fb.m_size.y) == renderHeight;
-    if (sizeMatches)
-        return true;
-
-    spdlog::debug("overview_window_preview_resize: monitor={} workspace={} window={} size=({}, {}) content=({}, {}) target_box=({}, {}, {}, {}) allocated={}",
-                  monitor->m_id,
-                  target.workspaceId,
-                  preview_key(target.window),
-                  renderWidth,
-                  renderHeight,
-                  contentWidth,
-                  contentHeight,
-                  target.box.x,
-                  target.box.y,
-                  target.box.w,
-                  target.box.h,
-                  preview.fb.isAllocated());
-    preview.fb.release();
-    if (preview.fb.alloc(renderWidth, renderHeight))
-        return true;
-
-    spdlog::warn("overview_window_preview_alloc_failed: workspace={} window={} size=({}, {})",
-                 target.workspaceId,
-                 preview_key(target.window),
-                 renderWidth,
-                 renderHeight);
-    return false;
-}
-
-void log_preview_capture(const char* phase, PHLMONITOR monitor, PHLWINDOW window,
-                         const MonitorSpace& renderSpace, const MonitorSpace& captureSpace,
-                         const ScopedPreviewCapture& capture, int renderWidth, int renderHeight) {
-    const auto afterPhase = std::string_view(phase) == "after";
-    const auto key = std::string("overview_window_preview_call")
-        + (afterPhase ? "_after_" : "_")
-        + std::to_string(monitor->m_id)
-        + "_"
-        + std::to_string(reinterpret_cast<uintptr_t>(preview_key(window)));
-    if (!should_log(key))
-        return;
-
-    if (!afterPhase) {
-        spdlog::debug("overview_window_preview_call: phase=before monitor={} orientation={} capture_orientation={} transform={} scale={} window={} mapped={} workspace={} active_workspace={} "
-                      "monitor_pos=({}, {}) monitor_size=({}, {}) pixel_size=({}, {}) transformed_size=({}, {}) capture_transformed_size=({}, {}) "
-                      "window_pos=({}, {}) window_size=({}, {}) capture_pos=({}, {}) capture_size=({}, {}) fb=({}, {})",
-                      monitor->m_id,
-                      orientation_name(renderSpace.orientation()),
-                      orientation_name(captureSpace.orientation()),
-                      static_cast<int>(renderSpace.transform),
-                      monitor->m_scale,
-                      preview_key(window),
-                      window->m_isMapped,
-                      window->workspaceID(),
-                      monitor->m_activeWorkspace ? monitor->m_activeWorkspace->m_id : WORKSPACE_INVALID,
-                      monitor->m_position.x,
-                      monitor->m_position.y,
-                      monitor->m_size.x,
-                      monitor->m_size.y,
-                      renderSpace.pixelSize.x,
-                      renderSpace.pixelSize.y,
-                      renderSpace.transformedSize.x,
-                      renderSpace.transformedSize.y,
-                      captureSpace.transformedSize.x,
-                      captureSpace.transformedSize.y,
-                      capture.previousRealPosition().x,
-                      capture.previousRealPosition().y,
-                      capture.previousRealSize().x,
-                      capture.previousRealSize().y,
-                      window->m_realPosition->value().x,
-                      window->m_realPosition->value().y,
-                      window->m_realSize->value().x,
-                      window->m_realSize->value().y,
-                      renderWidth,
-                      renderHeight);
-        return;
-    }
-
-    spdlog::debug("overview_window_preview_call: phase=after monitor={} orientation={} capture_orientation={} transform={} scale={} window={} mapped={} workspace={} active_workspace={} "
-                  "window_pos=({}, {}) window_size=({}, {}) capture_pos=({}, {}) capture_size=({}, {}) fb=({}, {})",
-                  monitor->m_id,
-                  orientation_name(renderSpace.orientation()),
-                  orientation_name(captureSpace.orientation()),
-                  static_cast<int>(renderSpace.transform),
-                  monitor->m_scale,
-                  preview_key(window),
-                  window->m_isMapped,
-                  window->workspaceID(),
-                  monitor->m_activeWorkspace ? monitor->m_activeWorkspace->m_id : WORKSPACE_INVALID,
-                  capture.previousRealPosition().x,
-                  capture.previousRealPosition().y,
-                  capture.previousRealSize().x,
-                  capture.previousRealSize().y,
-                  window->m_realPosition->value().x,
-                  window->m_realPosition->value().y,
-                  window->m_realSize->value().x,
-                  window->m_realSize->value().y,
-                  renderWidth,
-                  renderHeight);
-}
-
-void render_preview_window(PHLMONITOR monitor, PHLWINDOW window) {
-    if (!g_renderWindow)
-        return;
-
-    g_pHyprOpenGL->pushMonitorTransformEnabled(false);
-    g_renderWindow(g_pHyprRenderer.get(), window, monitor, std::chrono::steady_clock::now(), false, RENDER_PASS_MAIN, false, false);
-    g_pHyprOpenGL->popMonitorTransformEnabled();
-}
-
-void log_preview_rendered(PHLMONITOR monitor, const Target& target, const WindowPreview& preview,
-                          int renderWidth, int renderHeight, int contentWidth, int contentHeight) {
-    const auto key = "overview_window_preview_rendered_" + std::to_string(monitor->m_id)
-        + "_" + std::to_string(reinterpret_cast<uintptr_t>(preview_key(target.window)));
-    if (!should_log(key))
-        return;
-
-    spdlog::debug("overview_window_preview_rendered: monitor={} workspace={} window={} size=({}, {}) content=({}, {}) original=({}, {}, {}, {})",
-                  monitor->m_id,
-                  target.workspaceId,
-                  preview_key(target.window),
-                  renderWidth,
-                  renderHeight,
-                  contentWidth,
-                  contentHeight,
-                  preview.originalPos.x,
-                  preview.originalPos.y,
-                  preview.originalSize.x,
-                  preview.originalSize.y);
-}
-
-void update_window_preview_texture(PHLMONITOR monitor, const Target& target) {
-    if (!monitor || !target.window || target.type != TargetType::Window)
-        return;
-
-    auto window = target.window;
-    if (!window || !window->m_isMapped)
-        return;
-
-    const auto renderSize = window->m_realSize->value();
-    const auto contentWidth = std::max(1, static_cast<int>(std::round(renderSize.x * monitor->m_scale)));
-    const auto contentHeight = std::max(1, static_cast<int>(std::round(renderSize.y * monitor->m_scale)));
-    const auto renderWidth = contentWidth;
-    const auto renderHeight = contentHeight;
-    const auto renderSpace = MonitorSpace::fromMonitor(monitor);
-    const auto captureSpace = MonitorSpace::uprightCapture(monitor);
-    auto& preview = g_windowPreviews[preview_key(window)];
-    preview.window = window;
-    preview.originalPos = window->m_realPosition->value();
-    preview.originalSize = window->m_realSize->value();
-    preview.capturedSize = Vector2D(contentWidth, contentHeight);
-
-    if (!ensure_preview_framebuffer(preview, monitor, target, renderWidth, renderHeight, contentWidth, contentHeight))
-        return;
-
-    CRegion damage(CBox(0, 0, renderWidth, renderHeight));
-    ScopedOverviewRendering overviewGuard;
-    if (!g_pHyprRenderer->beginRender(monitor, damage, RENDER_MODE_FULL_FAKE, nullptr, &preview.fb)) {
-        spdlog::warn("overview_window_preview_begin_render_failed: monitor={} workspace={} window={} size=({}, {})",
-                     monitor->m_id,
-                     target.workspaceId,
-                     preview_key(window),
-                     renderWidth,
-                     renderHeight);
-        return;
-    }
-
-    g_pHyprOpenGL->clear(CHyprColor(0.F, 0.F, 0.F, 0.F));
-    ScopedPreviewCapture capture(monitor, window, captureSpace);
-    log_preview_capture("before", monitor, window, renderSpace, captureSpace, capture, renderWidth, renderHeight);
-    render_preview_window(monitor, window);
-    g_pHyprOpenGL->m_renderData.blockScreenShader = true;
-    log_preview_capture("after", monitor, window, renderSpace, captureSpace, capture, renderWidth, renderHeight);
-    capture.restore();
-    g_pHyprRenderer->endRender();
-    log_preview_rendered(monitor, target, preview, renderWidth, renderHeight, contentWidth, contentHeight);
-}
-
-void update_preview_textures_for_monitor(PHLMONITOR monitor) {
-    const auto* region = region_for_monitor(session().model().monitors(), monitor);
-    const auto renderSpace = MonitorSpace::fromMonitor(monitor);
-    if (!region) {
-        if (should_log("overview_preview_no_region_" + std::to_string(monitor ? monitor->m_id : -1), std::chrono::milliseconds(500))) {
-            spdlog::debug("overview_preview_update_skip: monitor={} reason=no_region",
-                          monitor ? monitor->m_id : -1);
-        }
-        return;
-    }
-
-    if (should_log("overview_preview_update_" + std::to_string(monitor->m_id))) {
-        spdlog::debug("overview_preview_update: monitor={} orientation={} workspaces={} region_box=({}, {}, {}, {}) pixel_size=({}, {}) transformed_size=({}, {})",
-                      monitor->m_id,
-                      orientation_name(renderSpace.orientation()),
-                      region->workspaces.size(),
-                      region->box.x,
-                      region->box.y,
-                      region->box.w,
-                      region->box.h,
-                      renderSpace.pixelSize.x,
-                      renderSpace.pixelSize.y,
-                      renderSpace.transformedSize.x,
-                      renderSpace.transformedSize.y);
-    }
+    const auto* selection = model.selection();
+    SceneMonitor scene;
+    scene.monitorId = monitor->m_id;
+    scene.monitorName = monitor->m_name;
+    scene.box = {0.0, 0.0, monitor->m_size.x, monitor->m_size.y};
 
     for (const auto& workspace : region->workspaces) {
-        for (const auto& target : workspace.targets)
-            update_window_preview_texture(monitor, target);
-    }
-}
+        SceneWorkspace sceneWorkspace;
+        sceneWorkspace.workspaceId = workspace.workspaceId;
+        sceneWorkspace.box = localize_box(monitor, workspace.box);
+        sceneWorkspace.contentBox = inset_box(sceneWorkspace.box, 14.0, 14.0);
+        sceneWorkspace.contentBox.y += 26.0;
+        sceneWorkspace.contentBox.h = std::max(36.0, sceneWorkspace.contentBox.h - 26.0);
 
-void compose_empty_target(PHLMONITOR monitor, const Target& target) {
-    const auto box = preview_target_box(monitor, target);
+        const auto workspaceRef = g_pCompositor->getWorkspaceByID(workspace.workspaceId);
+        sceneWorkspace.special = workspaceRef ? workspaceRef->m_isSpecialWorkspace : false;
+        sceneWorkspace.label = workspace_label(workspaceRef, workspace.workspaceId);
 
-    CHyprOpenGLImpl::SRectRenderData data;
-    data.round = static_cast<int>(std::round(18.0 * monitor->m_scale));
-    data.roundingPower = 2.0F;
-    g_pHyprOpenGL->renderRect(box,
-                              target.synthetic ? CHyprColor(0.12F, 0.32F, 0.44F, 0.35F)
-                                               : CHyprColor(0.10F, 0.12F, 0.16F, 0.55F),
-                              data);
-}
+        const auto hasWindowTargets = std::any_of(workspace.targets.begin(), workspace.targets.end(), [](const Target& target) {
+            return target.type == TargetType::Window && target.window;
+        });
 
-[[maybe_unused]] void compose_window_live_preview(PHLMONITOR monitor, const Target& target) {
-    if (!monitor || !target.window || !g_renderWindow)
-        return;
-
-    auto window = target.window;
-    const auto originalSize = window->m_realSize->value();
-    if (originalSize.x <= 0.0 || originalSize.y <= 0.0)
-        return;
-
-    const auto box = preview_target_box(monitor, target);
-    const auto currentWorkspace = window->m_workspace;
-    const auto currentFullscreen = window->m_fullscreenState;
-    const auto currentPinned = window->m_pinned;
-    const auto currentFloating = window->m_isFloating;
-    const auto renderScale = box.w / std::max(1.0, originalSize.x * monitor->m_scale);
-    SRenderModifData renderModif;
-    renderModif.modifs.push_back(
-        {SRenderModifData::eRenderModifType::RMOD_TYPE_TRANSLATE,
-         (monitor->m_position * monitor->m_scale) + (box.pos() / renderScale) - (window->m_realPosition->value() * monitor->m_scale)});
-    renderModif.modifs.push_back({SRenderModifData::eRenderModifType::RMOD_TYPE_SCALE, renderScale});
-    renderModif.enabled = true;
-
-    if (monitor->m_activeWorkspace)
-        window->m_workspace = monitor->m_activeWorkspace;
-    window->m_fullscreenState = Desktop::View::SFullscreenState{FSMODE_NONE};
-    window->m_isFloating = false;
-    window->m_pinned = true;
-    window->m_ruleApplicator->nearestNeighbor().set(false, Desktop::Types::PRIORITY_SET_PROP);
-
-    const auto previousRenderModif = g_pHyprOpenGL->m_renderData.renderModif;
-    g_pHyprOpenGL->m_renderData.renderModif = renderModif;
-    g_pHyprOpenGL->setRenderModifEnabled(true);
-    g_renderWindow(g_pHyprRenderer.get(), window, monitor, std::chrono::steady_clock::now(), true, RENDER_PASS_ALL, false, false);
-    g_pHyprOpenGL->m_renderData.renderModif = previousRenderModif;
-    g_pHyprOpenGL->setRenderModifEnabled(previousRenderModif.enabled);
-
-    window->m_workspace = currentWorkspace;
-    window->m_fullscreenState = currentFullscreen;
-    window->m_isFloating = currentFloating;
-    window->m_pinned = currentPinned;
-    window->m_ruleApplicator->nearestNeighbor().unset(Desktop::Types::PRIORITY_SET_PROP);
-}
-
-void compose_window_preview(PHLMONITOR monitor, const Target& target) {
-    const auto previewIt = g_windowPreviews.find(preview_key(target.window));
-    if (previewIt == g_windowPreviews.end()) {
-        if (should_log("overview_window_compose_no_buffer_" + std::to_string(reinterpret_cast<uintptr_t>(preview_key(target.window))))) {
-            spdlog::debug("overview_compose_skip: monitor={} workspace={} window={} reason=no_buffer",
-                          monitor ? monitor->m_id : -1,
-                          target.workspaceId,
-                          preview_key(target.window));
+        if (hasWindowTargets) {
+            sceneWorkspace.targets = build_projected_targets(monitor, workspace, sceneWorkspace.contentBox, selection);
+        } else if (!workspace.targets.empty()) {
+            sceneWorkspace.targets.push_back(build_empty_workspace_target(workspace, sceneWorkspace.contentBox, workspace.targets.front(), selection));
         }
-        return;
-    }
 
-    const auto texture = previewIt->second.fb.getTexture();
-    if (!texture) {
-        if (should_log("overview_window_compose_no_texture_" + std::to_string(reinterpret_cast<uintptr_t>(preview_key(target.window))))) {
-            spdlog::debug("overview_compose_skip: monitor={} workspace={} window={} reason=no_texture buffer_size=({}, {})",
-                          monitor ? monitor->m_id : -1,
-                          target.workspaceId,
-                          preview_key(target.window),
-                          previewIt->second.fb.m_size.x,
-                          previewIt->second.fb.m_size.y);
+        for (const auto& target : sceneWorkspace.targets) {
+            if (!target.selected)
+                continue;
+
+            sceneWorkspace.selected = true;
+            scene.selectionBox = target.box;
         }
-        return;
+
+        scene.workspaces.push_back(std::move(sceneWorkspace));
     }
 
-    const auto renderSpace = MonitorSpace::fromMonitor(monitor);
-    const auto targetLocalBox = renderSpace.toLocalBox(target.box);
-    const auto box = preview_target_box(monitor, target);
-    CRegion damage{0, 0, INT16_MAX, INT16_MAX};
-    const ScrollerCore::Box sourceLogicalBox{
-        previewIt->second.originalPos.x,
-        previewIt->second.originalPos.y,
-        previewIt->second.originalSize.x,
-        previewIt->second.originalSize.y,
+    if (const auto synthetic = model.syntheticSelection(); synthetic && synthetic->monitorId == monitor->m_id) {
+        SceneTarget syntheticTarget;
+        syntheticTarget.type = synthetic->type;
+        syntheticTarget.workspaceId = synthetic->workspaceId;
+        syntheticTarget.window = synthetic->window;
+        syntheticTarget.box = localize_box(monitor, synthetic->box);
+        syntheticTarget.synthetic = true;
+        syntheticTarget.selected = target_matches_selection(*synthetic, selection);
+        syntheticTarget.label = empty_target_label(*synthetic);
+        if (syntheticTarget.selected)
+            scene.selectionBox = syntheticTarget.box;
+        scene.syntheticTarget = std::move(syntheticTarget);
+    }
+
+    return scene;
+}
+
+std::string text_cache_key(const std::string& text, const CHyprColor& color, int pt, int maxWidth, int weight) {
+    return text + "|" + std::to_string(color.stripA().getAsHex()) + "|" + std::to_string(pt) + "|" + std::to_string(maxWidth) + "|" + std::to_string(weight);
+}
+
+SP<CTexture> get_text_texture(const std::string& text, const CHyprColor& color, int pt, int maxWidth = 0, int weight = 400) {
+    if (text.empty())
+        return nullptr;
+
+    const auto key = text_cache_key(text, color, pt, maxWidth, weight);
+    const auto it = g_textCache.find(key);
+    if (it != g_textCache.end())
+        return it->second;
+
+    auto texture = g_pHyprOpenGL->renderText(text, color.stripA(), pt, false, "", maxWidth, weight);
+    g_textCache.emplace(key, texture);
+    return texture;
+}
+
+void draw_text(const std::string& text, const Box& box, const CHyprColor& color, int pt, int weight = 400) {
+    if (box.w <= 4.0 || box.h <= 4.0)
+        return;
+
+    auto texture = get_text_texture(text, color, pt, std::max(1, iround(box.w)), weight);
+    if (!texture || texture->m_size.x <= 0.0 || texture->m_size.y <= 0.0)
+        return;
+
+    const auto scale = std::min(box.w / texture->m_size.x, box.h / texture->m_size.y);
+    const auto width = std::max(1.0, texture->m_size.x * scale);
+    const auto height = std::max(1.0, texture->m_size.y * scale);
+    const Box drawBox{
+        box.x,
+        box.y + std::max(0.0, (box.h - height) * 0.5),
+        width,
+        height,
     };
-    const auto sourceLocalBox = renderSpace.toLocalBox(sourceLogicalBox);
 
     CHyprOpenGLImpl::STextureRenderData data;
-    data.damage = &damage;
-    data.a = 1.0F;
-    data.round = static_cast<int>(std::round(18.0 * monitor->m_scale));
-    data.roundingPower = 2.0F;
+    data.a = static_cast<float>(color.a);
     data.blockBlurOptimization = true;
-    if (monitor && should_log("overview_window_compose_" + std::to_string(monitor->m_id) + "_" +
-                              std::to_string(reinterpret_cast<uintptr_t>(preview_key(target.window))))) {
-        spdlog::debug("overview_window_compose: monitor={} orientation={} transform={} scale={} window={} monitor_pos=({}, {}) monitor_size=({}, {}) pixel_size=({}, {}) transformed_size=({}, {}) "
-                      "target_global=({}, {}, {}, {}) target_local=({}, {}, {}, {}) draw_box=({}, {}, {}, {}) "
-                      "source_global=({}, {}, {}, {}) source_local=({}, {}, {}, {}) "
-                      "fb=({}, {}) content=({}, {})",
-                      monitor->m_id,
-                      orientation_name(renderSpace.orientation()),
-                      static_cast<int>(renderSpace.transform),
-                      monitor->m_scale,
-                      preview_key(target.window),
-                      renderSpace.origin.x,
-                      renderSpace.origin.y,
-                      renderSpace.logicalSize.x,
-                      renderSpace.logicalSize.y,
-                      renderSpace.pixelSize.x,
-                      renderSpace.pixelSize.y,
-                      renderSpace.transformedSize.x,
-                      renderSpace.transformedSize.y,
-                      target.box.x,
-                      target.box.y,
-                      target.box.w,
-                      target.box.h,
-                      targetLocalBox.x,
-                      targetLocalBox.y,
-                      targetLocalBox.w,
-                      targetLocalBox.h,
-                      box.x,
-                      box.y,
-                      box.w,
-                      box.h,
-                      sourceLogicalBox.x,
-                      sourceLogicalBox.y,
-                      sourceLogicalBox.w,
-                      sourceLogicalBox.h,
-                      sourceLocalBox.x,
-                      sourceLocalBox.y,
-                      sourceLocalBox.w,
-                      sourceLocalBox.h,
-                      previewIt->second.fb.m_size.x,
-                      previewIt->second.fb.m_size.y,
-                      previewIt->second.capturedSize.x,
-                      previewIt->second.capturedSize.y);
-    }
-    if (g_renderTextureInternal)
-        g_renderTextureInternal(g_pHyprOpenGL.get(), texture, box, data);
-    else
-        g_pHyprOpenGL->renderTexture(texture, box, data);
+    g_pHyprOpenGL->renderTexture(texture, to_cbox(drawBox), data);
 }
 
-void render_monitor_overview(PHLMONITOR monitor, const MonitorRegion* region) {
-    draw_monitor_backdrop(monitor);
+void draw_rect(const Box& box, const CHyprColor& color, int round, float roundingPower = 2.0F) {
+    CHyprOpenGLImpl::SRectRenderData data;
+    data.round = round;
+    data.roundingPower = roundingPower;
+    g_pHyprOpenGL->renderRect(to_cbox(box), color, data);
+}
 
-    if (region) {
-        for (const auto& workspace : region->workspaces) {
-            for (const auto& target : workspace.targets) {
-                if (target.type == TargetType::Window)
-                    compose_window_preview(monitor, target);
-                else
-                    compose_empty_target(monitor, target);
-            }
+void draw_panel(const Box& box, const CHyprColor& border, const CHyprColor& fill, int round, double borderWidth = 2.0) {
+    if (box.w <= 2.0 || box.h <= 2.0)
+        return;
+
+    draw_rect(box, border, round);
+    draw_rect(inset_box(box, borderWidth, borderWidth), fill, std::max(0, round - iround(borderWidth)));
+}
+
+void draw_window_preview(const SceneTarget& target, double overlayAlpha) {
+    const auto drawBox = center_scale_box(target.box, 0.97 + 0.03 * overlayAlpha);
+    const auto baseFill = target.selected ? CHyprColor(0.27F, 0.41F, 0.55F, static_cast<float>(0.88 * overlayAlpha))
+                                          : CHyprColor(0.17F, 0.19F, 0.24F, static_cast<float>(0.86 * overlayAlpha));
+    const auto border = target.selected ? CHyprColor(0.64F, 0.86F, 0.98F, static_cast<float>(0.92 * overlayAlpha))
+                                        : CHyprColor(0.28F, 0.31F, 0.38F, static_cast<float>(0.92 * overlayAlpha));
+    draw_panel(drawBox, border, baseFill, 16, 2.0);
+
+    const auto titleBox = inset_box(drawBox, 10.0, 8.0);
+    draw_text(target.label, {titleBox.x, titleBox.y, titleBox.w, 18.0}, CHyprColor(0.95F, 0.97F, 1.0F, static_cast<float>(overlayAlpha)), 15, 500);
+}
+
+void draw_empty_target(const SceneTarget& target, double overlayAlpha) {
+    const auto drawBox = center_scale_box(target.box, 0.97 + 0.03 * overlayAlpha);
+    const auto fill = target.synthetic ? CHyprColor(0.11F, 0.29F, 0.38F, static_cast<float>(0.58 * overlayAlpha))
+                                       : CHyprColor(0.12F, 0.14F, 0.18F, static_cast<float>(0.58 * overlayAlpha));
+    const auto border = target.selected ? CHyprColor(0.64F, 0.86F, 0.98F, static_cast<float>(0.92 * overlayAlpha))
+                                        : CHyprColor(0.28F, 0.31F, 0.38F, static_cast<float>(0.86 * overlayAlpha));
+    draw_panel(drawBox, border, fill, 20, 2.0);
+    draw_text(target.label, inset_box(drawBox, 12.0, 10.0), CHyprColor(0.88F, 0.92F, 0.98F, static_cast<float>(overlayAlpha)), 16, 500);
+}
+
+double overlay_progress(int monitorId, steady_tp now) {
+    if (session().active()) {
+        const auto it = g_openedAt.find(monitorId);
+        if (it == g_openedAt.end())
+            return 1.0;
+
+        const auto elapsed = std::chrono::duration<double>(now - it->second).count();
+        return ease_out_cubic(elapsed / std::chrono::duration<double>(kOpenDuration).count());
+    }
+
+    const auto it = g_closingScenes.find(monitorId);
+    if (it == g_closingScenes.end())
+        return 0.0;
+
+    const auto elapsed = std::chrono::duration<double>(now - it->second.startedAt).count();
+    return 1.0 - ease_out_cubic(elapsed / std::chrono::duration<double>(kCloseDuration).count());
+}
+
+bool closing_animation_finished(const ClosingScene& scene, steady_tp now) {
+    return now - scene.startedAt >= kCloseDuration;
+}
+
+bool selection_animation_active(int monitorId, steady_tp now) {
+    const auto it = g_selectionPulses.find(monitorId);
+    return it != g_selectionPulses.end() && now - it->second.startedAt < kSelectionDuration;
+}
+
+Box animated_selection_box(const Box& selectionBox, int monitorId, steady_tp now) {
+    const auto it = g_selectionPulses.find(monitorId);
+    if (it == g_selectionPulses.end())
+        return selectionBox;
+
+    const auto elapsed = std::chrono::duration<double>(now - it->second.startedAt).count();
+    const auto t = clamp01(elapsed / std::chrono::duration<double>(kSelectionDuration).count());
+    const auto pulse = 1.0 + 0.05 * (1.0 - ease_out_cubic(t));
+    return center_scale_box(selectionBox, pulse);
+}
+
+void draw_scene_monitor(const SceneMonitor& scene, steady_tp now) {
+    const auto progress = overlay_progress(scene.monitorId, now);
+    if (progress <= 0.0)
+        return;
+
+    const auto overlayBox = center_scale_box(scene.box, 0.965 + 0.035 * progress);
+    const auto overlayAlpha = progress;
+
+    draw_rect(scene.box, CHyprColor(0.05F, 0.06F, 0.08F, static_cast<float>(0.76 * overlayAlpha)), 0);
+    draw_text(scene.monitorName.empty() ? "monitor" : scene.monitorName,
+              {18.0, 14.0, std::max(80.0, scene.box.w - 36.0), 20.0},
+              CHyprColor(0.84F, 0.88F, 0.94F, static_cast<float>(overlayAlpha)),
+              16,
+              500);
+
+    for (const auto& workspace : scene.workspaces) {
+        const auto workspaceBox = center_scale_box(workspace.box, 0.97 + 0.03 * progress);
+        const auto border = workspace.selected ? CHyprColor(0.53F, 0.74F, 0.88F, static_cast<float>(0.92 * overlayAlpha))
+                                               : CHyprColor(0.20F, 0.23F, 0.28F, static_cast<float>(0.92 * overlayAlpha));
+        const auto fill = workspace.special ? CHyprColor(0.12F, 0.16F, 0.21F, static_cast<float>(0.88 * overlayAlpha))
+                                            : CHyprColor(0.09F, 0.10F, 0.13F, static_cast<float>(0.88 * overlayAlpha));
+        draw_panel(workspaceBox, border, fill, 24, 2.0);
+
+        draw_text(workspace.label,
+                  {workspaceBox.x + 12.0, workspaceBox.y + 8.0, std::max(60.0, workspaceBox.w - 24.0), 18.0},
+                  CHyprColor(0.92F, 0.95F, 1.0F, static_cast<float>(overlayAlpha)),
+                  16,
+                  600);
+
+        for (const auto& target : workspace.targets) {
+            if (target.type == TargetType::Window)
+                draw_window_preview(target, overlayAlpha);
+            else
+                draw_empty_target(target, overlayAlpha);
         }
     }
 
-    draw_selection_overlay(monitor);
+    if (scene.workspaces.empty()) {
+        draw_text("No tiled workspaces",
+                  {overlayBox.x + std::max(24.0, overlayBox.w * 0.18), overlayBox.y + overlayBox.h * 0.5 - 12.0,
+                   std::max(120.0, overlayBox.w * 0.64), 24.0},
+                  CHyprColor(0.76F, 0.80F, 0.86F, static_cast<float>(overlayAlpha)),
+                  18,
+                  500);
+    }
+
+    if (scene.syntheticTarget)
+        draw_empty_target(*scene.syntheticTarget, overlayAlpha);
+
+    if (scene.selectionBox) {
+        const auto selectionBox = animated_selection_box(*scene.selectionBox, scene.monitorId, now);
+        draw_panel(center_scale_box(selectionBox, 1.02),
+                   CHyprColor(0.91F, 0.76F, 0.27F, static_cast<float>(0.96 * overlayAlpha)),
+                   CHyprColor(0.91F, 0.76F, 0.27F, static_cast<float>(0.12 * overlayAlpha)),
+                   18,
+                   2.0);
+    }
 }
 
-void hkRenderWorkspace(void* renderer, PHLMONITOR monitor, PHLWORKSPACE workspace, const Time::steady_tp& now, const CBox& geometry) {
-    if (!g_originalRenderWorkspace)
+void update_selection_pulse(const SceneMonitor& scene, steady_tp now) {
+    if (!scene.selectionBox) {
+        g_selectionPulses.erase(scene.monitorId);
+        return;
+    }
+
+    const auto it = g_selectionPulses.find(scene.monitorId);
+    if (it == g_selectionPulses.end() || !boxes_match(it->second.box, *scene.selectionBox)) {
+        g_selectionPulses[scene.monitorId] = SelectionPulse{
+            .box = *scene.selectionBox,
+            .startedAt = now,
+        };
+    }
+}
+
+void damage_monitor_if_animating(PHLMONITOR monitor, steady_tp now) {
+    if (!monitor)
         return;
 
-    if (g_renderingOverview || !session().active() || !monitor) {
-        if (monitor && should_log("overview_render_passthrough_" + std::to_string(monitor->m_id), std::chrono::milliseconds(500))) {
-            spdlog::debug("overview_render_passthrough: monitor={} workspace={} reason={}",
-                          monitor->m_id,
-                          workspace ? workspace->m_id : WORKSPACE_INVALID,
-                          g_renderingOverview ? "recursive" : (!session().active() ? "inactive" : "no_monitor"));
+    const auto openIt = g_openedAt.find(monitor->m_id);
+    if (session().active() && openIt != g_openedAt.end() && now - openIt->second < kOpenDuration) {
+        g_pHyprRenderer->damageMonitor(monitor);
+        return;
+    }
+
+    if (selection_animation_active(monitor->m_id, now)) {
+        g_pHyprRenderer->damageMonitor(monitor);
+        return;
+    }
+
+    const auto closeIt = g_closingScenes.find(monitor->m_id);
+    if (closeIt != g_closingScenes.end() && !closing_animation_finished(closeIt->second, now))
+        g_pHyprRenderer->damageMonitor(monitor);
+}
+
+void handle_session_transition(steady_tp now) {
+    const auto overviewActive = session().active();
+    if (overviewActive == g_lastOverviewActive)
+        return;
+
+    if (overviewActive) {
+        g_closingScenes.clear();
+        g_openedAt.clear();
+        g_selectionPulses.clear();
+        for (const auto& region : session().model().monitors()) {
+            g_openedAt[region.monitorId] = now;
+            if (region.monitor)
+                g_pHyprRenderer->damageMonitor(region.monitor);
         }
-        g_originalRenderWorkspace(renderer, monitor, workspace, now, geometry);
+        spdlog::info("overview_renderer: enabled monitors={}", session().model().monitors().size());
+    } else {
+        g_openedAt.clear();
+        g_selectionPulses.clear();
+        for (const auto& [monitorId, scene] : g_liveScenes) {
+            g_closingScenes[monitorId] = ClosingScene{
+                .scene = scene,
+                .startedAt = now,
+            };
+            if (const auto monitor = g_pCompositor->getMonitorFromID(monitorId))
+                g_pHyprRenderer->damageMonitor(monitor);
+        }
+        spdlog::info("overview_renderer: disabled monitors={}", g_closingScenes.size());
+    }
+
+    g_lastOverviewActive = overviewActive;
+}
+
+void update_live_scene_for_monitor(PHLMONITOR monitor, steady_tp now) {
+    const auto scene = build_scene_for_monitor(monitor);
+    if (!scene) {
+        g_liveScenes.erase(monitor->m_id);
         return;
     }
 
-    const auto* region = region_for_monitor(session().model().monitors(), monitor);
-
-    if (g_renderedMonitors.contains(monitor->m_id))
-        return;
-
-    if (should_log("overview_render_compose_" + std::to_string(monitor->m_id))) {
-        const auto renderSpace = MonitorSpace::fromMonitor(monitor);
-        spdlog::debug("overview_render_compose: monitor={} orientation={} trigger_workspace={} previews={} geometry=({}, {}, {}, {}) pixel_size=({}, {}) transformed_size=({}, {})",
-                      monitor->m_id,
-                      orientation_name(renderSpace.orientation()),
-                      workspace ? workspace->m_id : WORKSPACE_INVALID,
-                      region ? region->workspaces.size() : 0,
-                      geometry.x,
-                      geometry.y,
-                      geometry.w,
-                      geometry.h,
-                      renderSpace.pixelSize.x,
-                      renderSpace.pixelSize.y,
-                      renderSpace.transformedSize.x,
-                      renderSpace.transformedSize.y);
-    }
-
-    g_renderedMonitors.insert(monitor->m_id);
-    if (!region) {
-        g_originalRenderWorkspace(renderer, monitor, workspace, now, geometry);
-        return;
-    }
-
-    g_pHyprRenderer->m_renderPass.add(makeUnique<OverviewPassElement>(monitor));
+    update_selection_pulse(*scene, now);
+    g_liveScenes[monitor->m_id] = *scene;
+    g_closingScenes.erase(monitor->m_id);
 }
 
 } // namespace
@@ -614,130 +588,80 @@ void fullRenderMonitor(PHLMONITOR monitor) {
     if (!monitor)
         return;
 
-    render_monitor_overview(monitor, region_for_monitor(session().model().monitors(), monitor));
+    const auto now = std::chrono::steady_clock::now();
+
+    if (session().active()) {
+        const auto it = g_liveScenes.find(monitor->m_id);
+        if (it == g_liveScenes.end())
+            return;
+
+        draw_scene_monitor(it->second, now);
+        return;
+    }
+
+    const auto it = g_closingScenes.find(monitor->m_id);
+    if (it == g_closingScenes.end())
+        return;
+
+    draw_scene_monitor(it->second.scene, now);
 }
 
 bool initializeRendererHooks(HANDLE handle) {
-    if (g_renderWorkspaceHook)
+    (void)handle;
+    if (g_renderPreListener)
         return true;
 
     try {
-        const auto matches = HyprlandAPI::findFunctionsByName(handle, "renderWorkspace");
-        const auto it = std::find_if(matches.begin(), matches.end(), [](const SFunctionMatch& match) {
-            return match.demangled.find("renderWorkspace") != std::string::npos;
-        });
-
-        if (it == matches.end()) {
-            spdlog::warn("overview_renderer_init: renderWorkspace symbol not found");
-            return false;
-        }
-
-        g_renderWorkspaceHook = HyprlandAPI::createFunctionHook(handle, it->address, reinterpret_cast<void*>(&hkRenderWorkspace));
-        if (!g_renderWorkspaceHook) {
-            spdlog::warn("overview_renderer_init: createFunctionHook failed");
-            return false;
-        }
-
-        if (!g_renderWorkspaceHook->hook()) {
-            spdlog::warn("overview_renderer_init: hook() failed");
-            HyprlandAPI::removeFunctionHook(handle, g_renderWorkspaceHook);
-            g_renderWorkspaceHook = nullptr;
-            return false;
-        }
-
-        const auto renderWindowMatches = HyprlandAPI::findFunctionsByName(handle, "renderWindow");
-        const auto renderWindowIt = std::find_if(renderWindowMatches.begin(), renderWindowMatches.end(), [](const SFunctionMatch& match) {
-            return match.demangled.find("CHyprRenderer::renderWindow") != std::string::npos;
-        });
-        if (renderWindowIt == renderWindowMatches.end()) {
-            spdlog::warn("overview_renderer_init: renderWindow symbol not found");
-            return false;
-        }
-
-        const auto renderTextureInternalMatches = HyprlandAPI::findFunctionsByName(handle, "renderTextureInternal");
-        const auto renderTextureInternalIt = std::find_if(renderTextureInternalMatches.begin(),
-                                                          renderTextureInternalMatches.end(),
-                                                          [](const SFunctionMatch& match) {
-                                                              return match.demangled.find("CHyprOpenGLImpl::renderTextureInternal") != std::string::npos;
-                                                          });
-        if (renderTextureInternalIt == renderTextureInternalMatches.end()) {
-            spdlog::warn("overview_renderer_init: renderTextureInternal symbol not found");
-        } else {
-            g_renderTextureInternal = reinterpret_cast<RenderTextureInternalFn>(renderTextureInternalIt->address);
-        }
-
-        g_originalRenderWorkspace = reinterpret_cast<RenderWorkspaceHookFn>(g_renderWorkspaceHook->m_original);
-        g_renderWindow = reinterpret_cast<RenderWindowFn>(renderWindowIt->address);
         g_renderPreListener = Event::bus()->m_events.render.pre.listen([](PHLMONITOR monitor) {
             if (!monitor)
                 return;
 
-            const auto overviewActive = session().active();
-            if (overviewActive != g_lastOverviewActive) {
-                g_logTimestamps.clear();
-                g_dirtyMonitors.clear();
-                g_overviewOpenedAt.clear();
-                if (overviewActive) {
-                    const auto openedAt = std::chrono::steady_clock::now();
-                    for (const auto& region : session().model().monitors()) {
-                        g_dirtyMonitors.insert(region.monitorId);
-                        g_overviewOpenedAt[region.monitorId] = openedAt;
+            const auto now = std::chrono::steady_clock::now();
+            handle_session_transition(now);
+
+            if (session().active()) {
+                update_live_scene_for_monitor(monitor, now);
+                if (g_liveScenes.contains(monitor->m_id))
+                    g_pHyprRenderer->m_renderPass.add(makeUnique<OverviewPassElement>(monitor));
+            } else {
+                auto it = g_closingScenes.find(monitor->m_id);
+                if (it != g_closingScenes.end()) {
+                    if (closing_animation_finished(it->second, now)) {
+                        g_closingScenes.erase(it);
+                    } else {
+                        g_pHyprRenderer->m_renderPass.add(makeUnique<OverviewPassElement>(monitor));
                     }
                 }
-                spdlog::debug("overview_render_session_state: active={} monitors={}",
-                              overviewActive,
-                              session().model().monitors().size());
-                g_lastOverviewActive = overviewActive;
             }
 
-            g_renderedMonitors.erase(monitor->m_id);
-            if (!overviewActive)
-                return;
-
-            if (!g_dirtyMonitors.contains(monitor->m_id))
-                return;
-
-            update_preview_textures_for_monitor(monitor);
-            g_dirtyMonitors.erase(monitor->m_id);
+            damage_monitor_if_animating(monitor, now);
         });
 
-        spdlog::info("overview_renderer_init: hooked renderWorkspace address={} matches={}",
-                     it->address,
-                     matches.size());
+        spdlog::info("overview_renderer_init: using render-pass overlay backend");
         return true;
     } catch (const std::exception& e) {
-        if (g_renderWorkspaceHook) {
-            HyprlandAPI::removeFunctionHook(handle, g_renderWorkspaceHook);
-            g_renderWorkspaceHook = nullptr;
-        }
-        g_originalRenderWorkspace = nullptr;
-        g_renderWindow = nullptr;
-        g_renderTextureInternal = nullptr;
         g_renderPreListener = nullptr;
+        g_openedAt.clear();
+        g_closingScenes.clear();
+        g_liveScenes.clear();
+        g_selectionPulses.clear();
+        g_textCache.clear();
+        g_lastOverviewActive = false;
         spdlog::warn("overview_renderer_init: disabled after exception: {}", e.what());
         return false;
     }
 }
 
 void shutdownRendererHooks(HANDLE handle) {
+    (void)handle;
     g_renderPreListener = nullptr;
-    g_renderedMonitors.clear();
-    g_dirtyMonitors.clear();
-    g_windowPreviews.clear();
-    g_logTimestamps.clear();
-    g_overviewOpenedAt.clear();
-    g_originalRenderWorkspace = nullptr;
-    g_renderWindow = nullptr;
-    g_renderTextureInternal = nullptr;
-    g_renderingOverview = false;
+    g_openedAt.clear();
+    g_closingScenes.clear();
+    g_liveScenes.clear();
+    g_selectionPulses.clear();
+    g_textCache.clear();
     g_lastOverviewActive = false;
     g_pHyprRenderer->m_renderPass.removeAllOfType("OverviewPassElement");
-
-    if (!g_renderWorkspaceHook)
-        return;
-
-    HyprlandAPI::removeFunctionHook(handle, g_renderWorkspaceHook);
-    g_renderWorkspaceHook = nullptr;
     spdlog::info("overview_renderer_shutdown");
 }
 
