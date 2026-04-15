@@ -31,7 +31,7 @@ MoveFocusRouteAction decide_move_focus_route(bool hasLane, bool laneEmpty, bool 
     if (!laneEmpty) {
         if (moveResult == FocusMoveResult::Moved)
             return MoveFocusRouteAction::FinalizeLocalMove;
-        if (moveResult == FocusMoveResult::CrossMonitor)
+        if (!betweenLanes && moveResult == FocusMoveResult::CrossMonitor)
             return MoveFocusRouteAction::CrossMonitor;
     }
 
@@ -46,7 +46,9 @@ MoveFocusRouteAction decide_move_focus_route(bool hasLane, bool laneEmpty, bool 
     case DirectionalHandoffRoute::CreateLane:
         return MoveFocusRouteAction::CreateLane;
     case DirectionalHandoffRoute::NoOp:
-        return MoveFocusRouteAction::NoOp;
+        return moveResult == FocusMoveResult::CrossMonitor
+            ? MoveFocusRouteAction::CrossMonitor
+            : MoveFocusRouteAction::NoOp;
     }
 
     return MoveFocusRouteAction::NoOp;

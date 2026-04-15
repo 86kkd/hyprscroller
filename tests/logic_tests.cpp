@@ -319,6 +319,9 @@ void test_route_logic() {
     expect_eq(decide_move_focus_route(true, true, true, FocusMoveResult::NoOp, DirectionalHandoffRoute::CreateLane),
               MoveFocusRouteAction::CreateLane,
               "move_focus can create an empty lane when routing into blank space");
+    expect_eq(decide_move_focus_route(true, false, true, FocusMoveResult::CrossMonitor, DirectionalHandoffRoute::AdjacentLane),
+              MoveFocusRouteAction::AdjacentLane,
+              "move_focus prefers adjacent lanes over monitor escape on lane directions");
     expect_eq(decide_move_focus_route(true, false, true, FocusMoveResult::CrossMonitor, DirectionalHandoffRoute::NoOp),
               MoveFocusRouteAction::CrossMonitor,
               "move_focus returns cross-monitor handoff for monitor edges");
