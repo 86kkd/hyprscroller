@@ -115,6 +115,10 @@ bool boxes_match(const Box& a, const Box& b) {
         && approximately_equal(a.w, b.w) && approximately_equal(a.h, b.h);
 }
 
+bool finite_box(const Box& box) {
+    return std::isfinite(box.x) && std::isfinite(box.y) && std::isfinite(box.w) && std::isfinite(box.h);
+}
+
 Box inset_box(const Box& box, double insetX, double insetY) {
     return {
         box.x + insetX,
@@ -133,6 +137,20 @@ Box center_scale_box(const Box& box, double scale) {
         scaledWidth,
         scaledHeight,
     };
+}
+
+std::optional<Box> intersect_box(const Box& box, const Box& bounds) {
+    if (!finite_box(box) || !finite_box(bounds))
+        return std::nullopt;
+
+    const auto x0 = std::max(box.x, bounds.x);
+    const auto y0 = std::max(box.y, bounds.y);
+    const auto x1 = std::min(box.x + box.w, bounds.x + bounds.w);
+    const auto y1 = std::min(box.y + box.h, bounds.y + bounds.h);
+    if (x1 <= x0 || y1 <= y0)
+        return std::nullopt;
+
+    return Box{x0, y0, x1 - x0, y1 - y0};
 }
 
 Box localize_box(PHLMONITOR monitor, const Box& box) {
@@ -345,65 +363,74 @@ SP<CTexture> get_text_texture(const std::string& text, const CHyprColor& color, 
     return texture;
 }
 
-void draw_text(const std::string& text, const Box& box, const CHyprColor& color, int pt, int weight = 400) {
-    if (box.w <= 4.0 || box.h <= 4.0)
+void draw_text(const std::string& text, const Box& box, const Box& bounds, const CHyprColor& color, int pt, int weight = 400) {
+    const auto clipped = intersect_box(box, bounds);
+    if (!clipped || clipped->w <= 4.0 || clipped->h <= 4.0)
         return;
 
-    auto texture = get_text_texture(text, color, pt, std::max(1, iround(box.w)), weight);
+    auto texture = get_text_texture(text, color, pt, std::max(1, iround(clipped->w)), weight);
     if (!texture || texture->m_size.x <= 0.0 || texture->m_size.y <= 0.0)
         return;
 
-    const auto scale = std::min(box.w / texture->m_size.x, box.h / texture->m_size.y);
+    const auto scale = std::min(clipped->w / texture->m_size.x, clipped->h / texture->m_size.y);
     const auto width = std::max(1.0, texture->m_size.x * scale);
     const auto height = std::max(1.0, texture->m_size.y * scale);
     const Box drawBox{
-        box.x,
-        box.y + std::max(0.0, (box.h - height) * 0.5),
+        clipped->x,
+        clipped->y + std::max(0.0, (clipped->h - height) * 0.5),
         width,
         height,
     };
+    const auto finalBox = intersect_box(drawBox, bounds);
+    if (!finalBox)
+        return;
 
     CHyprOpenGLImpl::STextureRenderData data;
     data.a = static_cast<float>(color.a);
     data.blockBlurOptimization = true;
-    g_pHyprOpenGL->renderTexture(texture, to_cbox(drawBox), data);
+    g_pHyprOpenGL->renderTexture(texture, to_cbox(*finalBox), data);
 }
 
-void draw_rect(const Box& box, const CHyprColor& color, int round, float roundingPower = 2.0F) {
+void draw_rect(const Box& box, const Box& bounds, const CHyprColor& color, int round, float roundingPower = 2.0F) {
+    const auto clipped = intersect_box(box, bounds);
+    if (!clipped)
+        return;
+
     CHyprOpenGLImpl::SRectRenderData data;
     data.round = round;
     data.roundingPower = roundingPower;
-    g_pHyprOpenGL->renderRect(to_cbox(box), color, data);
+    g_pHyprOpenGL->renderRect(to_cbox(*clipped), color, data);
 }
 
-void draw_panel(const Box& box, const CHyprColor& border, const CHyprColor& fill, int round, double borderWidth = 2.0) {
-    if (box.w <= 2.0 || box.h <= 2.0)
+void draw_panel(const Box& box, const Box& bounds, const CHyprColor& border, const CHyprColor& fill, int round, double borderWidth = 2.0) {
+    const auto clipped = intersect_box(box, bounds);
+    if (!clipped || clipped->w <= 2.0 || clipped->h <= 2.0)
         return;
 
-    draw_rect(box, border, round);
-    draw_rect(inset_box(box, borderWidth, borderWidth), fill, std::max(0, round - iround(borderWidth)));
+    draw_rect(*clipped, bounds, border, round);
+    draw_rect(inset_box(*clipped, borderWidth, borderWidth), bounds, fill, std::max(0, round - iround(borderWidth)));
 }
 
-void draw_window_preview(const SceneTarget& target, double overlayAlpha) {
+void draw_window_preview(const SceneTarget& target, const Box& bounds, double overlayAlpha) {
     const auto drawBox = center_scale_box(target.box, 0.97 + 0.03 * overlayAlpha);
     const auto baseFill = target.selected ? CHyprColor(0.27F, 0.41F, 0.55F, static_cast<float>(0.88 * overlayAlpha))
                                           : CHyprColor(0.17F, 0.19F, 0.24F, static_cast<float>(0.86 * overlayAlpha));
     const auto border = target.selected ? CHyprColor(0.64F, 0.86F, 0.98F, static_cast<float>(0.92 * overlayAlpha))
                                         : CHyprColor(0.28F, 0.31F, 0.38F, static_cast<float>(0.92 * overlayAlpha));
-    draw_panel(drawBox, border, baseFill, 16, 2.0);
+    draw_panel(drawBox, bounds, border, baseFill, 16, 2.0);
 
     const auto titleBox = inset_box(drawBox, 10.0, 8.0);
-    draw_text(target.label, {titleBox.x, titleBox.y, titleBox.w, 18.0}, CHyprColor(0.95F, 0.97F, 1.0F, static_cast<float>(overlayAlpha)), 15, 500);
+    draw_text(target.label, {titleBox.x, titleBox.y, titleBox.w, 18.0}, bounds, CHyprColor(0.95F, 0.97F, 1.0F, static_cast<float>(overlayAlpha)), 15, 500);
 }
 
-void draw_empty_target(const SceneTarget& target, double overlayAlpha) {
+void draw_empty_target(const SceneTarget& target, const Box& bounds, double overlayAlpha) {
     const auto drawBox = center_scale_box(target.box, 0.97 + 0.03 * overlayAlpha);
     const auto fill = target.synthetic ? CHyprColor(0.11F, 0.29F, 0.38F, static_cast<float>(0.58 * overlayAlpha))
                                        : CHyprColor(0.12F, 0.14F, 0.18F, static_cast<float>(0.58 * overlayAlpha));
     const auto border = target.selected ? CHyprColor(0.64F, 0.86F, 0.98F, static_cast<float>(0.92 * overlayAlpha))
                                         : CHyprColor(0.28F, 0.31F, 0.38F, static_cast<float>(0.86 * overlayAlpha));
-    draw_panel(drawBox, border, fill, 20, 2.0);
-    draw_text(target.label, inset_box(drawBox, 12.0, 10.0), CHyprColor(0.88F, 0.92F, 0.98F, static_cast<float>(overlayAlpha)), 16, 500);
+    draw_panel(drawBox, bounds, border, fill, 20, 2.0);
+    draw_text(target.label, inset_box(drawBox, 12.0, 10.0), bounds, CHyprColor(0.88F, 0.92F, 0.98F, static_cast<float>(overlayAlpha)), 16, 500);
 }
 
 double overlay_progress(int monitorId, steady_tp now) {
@@ -452,9 +479,10 @@ void draw_scene_monitor(const SceneMonitor& scene, steady_tp now) {
     const auto overlayBox = center_scale_box(scene.box, 0.965 + 0.035 * progress);
     const auto overlayAlpha = progress;
 
-    draw_rect(scene.box, CHyprColor(0.05F, 0.06F, 0.08F, static_cast<float>(0.76 * overlayAlpha)), 0);
+    draw_rect(scene.box, scene.box, CHyprColor(0.05F, 0.06F, 0.08F, static_cast<float>(0.76 * overlayAlpha)), 0);
     draw_text(scene.monitorName.empty() ? "monitor" : scene.monitorName,
               {18.0, 14.0, std::max(80.0, scene.box.w - 36.0), 20.0},
+              scene.box,
               CHyprColor(0.84F, 0.88F, 0.94F, static_cast<float>(overlayAlpha)),
               16,
               500);
@@ -465,19 +493,20 @@ void draw_scene_monitor(const SceneMonitor& scene, steady_tp now) {
                                                : CHyprColor(0.20F, 0.23F, 0.28F, static_cast<float>(0.92 * overlayAlpha));
         const auto fill = workspace.special ? CHyprColor(0.12F, 0.16F, 0.21F, static_cast<float>(0.88 * overlayAlpha))
                                             : CHyprColor(0.09F, 0.10F, 0.13F, static_cast<float>(0.88 * overlayAlpha));
-        draw_panel(workspaceBox, border, fill, 24, 2.0);
+        draw_panel(workspaceBox, scene.box, border, fill, 24, 2.0);
 
         draw_text(workspace.label,
                   {workspaceBox.x + 12.0, workspaceBox.y + 8.0, std::max(60.0, workspaceBox.w - 24.0), 18.0},
+                  scene.box,
                   CHyprColor(0.92F, 0.95F, 1.0F, static_cast<float>(overlayAlpha)),
                   16,
                   600);
 
         for (const auto& target : workspace.targets) {
             if (target.type == TargetType::Window)
-                draw_window_preview(target, overlayAlpha);
+                draw_window_preview(target, scene.box, overlayAlpha);
             else
-                draw_empty_target(target, overlayAlpha);
+                draw_empty_target(target, scene.box, overlayAlpha);
         }
     }
 
@@ -485,17 +514,19 @@ void draw_scene_monitor(const SceneMonitor& scene, steady_tp now) {
         draw_text("No tiled workspaces",
                   {overlayBox.x + std::max(24.0, overlayBox.w * 0.18), overlayBox.y + overlayBox.h * 0.5 - 12.0,
                    std::max(120.0, overlayBox.w * 0.64), 24.0},
+                  scene.box,
                   CHyprColor(0.76F, 0.80F, 0.86F, static_cast<float>(overlayAlpha)),
                   18,
                   500);
     }
 
     if (scene.syntheticTarget)
-        draw_empty_target(*scene.syntheticTarget, overlayAlpha);
+        draw_empty_target(*scene.syntheticTarget, scene.box, overlayAlpha);
 
     if (scene.selectionBox) {
         const auto selectionBox = animated_selection_box(*scene.selectionBox, scene.monitorId, now);
         draw_panel(center_scale_box(selectionBox, 1.02),
+                   scene.box,
                    CHyprColor(0.91F, 0.76F, 0.27F, static_cast<float>(0.96 * overlayAlpha)),
                    CHyprColor(0.91F, 0.76F, 0.27F, static_cast<float>(0.12 * overlayAlpha)),
                    18,
