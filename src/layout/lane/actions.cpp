@@ -324,17 +324,20 @@ void Lane::move_active_window_to_adjacent_stack(Direction dir) {
     if (dir != backward && dir != forward)
         return;
 
-    if (active->data()->maximized() ||
-        active->data()->fullscreen() ||
-        active->data()->expanded())
+    auto *sourceStack = active->data();
+    if (sourceStack->maximized() ||
+        sourceStack->fullscreen())
         return;
+
+    if (sourceStack->expanded())
+        (void)sourceStack->toggle_fullscreen(max);
 
     auto *target = dir == backward ? active->prev() : active->next();
     if (!target)
         return;
 
     auto *sourceNode = active;
-    auto *sourceStack = sourceNode->data();
+    sourceStack = sourceNode->data();
     auto w = sourceStack->expel_active(gap);
     const auto movedWindow = w ? w->ptr().lock() : nullptr;
     forgetWindowStack(movedWindow);
@@ -368,14 +371,17 @@ void Lane::move_active_window_to_new_stack(Direction dir) {
     if (dir != backward && dir != forward)
         return;
 
-    if (active->data()->maximized() ||
-        active->data()->fullscreen() ||
-        active->data()->expanded() ||
-        active->data()->size() == 1)
+    auto *sourceStack = active->data();
+    if (sourceStack->maximized() ||
+        sourceStack->fullscreen() ||
+        sourceStack->size() == 1)
         return;
 
+    if (sourceStack->expanded())
+        (void)sourceStack->toggle_fullscreen(max);
+
     auto *sourceNode = active;
-    auto *sourceStack = sourceNode->data();
+    sourceStack = sourceNode->data();
     auto w = sourceStack->expel_active(gap);
     const auto movedWindow = w ? w->ptr().lock() : nullptr;
     forgetWindowStack(movedWindow);
