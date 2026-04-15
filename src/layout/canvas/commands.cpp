@@ -173,12 +173,8 @@ void CanvasLayout::handleMoveWindowWithinLane(int workspace, Direction direction
     const auto targetMonitor = directionalMoveTargetMonitor(sourceMonitor, direction);
     const bool sourceStackHasMultipleWindows = lane->active_stack_has_multiple_windows();
     if (sourceStackHasMultipleWindows) {
-        if (lane->active_item_at_edge(direction) && targetMonitor) {
-            if (!handoffMoveWindowAcrossMonitor(workspace, direction, lane, currentWindow, sourceMonitor, targetMonitor))
-                CanvasLayoutInternal::dispatch_directional_builtin("movewindow", direction);
-            return;
-        }
-
+        // Splitting a multi-window stack stays local even at the lane edge.
+        // Cross-monitor handoff is reserved for single-window edge stacks.
         lane->move_active_window_to_new_stack(direction);
         CanvasLayoutInternal::switch_to_window(lane->get_active_window());
         return;
