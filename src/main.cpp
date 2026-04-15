@@ -8,11 +8,16 @@
  */
 #include <hyprland/src/config/ConfigManager.hpp>
 #include <hyprland/src/plugins/PluginAPI.hpp>
+#include <cerrno>
+#include <cstring>
 #include <cstdlib>
-#include <filesystem>
 #include <memory>
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/basic_file_sink.h>
+#include <spdlog/sinks/stdout_color_sinks.h>
+#include <string>
+#include <stdexcept>
+#include <sys/stat.h>
 #include <typeinfo>
 
 #include "dispatchers.h"
@@ -27,18 +32,60 @@ namespace {
 // Resolve the dedicated log file used by the plugin across sessions.
 std::string log_file_path() {
     const char* home = std::getenv("HOME");
-    const auto base = home ? std::filesystem::path(home) : std::filesystem::path("/tmp");
-    return (base / ".hyprland/plugins/hyprscroller/hyprscroller.log").string();
+    const std::string base = home && home[0] != '\0' ? home : "/tmp";
+    return base + "/.hyprland/plugins/hyprscroller/hyprscroller.log";
 }
 
-// Initialize the file-backed spdlog logger used by all plugin code.
+bool ensure_directory(const std::string& path) {
+    if (path.empty())
+        return false;
+
+    std::string current;
+    current.reserve(path.size());
+
+    for (size_t i = 0; i < path.size(); ++i) {
+        current.push_back(path[i]);
+        if (path[i] != '/' || current.size() == 1)
+            continue;
+
+        if (::mkdir(current.c_str(), 0755) == 0 || errno == EEXIST)
+            continue;
+
+        return false;
+    }
+
+    return ::mkdir(path.c_str(), 0755) == 0 || errno == EEXIST;
+}
+
+std::shared_ptr<spdlog::logger> make_stderr_logger() {
+    auto sink = std::make_shared<spdlog::sinks::stderr_color_sink_mt>();
+    return std::make_shared<spdlog::logger>("hyprscroller", std::move(sink));
+}
+
+// Initialize the plugin logger without letting filesystem setup abort plugin init.
 void init_logging() {
     const auto path = log_file_path();
-    std::filesystem::create_directories(std::filesystem::path(path).parent_path());
+    const auto split = path.find_last_of('/');
+    const auto directory = split == std::string::npos ? std::string() : path.substr(0, split);
 
     spdlog::drop("hyprscroller");
-    auto sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(path, true);
-    auto logger = std::make_shared<spdlog::logger>("hyprscroller", std::move(sink));
+
+    std::shared_ptr<spdlog::logger> logger;
+    try {
+        if (!directory.empty() && !ensure_directory(directory))
+            throw std::runtime_error(std::string("failed to create log directory: ") + directory + " (" + std::strerror(errno) + ")");
+
+        auto sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(path, true);
+        logger = std::make_shared<spdlog::logger>("hyprscroller", std::move(sink));
+    } catch (const std::exception& e) {
+        logger = make_stderr_logger();
+        spdlog::set_default_logger(logger);
+        spdlog::set_pattern("[%Y-%m-%d %H:%M:%S.%e] [hyprscroller] [%^%l%$] %v");
+        spdlog::set_level(spdlog::level::debug);
+        spdlog::error("logging fallback to stderr: {}", e.what());
+        return;
+    }
+
     spdlog::set_default_logger(std::move(logger));
     spdlog::set_pattern("[%Y-%m-%d %H:%M:%S.%e] [hyprscroller] [%^%l%$] %v");
 #ifndef NDEBUG

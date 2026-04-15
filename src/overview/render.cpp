@@ -8,6 +8,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <exception>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -620,89 +621,102 @@ bool initializeRendererHooks(HANDLE handle) {
     if (g_renderWorkspaceHook)
         return true;
 
-    const auto matches = HyprlandAPI::findFunctionsByName(handle, "renderWorkspace");
-    const auto it = std::find_if(matches.begin(), matches.end(), [](const SFunctionMatch& match) {
-        return match.demangled.find("renderWorkspace") != std::string::npos;
-    });
+    try {
+        const auto matches = HyprlandAPI::findFunctionsByName(handle, "renderWorkspace");
+        const auto it = std::find_if(matches.begin(), matches.end(), [](const SFunctionMatch& match) {
+            return match.demangled.find("renderWorkspace") != std::string::npos;
+        });
 
-    if (it == matches.end()) {
-        spdlog::warn("overview_renderer_init: renderWorkspace symbol not found");
-        return false;
-    }
-
-    g_renderWorkspaceHook = HyprlandAPI::createFunctionHook(handle, it->address, reinterpret_cast<void*>(&hkRenderWorkspace));
-    if (!g_renderWorkspaceHook) {
-        spdlog::warn("overview_renderer_init: createFunctionHook failed");
-        return false;
-    }
-
-    if (!g_renderWorkspaceHook->hook()) {
-        spdlog::warn("overview_renderer_init: hook() failed");
-        HyprlandAPI::removeFunctionHook(handle, g_renderWorkspaceHook);
-        g_renderWorkspaceHook = nullptr;
-        return false;
-    }
-
-    const auto renderWindowMatches = HyprlandAPI::findFunctionsByName(handle, "renderWindow");
-    const auto renderWindowIt = std::find_if(renderWindowMatches.begin(), renderWindowMatches.end(), [](const SFunctionMatch& match) {
-        return match.demangled.find("CHyprRenderer::renderWindow") != std::string::npos;
-    });
-    if (renderWindowIt == renderWindowMatches.end()) {
-        spdlog::warn("overview_renderer_init: renderWindow symbol not found");
-        return false;
-    }
-
-    const auto renderTextureInternalMatches = HyprlandAPI::findFunctionsByName(handle, "renderTextureInternal");
-    const auto renderTextureInternalIt = std::find_if(renderTextureInternalMatches.begin(),
-                                                      renderTextureInternalMatches.end(),
-                                                      [](const SFunctionMatch& match) {
-                                                          return match.demangled.find("CHyprOpenGLImpl::renderTextureInternal") != std::string::npos;
-                                                      });
-    if (renderTextureInternalIt == renderTextureInternalMatches.end()) {
-        spdlog::warn("overview_renderer_init: renderTextureInternal symbol not found");
-    } else {
-        g_renderTextureInternal = reinterpret_cast<RenderTextureInternalFn>(renderTextureInternalIt->address);
-    }
-
-    g_originalRenderWorkspace = reinterpret_cast<RenderWorkspaceHookFn>(g_renderWorkspaceHook->m_original);
-    g_renderWindow = reinterpret_cast<RenderWindowFn>(renderWindowIt->address);
-    g_renderPreListener = Event::bus()->m_events.render.pre.listen([](PHLMONITOR monitor) {
-        if (!monitor)
-            return;
-
-        const auto overviewActive = session().active();
-        if (overviewActive != g_lastOverviewActive) {
-            g_logTimestamps.clear();
-            g_dirtyMonitors.clear();
-            g_overviewOpenedAt.clear();
-            if (overviewActive) {
-                const auto openedAt = std::chrono::steady_clock::now();
-                for (const auto& region : session().model().monitors()) {
-                    g_dirtyMonitors.insert(region.monitorId);
-                    g_overviewOpenedAt[region.monitorId] = openedAt;
-                }
-            }
-            spdlog::debug("overview_render_session_state: active={} monitors={}",
-                          overviewActive,
-                          session().model().monitors().size());
-            g_lastOverviewActive = overviewActive;
+        if (it == matches.end()) {
+            spdlog::warn("overview_renderer_init: renderWorkspace symbol not found");
+            return false;
         }
 
-        g_renderedMonitors.erase(monitor->m_id);
-        if (!overviewActive)
-            return;
+        g_renderWorkspaceHook = HyprlandAPI::createFunctionHook(handle, it->address, reinterpret_cast<void*>(&hkRenderWorkspace));
+        if (!g_renderWorkspaceHook) {
+            spdlog::warn("overview_renderer_init: createFunctionHook failed");
+            return false;
+        }
 
-        if (!g_dirtyMonitors.contains(monitor->m_id))
-            return;
+        if (!g_renderWorkspaceHook->hook()) {
+            spdlog::warn("overview_renderer_init: hook() failed");
+            HyprlandAPI::removeFunctionHook(handle, g_renderWorkspaceHook);
+            g_renderWorkspaceHook = nullptr;
+            return false;
+        }
 
-        update_preview_textures_for_monitor(monitor);
-        g_dirtyMonitors.erase(monitor->m_id);
-    });
+        const auto renderWindowMatches = HyprlandAPI::findFunctionsByName(handle, "renderWindow");
+        const auto renderWindowIt = std::find_if(renderWindowMatches.begin(), renderWindowMatches.end(), [](const SFunctionMatch& match) {
+            return match.demangled.find("CHyprRenderer::renderWindow") != std::string::npos;
+        });
+        if (renderWindowIt == renderWindowMatches.end()) {
+            spdlog::warn("overview_renderer_init: renderWindow symbol not found");
+            return false;
+        }
 
-    spdlog::info("overview_renderer_init: hooked renderWorkspace address={} matches={}",
-                 it->address,
-                 matches.size());
-    return true;
+        const auto renderTextureInternalMatches = HyprlandAPI::findFunctionsByName(handle, "renderTextureInternal");
+        const auto renderTextureInternalIt = std::find_if(renderTextureInternalMatches.begin(),
+                                                          renderTextureInternalMatches.end(),
+                                                          [](const SFunctionMatch& match) {
+                                                              return match.demangled.find("CHyprOpenGLImpl::renderTextureInternal") != std::string::npos;
+                                                          });
+        if (renderTextureInternalIt == renderTextureInternalMatches.end()) {
+            spdlog::warn("overview_renderer_init: renderTextureInternal symbol not found");
+        } else {
+            g_renderTextureInternal = reinterpret_cast<RenderTextureInternalFn>(renderTextureInternalIt->address);
+        }
+
+        g_originalRenderWorkspace = reinterpret_cast<RenderWorkspaceHookFn>(g_renderWorkspaceHook->m_original);
+        g_renderWindow = reinterpret_cast<RenderWindowFn>(renderWindowIt->address);
+        g_renderPreListener = Event::bus()->m_events.render.pre.listen([](PHLMONITOR monitor) {
+            if (!monitor)
+                return;
+
+            const auto overviewActive = session().active();
+            if (overviewActive != g_lastOverviewActive) {
+                g_logTimestamps.clear();
+                g_dirtyMonitors.clear();
+                g_overviewOpenedAt.clear();
+                if (overviewActive) {
+                    const auto openedAt = std::chrono::steady_clock::now();
+                    for (const auto& region : session().model().monitors()) {
+                        g_dirtyMonitors.insert(region.monitorId);
+                        g_overviewOpenedAt[region.monitorId] = openedAt;
+                    }
+                }
+                spdlog::debug("overview_render_session_state: active={} monitors={}",
+                              overviewActive,
+                              session().model().monitors().size());
+                g_lastOverviewActive = overviewActive;
+            }
+
+            g_renderedMonitors.erase(monitor->m_id);
+            if (!overviewActive)
+                return;
+
+            if (!g_dirtyMonitors.contains(monitor->m_id))
+                return;
+
+            update_preview_textures_for_monitor(monitor);
+            g_dirtyMonitors.erase(monitor->m_id);
+        });
+
+        spdlog::info("overview_renderer_init: hooked renderWorkspace address={} matches={}",
+                     it->address,
+                     matches.size());
+        return true;
+    } catch (const std::exception& e) {
+        if (g_renderWorkspaceHook) {
+            HyprlandAPI::removeFunctionHook(handle, g_renderWorkspaceHook);
+            g_renderWorkspaceHook = nullptr;
+        }
+        g_originalRenderWorkspace = nullptr;
+        g_renderWindow = nullptr;
+        g_renderTextureInternal = nullptr;
+        g_renderPreListener = nullptr;
+        spdlog::warn("overview_renderer_init: disabled after exception: {}", e.what());
+        return false;
+    }
 }
 
 void shutdownRendererHooks(HANDLE handle) {
