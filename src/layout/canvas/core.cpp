@@ -41,6 +41,56 @@ void clear_lanes(List<Lane*>& lanes) {
 // Return true when any lane is a temporary page-like lane.
 } // namespace
 
+CanvasLayout::CanvasLayout() {
+    m_focusCallback = Event::bus()->m_events.window.active.listen([this](PHLWINDOW window, Desktop::eFocusReason) {
+        onWindowFocusChange(window);
+    });
+}
+
+CanvasLayout::~CanvasLayout() {
+    resetRuntimeState();
+}
+
+void CanvasLayout::resetRuntimeState() {
+    m_focusCallback = nullptr;
+    m_workspaceActiveCallback = nullptr;
+    workspaceRuntimeId = WORKSPACE_INVALID;
+    clear_lanes(lanes);
+    activeLane = nullptr;
+    laneByWindow.clear();
+    resetHandoffState();
+    specialEphemeralLaneRestorePending = false;
+}
+
+void CanvasLayout::ensureWorkspaceRuntime() {
+    if (!m_focusCallback) {
+        m_focusCallback = Event::bus()->m_events.window.active.listen([this](PHLWINDOW window, Desktop::eFocusReason) {
+            onWindowFocusChange(window);
+        });
+    }
+
+    const auto workspace = getCanvasWorkspace();
+    if (!workspace) {
+        m_workspaceActiveCallback = nullptr;
+        workspaceRuntimeId = WORKSPACE_INVALID;
+        return;
+    }
+
+    if (workspaceRuntimeId == workspace->m_id && m_workspaceActiveCallback)
+        return;
+
+    workspaceRuntimeId = workspace->m_id;
+    m_workspaceActiveCallback = workspace->m_events.activeChanged.listen([this] {
+        const auto workspace = getCanvasWorkspace();
+        if (!workspace)
+            return;
+        syncHiddenSpecialWorkspaceCanvases();
+        const auto monitor = CanvasLayoutInternal::visible_monitor_for_workspace(workspace);
+        if (syncSpecialWorkspaceVisibilityState(monitor) && monitor)
+            relayoutCanvas(monitor, !workspace->m_isSpecialWorkspace);
+    });
+}
+
 CanvasLayoutInternal::CanvasBounds CanvasLayoutInternal::compute_canvas_bounds(PHLMONITOR monitor) {
     static auto PGAPSINDATA = CConfigValue<Hyprlang::CUSTOMTYPE>("general:gaps_in");
     static auto PGAPSOUTDATA = CConfigValue<Hyprlang::CUSTOMTYPE>("general:gaps_out");
@@ -274,6 +324,8 @@ PHLMONITOR CanvasLayout::getVisibleCanvasMonitor(PHLMONITOR fallbackMonitor) con
 }
 
 void CanvasLayout::prepareForActionContext() {
+    ensureWorkspaceRuntime();
+
     syncHiddenSpecialWorkspaceCanvases();
     const auto workspace = getCanvasWorkspace();
     const auto monitor = getVisibleCanvasMonitor();
@@ -394,6 +446,8 @@ void CanvasLayout::relayoutCanvas(PHLMONITOR monitor, bool honor_fullscreen) {
 
 // Hyprland callback: add a new tiled target into the current canvas.
 void CanvasLayout::newTarget(SP<Layout::ITarget> target) {
+    ensureWorkspaceRuntime();
+
     if (!target)
         return;
 
@@ -416,6 +470,8 @@ void CanvasLayout::newTarget(SP<Layout::ITarget> target) {
 // Hyprland callback: target re-entered tiling flow and should be owned again.
 void CanvasLayout::movedTarget(SP<Layout::ITarget> target, std::optional<Vector2D>)
 {
+    ensureWorkspaceRuntime();
+
     if (!target)
         return;
 
@@ -436,6 +492,8 @@ void CanvasLayout::movedTarget(SP<Layout::ITarget> target, std::optional<Vector2
 // Hyprland callback: remove a tiled target from canvas ownership.
 void CanvasLayout::removeTarget(SP<Layout::ITarget> target)
 {
+    ensureWorkspaceRuntime();
+
     if (!target)
         return;
 
@@ -464,6 +522,8 @@ void CanvasLayout::resizeTarget(const Vector2D &delta, SP<Layout::ITarget> targe
 // Hyprland callback: relayout the whole canvas after monitor/workspace changes.
 void CanvasLayout::recalculate()
 {
+    ensureWorkspaceRuntime();
+
     const auto workspace = getCanvasWorkspace();
     if (!workspace)
         return;
@@ -680,75 +740,9 @@ void CanvasLayout::alterSplitRatio(PHLWINDOW, float, bool)
 {
 }
 
-void CanvasLayout::onEnable() {
-    clear_lanes(lanes);
-    activeLane = nullptr;
-    laneByWindow.clear();
-    resetHandoffState();
-    specialEphemeralLaneRestorePending = false;
-    m_workspaceActiveCallback = nullptr;
-    m_focusCallback = Event::bus()->m_events.window.active.listen([this](PHLWINDOW window, Desktop::eFocusReason) {
-        onWindowFocusChange(window);
-    });
-
-    const auto algorithm = m_parent.lock();
-    const auto space = algorithm ? algorithm->space() : nullptr;
-    const auto workspace = space ? space->workspace() : nullptr;
-    if (!workspace) {
-        spdlog::warn("onEnable: missing parent workspace for layout instance={}",
-                     static_cast<const void*>(this));
-        return;
-    }
-
-    m_workspaceActiveCallback = workspace->m_events.activeChanged.listen([this] {
-        const auto workspace = getCanvasWorkspace();
-        if (!workspace)
-            return;
-        syncHiddenSpecialWorkspaceCanvases();
-        const auto monitor = CanvasLayoutInternal::visible_monitor_for_workspace(workspace);
-        if (syncSpecialWorkspaceVisibilityState(monitor) && monitor)
-            relayoutCanvas(monitor, !workspace->m_isSpecialWorkspace);
-    });
-
-    spdlog::info("onEnable: rebuilding layout instance={} workspace={} from mapped windows",
-                 static_cast<const void*>(this), workspace->m_id);
-    for (auto& window : g_pCompositor->m_windows) {
-        spdlog::debug("onEnable: candidate instance={} window={} workspace={} mapped={} hidden={} floating={}",
-                      static_cast<const void*>(this),
-                      static_cast<const void*>(window.get()), window->workspaceID(), window->m_isMapped,
-                      window->isHidden(), window->m_isFloating);
-        if (window->workspaceID() != workspace->m_id || window->m_isFloating || !window->m_isMapped)
-            continue;
-
-        spdlog::info("onEnable: registering instance={} window={} workspace={} hidden={}",
-                     static_cast<const void*>(this), static_cast<const void*>(window.get()),
-                     window->workspaceID(), window->isHidden());
-        onWindowCreatedTiling(window);
-    }
-
-    const auto monitor = CanvasLayoutInternal::visible_monitor_for_workspace(workspace);
-    if (!monitor) {
-        spdlog::debug("onEnable: no visible monitor for instance={} workspace={}",
-                      static_cast<const void*>(this), workspace->m_id);
-        return;
-    }
-
-    relayoutCanvas(monitor, !workspace->m_isSpecialWorkspace);
-    debugVerifyLaneCache();
-}
-
-void CanvasLayout::onDisable() {
-    m_focusCallback = nullptr;
-    m_workspaceActiveCallback = nullptr;
-    clear_lanes(lanes);
-    activeLane = nullptr;
-    laneByWindow.clear();
-    resetHandoffState();
-    specialEphemeralLaneRestorePending = false;
-    debugVerifyLaneCache();
-}
-
 Vector2D CanvasLayout::predictSizeForNewWindowTiled() {
+    ensureWorkspaceRuntime();
+
     auto monitor = monitorFromPointingOrCursor();
     if (!monitor)
         return {};

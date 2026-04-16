@@ -9,6 +9,7 @@
 #include "layout.h"
 
 void CanvasLayout::prepareForOverviewSnapshot() {
+    ensureWorkspaceRuntime();
     prepareForActionContext();
 
     const auto workspace = getCanvasWorkspace();

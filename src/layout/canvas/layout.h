@@ -47,6 +47,9 @@ struct CanvasOverviewSnapshot {
  */
 class CanvasLayout : public Layout::ITiledAlgorithm {
 public:
+    CanvasLayout();
+    ~CanvasLayout() override;
+
     // Public hooks required by Hyprland's tiled algorithm interface.
     void                             newTarget(SP<Layout::ITarget> target) override;
     void                             movedTarget(SP<Layout::ITarget> target, std::optional<Vector2D> focalPoint = std::nullopt) override;
@@ -59,10 +62,6 @@ public:
     void                             swapTargets(SP<Layout::ITarget> a, SP<Layout::ITarget> b) override;
     void                             moveTargetInDirection(SP<Layout::ITarget> t, Math::eDirection direction, bool silent = false) override;
 
-    // Internal compatibility helpers used by LayoutAlgorithm dispatch and
-    // legacy callback paths.
-    void onEnable();
-    void onDisable();
     // Called when a tiled window is first mapped.
     void onWindowCreatedTiling(PHLWINDOW, Math::eDirection = Math::DIRECTION_DEFAULT);
     // Return true if the layout currently manages this window.
@@ -112,6 +111,10 @@ public:
     void marks_reset();
 
 private:
+    // Disconnect listeners and drop all per-workspace model state.
+    void resetRuntimeState();
+    // Ensure workspace-bound listeners are attached for the current canvas workspace.
+    void ensureWorkspaceRuntime();
     // Resolve the workspace that owns this canvas instance.
     PHLWORKSPACE getCanvasWorkspace() const;
     // Return the currently active lane, defaulting to the first lane when needed.
@@ -213,6 +216,8 @@ private:
     CHyprSignalListener m_focusCallback;
     // Workspace-active listener used to observe special workspace hide/show transitions.
     CHyprSignalListener m_workspaceActiveCallback;
+    // Workspace id currently bound to the workspace-active listener.
+    WORKSPACEID workspaceRuntimeId = WORKSPACE_INVALID;
     // Currently active lane inside this canvas.
     ListNode<Lane *> *activeLane = nullptr;
     // Ordered lanes that make up the current canvas.
