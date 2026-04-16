@@ -404,6 +404,9 @@ void CanvasLayout::finalizeLocalFocusMove(int workspace, Direction direction, La
 void CanvasLayout::move_focus(int workspace, Direction direction)
 {
     static auto* const *focus_wrap = (Hyprlang::INT* const *)HyprlandAPI::getConfigValue(PHANDLE, "plugin:scroller:focus_wrap")->getDataStaticPtr();
+    // Phase 1: snapshot the current lane/window/monitor state before any move.
+    // Both local focus changes and cross-monitor handoff decisions depend on
+    // the same source state, so keep that snapshot stable for the whole route.
     if (CanvasLayoutInternal::should_sync_workspace_focus_before_move(activeLane))
         syncActiveStateFromWorkspaceFocus();
     auto lane = getActiveLane();
@@ -456,6 +459,8 @@ void CanvasLayout::move_focus(int workspace, Direction direction)
         return;
     }
 
+    // Phase 2: lane-axis routing stays pure until the final action dispatch so
+    // the empty-lane, adjacent-lane, and cross-monitor cases remain unit-testable.
     // Lane-axis navigation goes through a pure routing plan so the tricky
     // combination of empty ephemeral lanes, adjacent lanes, and cross-monitor
     // exits stays readable and unit-testable.

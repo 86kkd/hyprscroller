@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "core/direction.h"
+#include "core/fit_size.h"
 #include "core/interval.h"
 #include "core/layout_math.h"
 #include "core/monitor_geometry.h"
@@ -63,6 +64,11 @@ struct FakeOwner {
     bool owns(int key) const {
         return std::find(keys.begin(), keys.end(), key) != keys.end();
     }
+};
+
+struct FakeFitItem {
+    double span = 0.0;
+    bool   visible = false;
 };
 
 void expect_true(bool condition, std::string_view message) {
@@ -565,6 +571,73 @@ void test_owner_index() {
                 "owner index clear removes every cached key");
 }
 
+void test_fit_size_helpers() {
+    FakeFitItem itemA{.span = 10.0, .visible = false};
+    FakeFitItem itemB{.span = 20.0, .visible = true};
+    FakeFitItem itemC{.span = 30.0, .visible = true};
+    FakeFitItem itemD{.span = 40.0, .visible = false};
+    List<FakeFitItem *> items;
+    items.push_back(&itemA);
+    items.push_back(&itemB);
+    items.push_back(&itemC);
+    items.push_back(&itemD);
+
+    auto *active = items.first()->next()->next();
+    const auto isVisible = [](ListNode<FakeFitItem *> *node) {
+        return node && node->data() && node->data()->visible;
+    };
+
+    const auto [activeFrom, activeTo] = ScrollerCore::select_fit_size_range(
+        FitSize::Active, items.first(), items.last(), active, isVisible);
+    expect_true(activeFrom == active && activeTo == active,
+                "fit-size helper selects only the active node for active mode");
+
+    const auto [visibleFrom, visibleTo] = ScrollerCore::select_fit_size_range(
+        FitSize::Visible, items.first(), items.last(), active, isVisible);
+    expect_true(visibleFrom == items.first()->next(),
+                "fit-size helper finds the first visible node");
+    expect_true(visibleTo == items.last()->prev(),
+                "fit-size helper finds the last visible node");
+
+    const auto [toBegFrom, toBegTo] = ScrollerCore::select_fit_size_range(
+        FitSize::ToBeg, items.first(), items.last(), active, isVisible);
+    expect_true(toBegFrom == items.first() && toBegTo == active,
+                "fit-size helper keeps the head-to-active range");
+
+    const auto normalized = ScrollerCore::normalize_fit_size_range(
+        visibleFrom,
+        visibleTo,
+        100.0,
+        [](ListNode<FakeFitItem *> *node) {
+            return node->data()->span;
+        },
+        [](ListNode<FakeFitItem *> *node, double scaledSpan) {
+            node->data()->span = scaledSpan;
+        });
+    expect_true(normalized, "fit-size helper normalizes non-empty ranges");
+    expect_near(itemB.span, 40.0, 1e-9,
+                "fit-size helper preserves proportional span for the first visible node");
+    expect_near(itemC.span, 60.0, 1e-9,
+                "fit-size helper preserves proportional span for the second visible node");
+
+    FakeFitItem zeroA{.span = 0.0, .visible = true};
+    FakeFitItem zeroB{.span = 0.0, .visible = true};
+    List<FakeFitItem *> zeros;
+    zeros.push_back(&zeroA);
+    zeros.push_back(&zeroB);
+    expect_true(!ScrollerCore::normalize_fit_size_range(
+                    zeros.first(),
+                    zeros.last(),
+                    80.0,
+                    [](ListNode<FakeFitItem *> *node) {
+                        return node->data()->span;
+                    },
+                    [](ListNode<FakeFitItem *> *node, double scaledSpan) {
+                        node->data()->span = scaledSpan;
+                    }),
+                "fit-size helper rejects zero-total ranges");
+}
+
 void test_list_move_only() {
     static_assert(!std::is_copy_constructible_v<List<int>>);
     static_assert(!std::is_copy_assignable_v<List<int>>);
@@ -664,6 +737,7 @@ int main() {
     test_route_logic();
     test_dispatch_logic();
     test_owner_index();
+    test_fit_size_helpers();
     test_list_move_only();
     test_overview_target_selection_across_monitors();
     test_overview_empty_target_region_selection();

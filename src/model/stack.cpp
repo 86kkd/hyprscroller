@@ -23,6 +23,7 @@
 #include <hyprland/src/layout/target/Target.hpp>
 
 #include "../core/interval.h"
+#include "../core/fit_size.h"
 #include "../core/layout_profile.h"
 #include "../core/layout_math.h"
 #include "../core/monitor_geometry_runtime.h"
@@ -727,59 +728,30 @@ void Stack::update_width(StackWidth cwidth, double maxw, double maxh) {
 // Resize a requested window range so it fills the current stack viewport.
 void Stack::fit_size(FitSize fitsize, const Vector2D &gap_x, double gap) {
     reorder = Reorder::Auto;
-    ListNode<Window *> *from = nullptr;
-    ListNode<Window *> *to = nullptr;
-    switch (fitsize) {
-    case FitSize::Active:
-        from = to = active;
-        break;
-    case FitSize::Visible:
-        for (auto w = windows.first(); w != nullptr; w = w->next()) {
-            Window *win = w->data();
-            if (is_window_intersect_viewport(win, geom, mode)) {
-                from = w;
-                break;
-            }
-        }
-        for (auto w = windows.last(); w != nullptr; w = w->prev()) {
-            Window *win = w->data();
-            if (is_window_intersect_viewport(win, geom, mode)) {
-                to = w;
-                break;
-            }
-        }
-        break;
-    case FitSize::All:
-        from = windows.first();
-        to = windows.last();
-        break;
-    case FitSize::ToEnd:
-        from = active;
-        to = windows.last();
-        break;
-    case FitSize::ToBeg:
-        from = windows.first();
-        to = active;
-        break;
-    default:
+    const auto [from, to] = ScrollerCore::select_fit_size_range(
+        fitsize,
+        windows.first(),
+        windows.last(),
+        active,
+        [&](ListNode<Window *> *node) {
+            return node && is_window_intersect_viewport(node->data(), geom, mode);
+        });
+    if (!ScrollerCore::normalize_fit_size_range(
+            from,
+            to,
+            stack_local_span(geom, mode),
+            [](ListNode<Window *> *node) {
+                return node->data()->get_geom_h();
+            },
+            [](ListNode<Window *> *node, double scaledSpan) {
+                auto *window = node->data();
+                window->set_height_free();
+                window->set_geom_h(scaledSpan);
+            }))
         return;
-    }
 
-    if (from != nullptr && to != nullptr) {
-        double total = 0.0;
-        for (auto c = from; c != to->next(); c = c->next()) {
-            total += c->data()->get_geom_h();
-        }
-        if (total <= 0.0)
-            return;
-        for (auto c = from; c != to->next(); c = c->next()) {
-            Window *win = c->data();
-            win->set_height_free();
-            win->set_geom_h(win->get_geom_h() / total * stack_local_span(geom, mode));
-        }
-        from->data()->set_geom_y(stack_local_origin(geom, mode));
-        adjust_windows(from, gap_x, gap);
-    }
+    from->data()->set_geom_y(stack_local_origin(geom, mode));
+    adjust_windows(from, gap_x, gap);
 }
 
 // Shift windows around the anchor window and then write the resulting geometry
@@ -809,6 +781,10 @@ void Stack::adjust_windows(ListNode<Window *> *win, const Vector2D &gap_x, doubl
     const auto reservedBefore = std::max(0.0, stack_local_origin(geom, mode) - fullStart);
     const auto reservedAfter = std::max(0.0, fullEnd - local_viewport_end(geom, mode));
 
+    // When the stack viewport starts after reserved monitor space, keep windows
+    // that are already completely outside the viewport offset by that reserved
+    // amount. This preserves their relative scroll positions instead of
+    // snapping them back toward the visible viewport on every relayout.
     size_t shiftedAbove = 0;
     size_t shiftedBelow = 0;
     for (auto w = windows.first(); w != nullptr; w = w->next()) {
@@ -841,6 +817,7 @@ void Stack::adjust_windows(ListNode<Window *> *win, const Vector2D &gap_x, doubl
                       shiftedBelow);
     }
 
+    // Commit the logical window geometry back into Hyprland's live rectangles.
     for (auto w = windows.first(); w != nullptr; w = w->next()) {
         PHLWINDOW window = w->data()->ptr().lock();
         if (!window)

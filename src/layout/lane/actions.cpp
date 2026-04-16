@@ -11,6 +11,8 @@
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/helpers/Monitor.hpp>
 
+#include "../../core/fit_size.h"
+#include "../../core/interval.h"
 #include "../../core/layout_profile.h"
 
 using ScrollerModel::Reorder;
@@ -456,70 +458,39 @@ void Lane::expel_window_right() {
 
 // Fit stack sizes to the requested visible range along the lane's primary axis.
 void Lane::fit_size(FitSize fitsize) {
-    ListNode<Stack *> *from = nullptr;
-    ListNode<Stack *> *to = nullptr;
     const auto visibleStart = mode == Mode::Column ? max.y : max.x;
     const auto visibleEnd = mode == Mode::Column ? max.y + max.h : max.x + max.w;
-    switch (fitsize) {
-    case FitSize::Active:
-        from = to = active;
-        break;
-    case FitSize::Visible:
-        for (auto c = stacks.first(); c != nullptr; c = c->next()) {
-            Stack *col = c->data();
-            const auto c0 = mode == Mode::Column ? col->get_geom_y() : col->get_geom_x();
-            const auto c1 = c0 + (mode == Mode::Column ? col->get_geom_h() : col->get_geom_w());
-            if ((c0 < visibleEnd && c0 >= visibleStart) ||
-                (c1 > visibleStart && c1 <= visibleEnd) ||
-                (c0 < visibleStart && c1 >= visibleEnd)) {
-                from = c;
-                break;
-            }
-        }
-        for (auto c = stacks.last(); c != nullptr; c = c->prev()) {
-            Stack *col = c->data();
-            const auto c0 = mode == Mode::Column ? col->get_geom_y() : col->get_geom_x();
-            const auto c1 = c0 + (mode == Mode::Column ? col->get_geom_h() : col->get_geom_w());
-            if ((c0 < visibleEnd && c0 >= visibleStart) ||
-                (c1 > visibleStart && c1 <= visibleEnd) ||
-                (c0 < visibleStart && c1 >= visibleEnd)) {
-                to = c;
-                break;
-            }
-        }
-        break;
-    case FitSize::All:
-        from = stacks.first();
-        to = stacks.last();
-        break;
-    case FitSize::ToEnd:
-        from = active;
-        to = stacks.last();
-        break;
-    case FitSize::ToBeg:
-        from = stacks.first();
-        to = active;
-        break;
-    default:
+    const auto [from, to] = ScrollerCore::select_fit_size_range(
+        fitsize,
+        stacks.first(),
+        stacks.last(),
+        active,
+        [&](ListNode<Stack *> *node) {
+            auto *stack = node ? node->data() : nullptr;
+            if (!stack)
+                return false;
+
+            const auto spanStart = mode == Mode::Column ? stack->get_geom_y() : stack->get_geom_x();
+            const auto spanEnd = spanStart + (mode == Mode::Column ? stack->get_geom_h() : stack->get_geom_w());
+            return ScrollerCore::Interval::intersects(spanStart, spanEnd, visibleStart, visibleEnd);
+        });
+    if (!ScrollerCore::normalize_fit_size_range(
+            from,
+            to,
+            mode == Mode::Column ? max.h : max.w,
+            [&](ListNode<Stack *> *node) {
+                return mode == Mode::Column ? node->data()->get_geom_h() : node->data()->get_geom_w();
+            },
+            [&](ListNode<Stack *> *node, double scaledSpan) {
+                auto *stack = node->data();
+                stack->set_width_free();
+                if (mode == Mode::Column)
+                    stack->set_geom_h(scaledSpan);
+                else
+                    stack->set_geom_w(scaledSpan);
+            }))
         return;
-    }
 
-    if (from != nullptr && to != nullptr) {
-        double total = 0.0;
-        for (auto c = from; c != to->next(); c = c->next())
-            total += mode == Mode::Column ? c->data()->get_geom_h() : c->data()->get_geom_w();
-        if (total <= 0.0)
-            return;
-
-        for (auto c = from; c != to->next(); c = c->next()) {
-            Stack *col = c->data();
-            col->set_width_free();
-            if (mode == Mode::Column)
-                col->set_geom_h(col->get_geom_h() / total * max.h);
-            else
-                col->set_geom_w(col->get_geom_w() / total * max.w);
-        }
-        from->data()->set_geom_pos(max.x, max.y);
-        adjust_stacks(from);
-    }
+    from->data()->set_geom_pos(max.x, max.y);
+    adjust_stacks(from);
 }

@@ -17,6 +17,8 @@ namespace ScrollerCore {
 template <typename Key, typename Owner>
 class OwnerIndex {
 public:
+    // Lookup behaves like a cache read for callers, but eagerly evicts stale
+    // entries so later reads do not keep paying the validation cost.
     Owner *find_valid(const Key &key, auto &&validate) const {
         if (const auto it = owners_.find(key); it != owners_.end()) {
             auto *owner = it->second;

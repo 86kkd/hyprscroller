@@ -58,6 +58,9 @@ bool CanvasLayout::handoffMoveWindowAcrossMonitor(int workspace, Direction direc
     if (!targetLayout)
         return false;
 
+    // Phase 1: resolve the destination anchor before we detach ownership from
+    // the source lane, so the insertion point still reflects the target
+    // canvas's current focus/geometry state.
     auto *targetLane = static_cast<Lane *>(nullptr);
     const auto targetAnchorWindow = resolveCrossMonitorFocusTarget(
         targetLayout,
@@ -74,6 +77,9 @@ bool CanvasLayout::handoffMoveWindowAcrossMonitor(int workspace, Direction direc
         return true;
 
     const auto insertDirection = ScrollerCore::opposite_direction(direction);
+    // Phase 2: tell target callbacks that the backend workspace move is part of
+    // an explicit scroller handoff. That keeps target hooks from auto-claiming
+    // the window before we finish reinserting the transferred payload.
     // Tell target callbacks that this window is being rehomed manually. The
     // Hyprland dispatcher still moves the backend window across workspaces, but
     // scroller keeps ownership transfer explicit so it can preserve lane/stack
@@ -91,6 +97,9 @@ bool CanvasLayout::handoffMoveWindowAcrossMonitor(int workspace, Direction direc
         return false;
     }
 
+    // Phase 3: re-resolve the destination lane after Hyprland has moved the
+    // backend window, then consume the payload into the target lane and update
+    // both caches before any relayout runs.
     targetLane = targetAnchorWindow ? targetLayout->getLaneForWindow(targetAnchorWindow) : nullptr;
     if (!targetLane)
         targetLane = targetLayout->getActiveLane();
@@ -107,6 +116,8 @@ bool CanvasLayout::handoffMoveWindowAcrossMonitor(int workspace, Direction direc
     targetLayout->forgetManualCrossMonitorInsertion(currentWindow);
     targetLayout->setActiveLane(targetLane);
 
+    // Phase 4: prune the emptied source lane, relayout both canvases, and end
+    // with focus on the transferred compositor window.
     if (!dropEmptyLane(sourceLaneNode, nullptr, sourceMonitor))
         relayoutVisibleCanvas(sourceMonitor);
 
