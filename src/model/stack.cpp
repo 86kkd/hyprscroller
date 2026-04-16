@@ -25,6 +25,7 @@
 #include "../core/interval.h"
 #include "../core/layout_profile.h"
 #include "../core/layout_math.h"
+#include "../core/monitor_geometry_runtime.h"
 
 extern HANDLE PHANDLE;
 
@@ -800,10 +801,10 @@ void Stack::adjust_windows(ListNode<Window *> *win, const Vector2D &gap_x, doubl
 
     auto anchorWindow = win ? win->data()->ptr().lock() : nullptr;
     auto monitor = anchorWindow ? g_pCompositor->getMonitorFromID(anchorWindow->monitorID()) : nullptr;
-    const auto fullStart = monitor ? (mode == Mode::Column ? monitor->m_position.x : monitor->m_position.y)
-                                   : stack_local_origin(geom, mode);
+    const auto monitorBox = monitor ? ScrollerCore::logical_monitor_box(monitor) : ScrollerCore::Box{};
+    const auto fullStart = monitor ? (mode == Mode::Column ? monitorBox.x : monitorBox.y) : stack_local_origin(geom, mode);
     const auto fullEnd = monitor
-        ? fullStart + (mode == Mode::Column ? monitor->m_size.x : monitor->m_size.y)
+        ? (mode == Mode::Column ? monitorBox.x + monitorBox.w : monitorBox.y + monitorBox.h)
         : local_viewport_end(geom, mode);
     const auto reservedBefore = std::max(0.0, stack_local_origin(geom, mode) - fullStart);
     const auto reservedAfter = std::max(0.0, fullEnd - local_viewport_end(geom, mode));
@@ -812,16 +813,20 @@ void Stack::adjust_windows(ListNode<Window *> *win, const Vector2D &gap_x, doubl
     size_t shiftedBelow = 0;
     for (auto w = windows.first(); w != nullptr; w = w->next()) {
         auto *wdata = w->data();
+        const auto window = wdata->ptr().lock();
+        const auto border = window ? window->getRealBorderSize() : 0.0;
+        const auto gap0 = w == windows.first() ? 0.0 : gap;
+        const auto gap1 = w == windows.last() ? 0.0 : gap;
+        const auto rendered = ScrollerCore::rendered_local_interval(wdata->get_geom_y(), wdata->get_geom_h(), border, gap0, gap1);
         const auto boxStart = wdata->get_geom_y();
-        const auto boxEnd = boxStart + wdata->get_geom_h();
 
-        if (reservedBefore > 0.0 && boxEnd <= stack_local_origin(geom, mode)) {
+        if (reservedBefore > 0.0 && rendered.end <= stack_local_origin(geom, mode)) {
             wdata->set_geom_y(boxStart - reservedBefore);
             shiftedAbove++;
             continue;
         }
 
-        if (reservedAfter > 0.0 && boxStart >= local_viewport_end(geom, mode)) {
+        if (reservedAfter > 0.0 && rendered.start >= local_viewport_end(geom, mode)) {
             wdata->set_geom_y(boxStart + reservedAfter);
             shiftedBelow++;
         }

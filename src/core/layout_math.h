@@ -24,6 +24,12 @@ struct OverviewProjection {
     Hyprutils::Math::Vector2D offset = {};
 };
 
+// Final client interval on the stack-local axis after borders and gaps are applied.
+struct LocalRenderInterval {
+    double start = 0.0;
+    double end = 0.0;
+};
+
 // Choose the horizontal anchor that keeps the active stack and a useful neighbor visible.
 double choose_anchor_x(bool has_next, bool has_prev, double active_width, double next_width,
                        double prev_width, double fallback_x, const Box &visible_box);
@@ -34,6 +40,10 @@ double choose_anchor_y(bool has_next, bool has_prev, double active_height, doubl
 
 // Center an inner span inside an outer span while preserving the outer origin.
 double center_span(double origin, double outer_span, double inner_span);
+
+// Compute the final client interval on the local axis after border and gap trimming.
+LocalRenderInterval rendered_local_interval(double local_pos, double local_size,
+                                            double border, double gap_before, double gap_after);
 
 // Compute the overview projection for a set of stack bounds inside the visible box.
 OverviewProjection compute_overview_projection(std::span<const OverviewRect> items,

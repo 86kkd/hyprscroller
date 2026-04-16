@@ -56,6 +56,20 @@ void set_stack_primary_position(Stack *stack, Mode mode, const ScrollerCore::Box
         stack->set_geom_pos(primary_pos, visible_box.y);
 }
 
+ScrollerCore::LocalRenderInterval stack_rendered_primary_interval(Stack *stack, Mode mode,
+                                                                  double gap_before, double gap_after) {
+    if (!stack)
+        return {};
+
+    const auto activeWindow = stack->get_active_window();
+    const auto border = activeWindow ? activeWindow->getRealBorderSize() : 0.0;
+    return ScrollerCore::rendered_local_interval(stack_primary_origin(stack, mode),
+                                                 stack_primary_span(stack, mode),
+                                                 border,
+                                                 gap_before,
+                                                 gap_after);
+}
+
 namespace viewport {
 // Return true when a stack would intersect the visible viewport at a projected position.
 bool projected_stack_intersects_visible_box(const Stack *stack, const double projected_pos,
@@ -338,6 +352,43 @@ void Lane::adjust_stacks(ListNode<Stack *> *stack) {
     }
 
     stack->data()->set_init();
+
+    const auto viewportStart = visible_primary_origin(max, mode);
+    const auto viewportEnd = visible_primary_end(max, mode);
+    const auto fullStart = visible_primary_origin(full, mode);
+    const auto fullEnd = visible_primary_end(full, mode);
+    const auto reservedBefore = std::max(0.0, viewportStart - fullStart);
+    const auto reservedAfter = std::max(0.0, fullEnd - viewportEnd);
+    size_t shiftedBefore = 0;
+    size_t shiftedAfter = 0;
+
+    for (auto col = stacks.first(); col != nullptr; col = col->next()) {
+        auto gap0 = col == stacks.first() ? 0.0 : gap;
+        auto gap1 = col == stacks.last() ? 0.0 : gap;
+        const auto rendered = stack_rendered_primary_interval(col->data(), mode, gap0, gap1);
+        const auto primaryPos = stack_primary_origin(col->data(), mode);
+
+        if (reservedBefore > 0.0 && rendered.end <= viewportStart) {
+            set_stack_primary_position(col->data(), mode, max, primaryPos - reservedBefore);
+            shiftedBefore++;
+            continue;
+        }
+
+        if (reservedAfter > 0.0 && rendered.start >= viewportEnd) {
+            set_stack_primary_position(col->data(), mode, max, primaryPos + reservedAfter);
+            shiftedAfter++;
+        }
+    }
+
+    if (shiftedBefore > 0 || shiftedAfter > 0) {
+        spdlog::debug("lane_recalc_reserved_shift: active_window={} reserved_before={} reserved_after={} shifted_before={} shifted_after={} stacks={}",
+                      logging::active_window_ptr(active ? active->data() : nullptr),
+                      reservedBefore,
+                      reservedAfter,
+                      shiftedBefore,
+                      shiftedAfter,
+                      logging::summarize_stacks(stacks, mode));
+    }
 
     for (auto col = stacks.first(); col != nullptr; col = col->next()) {
         auto gap0 = col == stacks.first() ? 0.0 : gap;

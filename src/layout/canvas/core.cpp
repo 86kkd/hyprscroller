@@ -20,6 +20,7 @@
 
 #include "../../core/core.h"
 #include "../../core/layout_profile.h"
+#include "../../core/monitor_geometry_runtime.h"
 #include "../lane/lane.h"
 #include "layout.h"
 #include "internal.h"
@@ -99,18 +100,10 @@ CanvasLayoutInternal::CanvasBounds CanvasLayoutInternal::compute_canvas_bounds(P
 
     const auto gaps_in = PGAPSIN->m_top;
     const auto gaps_out = PGAPSOUT->m_top;
-    const auto reserved = monitor->m_reservedArea;
-    const auto gapOutTopLeft = Vector2D(reserved.left(), reserved.top());
-    const auto gapOutBottomRight = Vector2D(reserved.right(), reserved.bottom());
-    const auto size = Vector2D(monitor->m_size.x, monitor->m_size.y);
-    const auto pos = Vector2D(monitor->m_position.x, monitor->m_position.y);
 
     return {
-        .full = Box(pos, size),
-        .max = Box(pos.x + gapOutTopLeft.x + gaps_out,
-                   pos.y + gapOutTopLeft.y + gaps_out,
-                   size.x - gapOutTopLeft.x - gapOutBottomRight.x - 2 * gaps_out,
-                   size.y - gapOutTopLeft.y - gapOutBottomRight.y - 2 * gaps_out),
+        .full = ScrollerCore::logical_monitor_box(monitor),
+        .max = ScrollerCore::logical_workarea_box(monitor, gaps_out),
         .gap = static_cast<int>(gaps_in),
     };
 }
@@ -552,8 +545,10 @@ std::optional<Vector2D> CanvasLayout::predictSizeForNewTarget()
         return {};
 
     auto lane = getActiveLane();
-    if (!lane)
-        return Vector2D(monitor->m_size.x, monitor->m_size.y);
+    if (!lane) {
+        const auto bounds = CanvasLayoutInternal::compute_canvas_bounds(monitor);
+        return Vector2D(bounds.max.w, bounds.max.h);
+    }
 
     return lane->predict_window_size();
 }
@@ -748,8 +743,10 @@ Vector2D CanvasLayout::predictSizeForNewWindowTiled() {
         return {};
 
     auto lane = getActiveLane();
-    if (lane == nullptr)
-        return monitor->m_size;
+    if (lane == nullptr) {
+        const auto bounds = CanvasLayoutInternal::compute_canvas_bounds(monitor);
+        return Vector2D(bounds.max.w, bounds.max.h);
+    }
 
     return lane->predict_window_size();
 }

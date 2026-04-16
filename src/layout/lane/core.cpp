@@ -6,6 +6,7 @@
 #include <hyprland/src/Compositor.hpp>
 
 #include "../../core/layout_profile.h"
+#include "../../core/monitor_geometry_runtime.h"
 
 Lane::Lane(PHLWINDOW window)
     : ephemeral(false), gap(0), reorder(Reorder::Auto), mode(Mode::Row), active(nullptr) {
@@ -13,7 +14,7 @@ Lane::Lane(PHLWINDOW window)
     if (!monitor)
         return;
 
-    mode = ScrollerCore::default_mode_for_extent(monitor->m_size.x, monitor->m_size.y);
+    mode = ScrollerCore::default_mode_for_monitor(monitor);
     update_sizes(monitor);
 }
 
@@ -28,7 +29,7 @@ Lane::Lane(Stack *stack)
     const auto window = stack ? stack->get_active_window() : nullptr;
     const auto monitor = window ? g_pCompositor->getMonitorFromID(window->monitorID()) : nullptr;
     if (monitor) {
-        mode = ScrollerCore::default_mode_for_extent(monitor->m_size.x, monitor->m_size.y);
+        mode = ScrollerCore::default_mode_for_monitor(monitor);
         update_sizes(monitor);
     }
 

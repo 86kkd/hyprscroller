@@ -18,6 +18,7 @@
 #include <hyprland/src/render/Renderer.hpp>
 #include <spdlog/spdlog.h>
 
+#include "../../core/monitor_geometry_runtime.h"
 #include "internal.h"
 
 namespace {
@@ -49,10 +50,11 @@ double primary_cross_monitor_score(PHLWINDOW window, PHLMONITOR monitor, Directi
     const auto window_right = window->m_position.x + window->m_size.x;
     const auto window_top = window->m_position.y;
     const auto window_bottom = window->m_position.y + window->m_size.y;
-    const auto monitor_left = monitor->m_position.x;
-    const auto monitor_right = monitor->m_position.x + monitor->m_size.x;
-    const auto monitor_top = monitor->m_position.y;
-    const auto monitor_bottom = monitor->m_position.y + monitor->m_size.y;
+    const auto monitor_box = ScrollerCore::logical_monitor_box(monitor);
+    const auto monitor_left = monitor_box.x;
+    const auto monitor_right = monitor_box.x + monitor_box.w;
+    const auto monitor_top = monitor_box.y;
+    const auto monitor_bottom = monitor_box.y + monitor_box.h;
 
     switch (direction) {
         case Direction::Left:

@@ -44,6 +44,13 @@ double center_span(double origin, double outer_span, double inner_span) {
     return origin + 0.5 * (outer_span - inner_span);
 }
 
+LocalRenderInterval rendered_local_interval(double local_pos, double local_size,
+                                            double border, double gap_before, double gap_after) {
+    const auto start = local_pos + border + gap_before;
+    const auto span = std::max(local_size - 2.0 * border - gap_before - gap_after, 1.0);
+    return {.start = start, .end = start + span};
+}
+
 OverviewProjection compute_overview_projection(std::span<const OverviewRect> items,
                                                const Box &visible_box) {
     if (items.empty())

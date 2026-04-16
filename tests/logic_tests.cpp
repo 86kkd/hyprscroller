@@ -9,6 +9,7 @@
 #include "core/direction.h"
 #include "core/interval.h"
 #include "core/layout_math.h"
+#include "core/monitor_geometry.h"
 #include "core/layout_profile.h"
 #include "overview/logic.h"
 #include "overview/orientation_math.h"
@@ -145,6 +146,10 @@ void test_anchor_selection() {
                 225.0, 1e-9, "center_span preserves the outer origin when centering");
     expect_near(ScrollerCore::center_span(-320.0, 640.0, 320.0),
                 -160.0, 1e-9, "center_span handles non-zero negative origins");
+
+    const auto rendered = ScrollerCore::rendered_local_interval(-1855.0, 1908.0, 4.0, 0.0, 16.0);
+    expect_near(rendered.start, -1851.0, 1e-9, "rendered_local_interval applies border and leading gap to start");
+    expect_near(rendered.end, 33.0, 1e-9, "rendered_local_interval matches final client bottom after border and trailing gap");
 }
 
 void test_overview_projection() {
@@ -231,6 +236,41 @@ void test_layout_profile() {
     const auto portraitPrediction = ScrollerCore::predict_window_size(Mode::Column, {0.0, 0.0, 800.0, 600.0});
     expect_near(portraitPrediction.x, 800.0, 1e-9, "column mode prediction keeps full width");
     expect_near(portraitPrediction.y, 300.0, 1e-9, "column mode prediction halves height");
+}
+
+void test_monitor_geometry() {
+    const auto portraitSize = ScrollerCore::logical_monitor_size({3840.0, 2160.0},
+                                                                 {2160.0, 3840.0},
+                                                                 WL_OUTPUT_TRANSFORM_270);
+    expect_near(portraitSize.x, 2160.0, 1e-9, "portrait logical width uses transformed width");
+    expect_near(portraitSize.y, 3840.0, 1e-9, "portrait logical height uses transformed height");
+
+    const ScrollerCore::ReservedEdges portraitReservedRaw{.top = 37.0, .right = 0.0, .bottom = 0.0, .left = 0.0};
+    const auto portraitReserved = ScrollerCore::logical_reserved_edges({3840.0, 2160.0},
+                                                                       {2160.0, 3840.0},
+                                                                       WL_OUTPUT_TRANSFORM_270,
+                                                                       portraitReservedRaw);
+    expect_near(portraitReserved.top, 37.0, 1e-9, "portrait logical reserve keeps the semantic top edge");
+    expect_near(portraitReserved.right, 0.0, 1e-9, "transform 270 clears logical right reserve when none exists");
+    expect_near(portraitReserved.bottom, 0.0, 1e-9, "transform 270 keeps logical bottom clear");
+    expect_near(portraitReserved.left, 0.0, 1e-9, "transform 270 keeps logical left clear");
+
+    const auto portraitWorkarea = ScrollerCore::logical_workarea_box({1680.0, 0.0},
+                                                                     {3840.0, 2160.0},
+                                                                     {2160.0, 3840.0},
+                                                                     WL_OUTPUT_TRANSFORM_270,
+                                                                     portraitReservedRaw,
+                                                                     0.0);
+    expect_near(portraitWorkarea.x, 1680.0, 1e-9, "portrait workarea keeps transformed monitor x origin");
+    expect_near(portraitWorkarea.y, 37.0, 1e-9, "portrait workarea starts below the transformed top reserve");
+    expect_near(portraitWorkarea.w, 2160.0, 1e-9, "portrait workarea width matches transformed width");
+    expect_near(portraitWorkarea.h, 3803.0, 1e-9, "portrait workarea height subtracts transformed reserve");
+
+    const auto fallbackSize = ScrollerCore::logical_monitor_size({3840.0, 2160.0},
+                                                                 {0.0, 0.0},
+                                                                 WL_OUTPUT_TRANSFORM_270);
+    expect_near(fallbackSize.x, 2160.0, 1e-9, "missing transformed size still swaps portrait axes");
+    expect_near(fallbackSize.y, 3840.0, 1e-9, "missing transformed size still preserves portrait height");
 }
 
 void test_monitor_space_orientation() {
@@ -467,6 +507,7 @@ int main() {
     test_anchor_selection();
     test_overview_projection();
     test_layout_profile();
+    test_monitor_geometry();
     test_monitor_space_orientation();
     test_handoff_state();
     test_route_logic();

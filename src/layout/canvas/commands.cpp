@@ -14,6 +14,7 @@
 
 #include "../../core/direction.h"
 #include "../../core/layout_profile.h"
+#include "../../core/monitor_geometry_runtime.h"
 #include "../lane/lane.h"
 #include "layout.h"
 #include "internal.h"
@@ -90,7 +91,7 @@ bool CanvasLayout::handoffMoveWindowAcrossMonitor(int workspace, Direction direc
     if (!targetLane)
         targetLane = targetLayout->getActiveLane();
     if (!targetLane) {
-        const auto targetMode = ScrollerCore::default_mode_for_extent(targetMonitor->m_size.x, targetMonitor->m_size.y);
+        const auto targetMode = ScrollerCore::default_mode_for_monitor(targetMonitor);
         targetLane = targetLayout->ensureActiveLane(targetMonitor, targetMode);
     }
 
