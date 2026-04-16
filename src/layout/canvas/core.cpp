@@ -166,22 +166,24 @@ void CanvasLayout::rememberWindowLane(PHLWINDOW window, Lane *lane) {
         return;
     }
 
-    laneByWindow[reinterpret_cast<uintptr_t>(window.get())] = lane;
+    laneByWindow.remember(reinterpret_cast<uintptr_t>(window.get()), lane);
 }
 
 void CanvasLayout::forgetWindowLane(PHLWINDOW window) {
     if (!window)
         return;
 
-    laneByWindow.erase(reinterpret_cast<uintptr_t>(window.get()));
+    laneByWindow.forget(reinterpret_cast<uintptr_t>(window.get()));
 }
 
 void CanvasLayout::rememberLaneWindows(Lane *lane) {
     if (!lane)
         return;
 
-    lane->for_each_window([&](PHLWINDOW window) {
-        rememberWindowLane(window, lane);
+    laneByWindow.remember_owner(lane, [&](auto &&remember) {
+        lane->for_each_window([&](PHLWINDOW window) {
+            remember(reinterpret_cast<uintptr_t>(window.get()));
+        });
     });
 }
 
@@ -189,32 +191,19 @@ void CanvasLayout::forgetLaneWindows(Lane *lane) {
     if (!lane)
         return;
 
-    for (auto it = laneByWindow.begin(); it != laneByWindow.end();) {
-        if (it->second == lane)
-            it = laneByWindow.erase(it);
-        else
-            ++it;
-    }
+    laneByWindow.forget_owner(lane);
 }
 
 void CanvasLayout::debugVerifyLaneCache() const {
 #ifndef NDEBUG
-    std::unordered_map<uintptr_t, Lane *> expected;
-    for (auto laneNode = lanes.first(); laneNode != nullptr; laneNode = laneNode->next()) {
-        auto *lane = laneNode->data();
-        lane->for_each_window([&](PHLWINDOW window) {
-            const auto [it, inserted] = expected.emplace(reinterpret_cast<uintptr_t>(window.get()), lane);
-            assert(inserted);
-            assert(it->second == lane);
-        });
-    }
-
-    assert(expected.size() == laneByWindow.size());
-    for (const auto &[key, lane] : expected) {
-        const auto it = laneByWindow.find(key);
-        assert(it != laneByWindow.end());
-        assert(it->second == lane);
-    }
+    assert(laneByWindow.matches_expected([&](auto &&addExpected) {
+        for (auto laneNode = lanes.first(); laneNode != nullptr; laneNode = laneNode->next()) {
+            auto *lane = laneNode->data();
+            lane->for_each_window([&](PHLWINDOW window) {
+                addExpected(reinterpret_cast<uintptr_t>(window.get()), lane);
+            });
+        }
+    }));
 #endif
 }
 
@@ -289,13 +278,10 @@ Lane *CanvasLayout::getLaneForWindow(PHLWINDOW window) {
         return nullptr;
 
     const auto key = reinterpret_cast<uintptr_t>(window.get());
-    if (const auto it = laneByWindow.find(key); it != laneByWindow.end()) {
-        auto *cachedLane = it->second;
-        if (cachedLane && getLaneNode(cachedLane) && cachedLane->has_window(window))
-            return cachedLane;
-
-        laneByWindow.erase(it);
-    }
+    if (auto *cachedLane = laneByWindow.find_valid(key, [&](Lane *owner) {
+            return owner && getLaneNode(owner) && owner->has_window(window);
+        }))
+        return cachedLane;
 
     for (auto lane = lanes.first(); lane != nullptr; lane = lane->next()) {
         if (lane->data()->has_window(window)) {

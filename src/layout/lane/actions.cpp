@@ -13,6 +13,10 @@
 
 #include "../../core/layout_profile.h"
 
+using ScrollerModel::Reorder;
+using ScrollerModel::Stack;
+using ScrollerModel::StackWidth;
+
 // Insert a new window into the active lane as a peer stack.
 void Lane::add_active_window(PHLWINDOW window) {
     const bool singleWindowWorkspace = stacks.size() == 1 && stacks.first()->data()->size() == 1;

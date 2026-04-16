@@ -25,6 +25,11 @@
 #include "../../core/layout_profile.h"
 #include "../canvas/internal.h"
 
+using ScrollerCore::Box;
+using ScrollerModel::Reorder;
+using ScrollerModel::Stack;
+using ScrollerModel::StackWidth;
+
 namespace {
 double stack_primary_origin(const Stack *stack, Mode mode) {
     return mode == Mode::Column ? stack->get_geom_y() : stack->get_geom_x();

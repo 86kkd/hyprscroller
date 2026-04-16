@@ -13,13 +13,13 @@
 #include <optional>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 #include <utility>
 
 #include <hyprland/src/layout/algorithm/TiledAlgorithm.hpp>
 #include <hyprland/src/layout/target/Target.hpp>
 #include <hyprland/src/helpers/signal/Signal.hpp>
 
+#include "../../core/owner_index.h"
 #include "../../core/types.h"
 #include "../../list.h"
 #include "handoff_state.h"
@@ -223,7 +223,7 @@ private:
     // Ordered lanes that make up the current canvas.
     List<Lane *> lanes;
     // Cached window -> lane index used to avoid repeated whole-canvas scans.
-    std::unordered_map<uintptr_t, Lane *> laneByWindow;
+    ScrollerCore::OwnerIndex<uintptr_t, Lane> laneByWindow;
     // Concentrated one-shot focus and cross-monitor handoff state.
     HandoffState handoffState;
     // Remember whether a hidden special workspace needs to restore from a stale empty lane when shown again.

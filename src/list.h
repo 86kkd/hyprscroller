@@ -9,15 +9,16 @@
 #pragma once
 
 #include <algorithm>
+#include <utility>
 
 template<typename T> class List;
 
 template<typename T>
 class ListNode {
 public:
-    ListNode() : m_prev(nullptr), m_next(nullptr), m_data(nullptr) {}
-    ListNode(const T data) : m_prev(nullptr), m_next(nullptr), m_data(data) {}
-    ~ListNode() {}
+    ListNode() : m_prev(nullptr), m_next(nullptr), m_data{} {}
+    ListNode(T data) : m_prev(nullptr), m_next(nullptr), m_data(std::move(data)) {}
+    ~ListNode() = default;
 
     //const T &operator*() const { return m_data; }
     const T &data() const { return m_data; }
@@ -35,6 +36,22 @@ template<typename T>
 class List {
 public:
     List() : m_size(0), m_first(nullptr), m_last(nullptr) {}
+    List(const List &) = delete;
+    List &operator=(const List &) = delete;
+    List(List &&other) noexcept
+        : m_size(std::exchange(other.m_size, 0)),
+          m_first(std::exchange(other.m_first, nullptr)),
+          m_last(std::exchange(other.m_last, nullptr)) {}
+    List &operator=(List &&other) noexcept {
+        if (this == &other)
+            return *this;
+
+        clear();
+        m_size = std::exchange(other.m_size, 0);
+        m_first = std::exchange(other.m_first, nullptr);
+        m_last = std::exchange(other.m_last, nullptr);
+        return *this;
+    }
     ~List() {
         clear();
     }

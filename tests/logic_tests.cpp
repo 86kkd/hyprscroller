@@ -1,8 +1,10 @@
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -10,7 +12,9 @@
 #include "core/interval.h"
 #include "core/layout_math.h"
 #include "core/monitor_geometry.h"
+#include "core/owner_index.h"
 #include "core/layout_profile.h"
+#include "list.h"
 #include "overview/logic.h"
 #include "overview/orientation_math.h"
 #include "layout/canvas/dispatch_logic.h"
@@ -49,6 +53,15 @@ struct FakeDispatcherRuntime final : CanvasLayoutInternal::DispatcherRegistryRun
 
         invocations.emplace_back(dispatcher, std::string(arg));
         return true;
+    }
+};
+
+struct FakeOwner {
+    int              id = 0;
+    std::vector<int> keys;
+
+    bool owns(int key) const {
+        return std::find(keys.begin(), keys.end(), key) != keys.end();
     }
 };
 
@@ -512,6 +525,71 @@ void test_dispatch_logic() {
               "dispatcher helper does not record failed invocations");
 }
 
+void test_owner_index() {
+    ScrollerCore::OwnerIndex<int, FakeOwner> index;
+    FakeOwner stackA{.id = 1, .keys = {1, 2}};
+    FakeOwner stackB{.id = 2, .keys = {3}};
+
+    index.remember_owner(&stackA, [&](auto &&remember) {
+        for (const auto key : stackA.keys)
+            remember(key);
+    });
+    index.remember_owner(&stackB, [&](auto &&remember) {
+        for (const auto key : stackB.keys)
+            remember(key);
+    });
+
+    expect_true(index.find_valid(2, [&](FakeOwner *owner) { return owner && owner->owns(2); }) == &stackA,
+                "owner index returns the cached owner when it still owns the key");
+    expect_true(index.matches_expected([&](auto &&addExpected) {
+        addExpected(1, &stackA);
+        addExpected(2, &stackA);
+        addExpected(3, &stackB);
+    }), "owner index matches the expected owner mapping after initial population");
+
+    stackA.keys = {1};
+    expect_true(index.find_valid(2, [&](FakeOwner *owner) { return owner && owner->owns(2); }) == nullptr,
+                "owner index evicts stale cached keys when the owner no longer matches");
+    expect_true(index.matches_expected([&](auto &&addExpected) {
+        addExpected(1, &stackA);
+        addExpected(3, &stackB);
+    }), "owner index keeps unrelated keys after evicting one stale entry");
+
+    index.forget_owner(&stackA);
+    expect_true(index.matches_expected([&](auto &&addExpected) {
+        addExpected(3, &stackB);
+    }), "owner index can forget every key that still points at one owner");
+
+    index.clear();
+    expect_true(index.matches_expected([&](auto &&) {}),
+                "owner index clear removes every cached key");
+}
+
+void test_list_move_only() {
+    static_assert(!std::is_copy_constructible_v<List<int>>);
+    static_assert(!std::is_copy_assignable_v<List<int>>);
+    static_assert(std::is_move_constructible_v<List<int>>);
+    static_assert(std::is_move_assignable_v<List<int>>);
+
+    List<int> original;
+    original.push_back(1);
+    original.push_back(2);
+
+    List<int> moved(std::move(original));
+    expect_true(original.empty(), "moved-from list becomes empty after move construction");
+    expect_eq(moved.size(), std::size_t{2}, "move construction preserves list size");
+    expect_eq(moved.first()->data(), 1, "move construction preserves first node data");
+    expect_eq(moved.last()->data(), 2, "move construction preserves last node data");
+
+    List<int> assigned;
+    assigned.push_back(99);
+    assigned = std::move(moved);
+    expect_true(moved.empty(), "moved-from list becomes empty after move assignment");
+    expect_eq(assigned.size(), std::size_t{2}, "move assignment replaces the destination contents");
+    expect_eq(assigned.first()->data(), 1, "move assignment preserves first node data");
+    expect_eq(assigned.last()->data(), 2, "move assignment preserves last node data");
+}
+
 void test_overview_target_selection_across_monitors() {
     const std::vector<OverviewLogic::TargetCandidate> targets = {
         {.monitorId = 1, .box = {0.0, 0.0, 100.0, 100.0}},
@@ -585,6 +663,8 @@ int main() {
     test_handoff_state();
     test_route_logic();
     test_dispatch_logic();
+    test_owner_index();
+    test_list_move_only();
     test_overview_target_selection_across_monitors();
     test_overview_empty_target_region_selection();
     test_overview_empty_accept_plan();

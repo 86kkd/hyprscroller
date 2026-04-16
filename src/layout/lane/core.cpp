@@ -8,6 +8,11 @@
 #include "../../core/layout_profile.h"
 #include "../../core/monitor_geometry_runtime.h"
 
+using ScrollerCore::Box;
+using ScrollerModel::Reorder;
+using ScrollerModel::Stack;
+using ScrollerModel::StackWidth;
+
 Lane::Lane(PHLWINDOW window)
     : ephemeral(false), gap(0), reorder(Reorder::Auto), mode(Mode::Row), active(nullptr) {
     const auto monitor = g_pCompositor->getMonitorFromID(window->monitorID());
@@ -54,17 +59,14 @@ Stack *Lane::getStackForWindow(PHLWINDOW window) const {
         return nullptr;
 
     const auto key = windowKey(window);
-    if (const auto it = stackByWindow.find(key); it != stackByWindow.end()) {
-        auto *cachedStack = it->second;
-        if (cachedStack && getStackNode(cachedStack) && cachedStack->has_window(window))
-            return cachedStack;
-
-        stackByWindow.erase(it);
-    }
+    if (auto *cachedStack = stackByWindow.find_valid(key, [&](Stack *owner) {
+            return owner && getStackNode(owner) && owner->has_window(window);
+        }))
+        return cachedStack;
 
     for (auto col = stacks.first(); col != nullptr; col = col->next()) {
         if (col->data()->has_window(window)) {
-            stackByWindow[key] = col->data();
+            stackByWindow.remember(key, col->data());
             return col->data();
         }
     }
@@ -93,22 +95,24 @@ void Lane::rememberWindowStack(PHLWINDOW window, Stack *stack) {
         return;
     }
 
-    stackByWindow[windowKey(window)] = stack;
+    stackByWindow.remember(windowKey(window), stack);
 }
 
 void Lane::forgetWindowStack(PHLWINDOW window) {
     if (!window)
         return;
 
-    stackByWindow.erase(windowKey(window));
+    stackByWindow.forget(windowKey(window));
 }
 
 void Lane::rememberStackWindows(Stack *stack) {
     if (!stack)
         return;
 
-    stack->for_each_window([&](PHLWINDOW window) {
-        rememberWindowStack(window, stack);
+    stackByWindow.remember_owner(stack, [&](auto &&remember) {
+        stack->for_each_window([&](PHLWINDOW window) {
+            remember(windowKey(window));
+        });
     });
 }
 
@@ -116,32 +120,19 @@ void Lane::forgetStackWindows(Stack *stack) {
     if (!stack)
         return;
 
-    for (auto it = stackByWindow.begin(); it != stackByWindow.end();) {
-        if (it->second == stack)
-            it = stackByWindow.erase(it);
-        else
-            ++it;
-    }
+    stackByWindow.forget_owner(stack);
 }
 
 void Lane::debugVerifyStackCache() const {
 #ifndef NDEBUG
-    std::unordered_map<uintptr_t, Stack *> expected;
-    for (auto col = stacks.first(); col != nullptr; col = col->next()) {
-        auto *stack = col->data();
-        stack->for_each_window([&](PHLWINDOW window) {
-            const auto [it, inserted] = expected.emplace(windowKey(window), stack);
-            assert(inserted);
-            assert(it->second == stack);
-        });
-    }
-
-    assert(expected.size() == stackByWindow.size());
-    for (const auto &[key, stack] : expected) {
-        const auto it = stackByWindow.find(key);
-        assert(it != stackByWindow.end());
-        assert(it->second == stack);
-    }
+    assert(stackByWindow.matches_expected([&](auto &&addExpected) {
+        for (auto col = stacks.first(); col != nullptr; col = col->next()) {
+            auto *stack = col->data();
+            stack->for_each_window([&](PHLWINDOW window) {
+                addExpected(windowKey(window), stack);
+            });
+        }
+    }));
 #endif
 }
 
