@@ -74,6 +74,10 @@ bool CanvasLayout::handoffMoveWindowAcrossMonitor(int workspace, Direction direc
         return true;
 
     const auto insertDirection = ScrollerCore::opposite_direction(direction);
+    // Tell target callbacks that this window is being rehomed manually. The
+    // Hyprland dispatcher still moves the backend window across workspaces, but
+    // scroller keeps ownership transfer explicit so it can preserve lane/stack
+    // geometry and roll back cleanly on failure.
     targetLayout->rememberManualCrossMonitorInsertion(currentWindow);
 
     if (!CanvasLayoutInternal::invoke_dispatcher("movetoworkspacesilent", selector, "move_window_cross_monitor")) {

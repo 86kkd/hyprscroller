@@ -29,7 +29,8 @@ using namespace ScrollerModel;
 struct ActiveWindowPayload {
     std::unique_ptr<Window> window;
     StackWidth              width = StackWidth::OneHalf;
-    double                  maxw = 0.0;
+    // When width is Free, carry the stack's primary-axis span into the next lane.
+    double                  primarySpan = 0.0;
 
     ActiveWindowPayload() = default;
     ActiveWindowPayload(const ActiveWindowPayload &) = delete;
@@ -136,6 +137,12 @@ private:
 
     void center_active_stack();
     void adjust_stacks(ListNode<Stack *> *stack);
+    // Return the stack span that should be preserved when moving a free-sized stack.
+    double stack_primary_span_for_transfer(const Stack *stack) const;
+    // Rebuild a single-window stack from a transferred payload using this lane's mode/bounds.
+    Stack *create_stack_from_payload(ActiveWindowPayload payload);
+    // Position a freshly inserted stack immediately before/after a reference stack on the lane axis.
+    void position_stack_relative_to_reference(Stack *stack, const Stack *reference, Direction direction);
 
     // Raw monitor bounds for this lane's current canvas placement.
     Box full;

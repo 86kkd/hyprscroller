@@ -336,23 +336,14 @@ void Lane::move_active_window_to_adjacent_stack(Direction dir) {
     if (!target)
         return;
 
-    auto *sourceNode = active;
-    sourceStack = sourceNode->data();
-    auto w = sourceStack->expel_active(gap);
-    const auto movedWindow = w ? w->ptr().lock() : nullptr;
-    forgetWindowStack(movedWindow);
-
+    auto payload = extract_active_window_payload();
+    const auto movedWindow = payload.window ? payload.window->ptr().lock() : nullptr;
+    if (!payload)
+        return;
     const auto targetWindowCountBefore = target->data()->size();
-    if (sourceStack->size() == 0) {
-        forgetStackWindows(sourceStack);
-        stacks.erase(sourceNode);
-        delete sourceStack;
-    } else {
-        sourceStack->fit_size(FitSize::All, calculate_gap_x(sourceNode), gap);
-    }
 
     active = target;
-    active->data()->admit_window(std::move(w));
+    active->data()->admit_window(payload.release_window());
     rememberWindowStack(movedWindow, active->data());
 
     reorder = Reorder::Auto;
@@ -382,38 +373,22 @@ void Lane::move_active_window_to_new_stack(Direction dir) {
 
     auto *sourceNode = active;
     sourceStack = sourceNode->data();
-    auto w = sourceStack->expel_active(gap);
-    const auto movedWindow = w ? w->ptr().lock() : nullptr;
-    forgetWindowStack(movedWindow);
-
-    const auto width = sourceStack->get_width();
-    const auto carriedPrimarySpan = width == StackWidth::Free
-        ? (mode == Mode::Column ? sourceStack->get_geom_h() : sourceStack->get_geom_w())
-        : (mode == Mode::Column ? max.h : max.w);
-    auto *stack = new Stack(std::move(w),
-                            width,
-                            mode == Mode::Column ? max.w : carriedPrimarySpan,
-                            mode == Mode::Column ? carriedPrimarySpan : max.h,
-                            mode);
+    auto payload = extract_active_window_payload();
+    const auto movedWindow = payload.window ? payload.window->ptr().lock() : nullptr;
+    if (!payload)
+        return;
+    auto *stack = create_stack_from_payload(std::move(payload));
+    if (!stack)
+        return;
 
     ListNode<Stack *> *inserted = nullptr;
     if (dir == backward) {
         inserted = stacks.emplace_before(sourceNode, stack);
-        if (mode == Mode::Column) {
-            stack->set_geom_pos(max.x, sourceStack->get_geom_y() - stack->get_geom_h());
-        } else {
-            stack->set_geom_pos(sourceStack->get_geom_x() - stack->get_geom_w(), max.y);
-        }
     } else {
         inserted = stacks.emplace_after(sourceNode, stack);
-        if (mode == Mode::Column) {
-            stack->set_geom_pos(max.x, sourceStack->get_geom_y() + sourceStack->get_geom_h());
-        } else {
-            stack->set_geom_pos(sourceStack->get_geom_x() + sourceStack->get_geom_w(), max.y);
-        }
     }
+    position_stack_relative_to_reference(stack, sourceStack, dir);
 
-    sourceStack->fit_size(FitSize::All, calculate_gap_x(sourceNode), gap);
     active = inserted;
     rememberWindowStack(movedWindow, stack);
     reorder = Reorder::Auto;
@@ -432,20 +407,14 @@ void Lane::admit_window_left() {
         active == stacks.first())
         return;
 
-    auto w = active->data()->expel_active(gap);
-    const auto movedWindow = w ? w->ptr().lock() : nullptr;
-    forgetWindowStack(movedWindow);
     auto prev = active->prev();
+    auto payload = extract_active_window_payload();
+    const auto movedWindow = payload.window ? payload.window->ptr().lock() : nullptr;
+    if (!payload)
+        return;
     const auto windowCountBefore = prev->data()->size();
-    if (active->data()->size() == 0) {
-        auto *doomed = active->data();
-        auto *emptyNode = active;
-        stacks.erase(emptyNode);
-        forgetStackWindows(doomed);
-        delete doomed;
-    }
     active = prev;
-    active->data()->admit_window(std::move(w));
+    active->data()->admit_window(payload.release_window());
     rememberWindowStack(movedWindow, active->data());
 
     reorder = Reorder::Auto;
@@ -463,26 +432,18 @@ void Lane::expel_window_right() {
         active->data()->size() == 1)
         return;
 
-    auto w = active->data()->expel_active(gap);
-    const auto movedWindow = w ? w->ptr().lock() : nullptr;
-    forgetWindowStack(movedWindow);
-    StackWidth width = active->data()->get_width();
-    double maxw = width == StackWidth::Free
-        ? (mode == Mode::Column ? active->data()->get_geom_h() : active->data()->get_geom_w())
-        : (mode == Mode::Column ? max.h : max.w);
-    active = stacks.emplace_after(
-        active,
-        new Stack(std::move(w),
-                  width,
-                  mode == Mode::Column ? max.w : maxw,
-                  mode == Mode::Column ? maxw : max.h,
-                  mode));
+    const auto forward = ScrollerCore::local_item_forward_direction(mode);
+    auto *sourceStack = active->data();
+    auto payload = extract_active_window_payload();
+    const auto movedWindow = payload.window ? payload.window->ptr().lock() : nullptr;
+    if (!payload)
+        return;
+    auto *stack = create_stack_from_payload(std::move(payload));
+    if (!stack)
+        return;
+    active = stacks.emplace_after(active, stack);
     rememberWindowStack(movedWindow, active->data());
-    if (mode == Mode::Column) {
-        active->data()->set_geom_pos(max.x, active->prev()->data()->get_geom_y() + active->prev()->data()->get_geom_h());
-    } else {
-        active->data()->set_geom_pos(active->prev()->data()->get_geom_x() + active->prev()->data()->get_geom_w(), max.y);
-    }
+    position_stack_relative_to_reference(active->data(), sourceStack, forward);
 
     reorder = Reorder::Auto;
     recalculate_lane_geometry();

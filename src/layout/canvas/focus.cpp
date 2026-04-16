@@ -108,6 +108,9 @@ bool CanvasLayout::syncSpecialWorkspaceVisibilityState(PHLMONITOR visibleMonitor
         return false;
 
     const auto workspaceVisible = visibleMonitor != nullptr;
+    // Hidden special workspaces can temporarily leave the canvas pointing at an
+    // empty ephemeral lane. Remember that state while hidden so we can re-adopt
+    // the real focused lane when the special workspace becomes visible again.
     if (CanvasLayoutInternal::should_mark_special_ephemeral_lane_for_restore(
             workspace->m_isSpecialWorkspace,
             workspaceVisible,
@@ -131,6 +134,8 @@ bool CanvasLayout::syncSpecialWorkspaceVisibilityState(PHLMONITOR visibleMonitor
             currentLane->empty()))
         return false;
 
+    // On reopen, pull the workspace's remembered focused window back into the
+    // canvas model before the next relayout reads stale ephemeral-lane state.
     syncActiveStateFromWorkspaceFocus();
 
     const auto afterLane = activeLane ? activeLane->data() : nullptr;
@@ -451,6 +456,9 @@ void CanvasLayout::move_focus(int workspace, Direction direction)
         return;
     }
 
+    // Lane-axis navigation goes through a pure routing plan so the tricky
+    // combination of empty ephemeral lanes, adjacent lanes, and cross-monitor
+    // exits stays readable and unit-testable.
     const auto handoffPlan = betweenLanes
         ? CanvasLayoutInternal::plan_directional_handoff(
               lanes, activeLane, sourceMonitor, mode, direction, !laneEmpty, CanvasLayoutInternal::resolve_monitor_in_direction)

@@ -215,10 +215,10 @@ ActiveWindowPayload Lane::extract_active_window_payload() {
 
     auto *stack = active->data();
     ActiveWindowPayload payload;
+    // Free-width stacks need to carry their current rendered primary span so a
+    // later reinsertion does not collapse back to the lane default preset.
     payload.width = stack->get_width();
-    payload.maxw = stack->get_width() == StackWidth::Free
-        ? (mode == Mode::Column ? stack->get_geom_h() : stack->get_geom_w())
-        : (mode == Mode::Column ? max.h : max.w);
+    payload.primarySpan = stack_primary_span_for_transfer(stack);
     const auto payloadWindow = stack->get_active_window();
 
     payload.window = stack->expel_active(gap);
@@ -243,6 +243,60 @@ ActiveWindowPayload Lane::extract_active_window_payload() {
     return payload;
 }
 
+double Lane::stack_primary_span_for_transfer(const Stack *stack) const {
+    if (!stack)
+        return 0.0;
+
+    if (stack->get_width() != StackWidth::Free)
+        return mode == Mode::Column ? max.h : max.w;
+
+    return mode == Mode::Column ? stack->get_geom_h() : stack->get_geom_w();
+}
+
+Stack *Lane::create_stack_from_payload(ActiveWindowPayload payload) {
+    if (!payload)
+        return nullptr;
+
+    auto window = payload.release_window();
+    if (!window)
+        return nullptr;
+
+    window->set_geom_h(mode == Mode::Column ? max.w : max.h);
+    window->set_geom_y(mode == Mode::Column ? max.x : max.y);
+
+    // `primarySpan` refers to the lane axis: width in row mode, height in
+    // column mode. Keep the name axis-neutral so transfer code reads the same
+    // in both orientations.
+    const auto targetPrimarySpan =
+        payload.width == StackWidth::Free && payload.primarySpan > 0.0
+            ? std::min(payload.primarySpan, mode == Mode::Column ? max.h : max.w)
+            : (mode == Mode::Column ? max.h : max.w);
+    return new Stack(std::move(window),
+                     payload.width,
+                     mode == Mode::Column ? max.w : targetPrimarySpan,
+                     mode == Mode::Column ? targetPrimarySpan : max.h,
+                     mode);
+}
+
+void Lane::position_stack_relative_to_reference(Stack *stack, const Stack *reference, Direction direction) {
+    if (!stack || !reference)
+        return;
+
+    const auto backward = ScrollerCore::local_item_backward_direction(mode);
+    if (mode == Mode::Column) {
+        const auto y = direction == backward
+            ? reference->get_geom_y() - stack->get_geom_h()
+            : reference->get_geom_y() + reference->get_geom_h();
+        stack->set_geom_pos(max.x, y);
+        return;
+    }
+
+    const auto x = direction == backward
+        ? reference->get_geom_x() - stack->get_geom_w()
+        : reference->get_geom_x() + reference->get_geom_w();
+    stack->set_geom_pos(x, max.y);
+}
+
 void Lane::insert_window_payload(ActiveWindowPayload payload, Direction direction) {
     if (!payload)
         return;
@@ -252,22 +306,10 @@ void Lane::insert_window_payload(ActiveWindowPayload payload, Direction directio
     if (singleWindowLane)
         stacks.first()->data()->update_width(StackWidth::OneHalf, max.w, max.h);
 
-    auto window = payload.release_window();
-    if (!window)
+    auto *stack = create_stack_from_payload(std::move(payload));
+    if (!stack)
         return;
-    const auto compositorWindow = window->ptr().lock();
-
-    window->set_geom_h(mode == Mode::Column ? max.w : max.h);
-    window->set_geom_y(mode == Mode::Column ? max.x : max.y);
-    const auto targetPrimarySpan =
-        payload.width == StackWidth::Free && payload.maxw > 0.0
-            ? std::min(payload.maxw, mode == Mode::Column ? max.h : max.w)
-            : (mode == Mode::Column ? max.h : max.w);
-    auto *stack = new Stack(std::move(window),
-                            payload.width,
-                            mode == Mode::Column ? max.w : targetPrimarySpan,
-                            mode == Mode::Column ? targetPrimarySpan : max.h,
-                            mode);
+    const auto compositorWindow = stack->get_active_window();
     if (singleWindowLane)
         stack->update_width(StackWidth::OneHalf, max.w, max.h);
     stack->set_geom_pos(max.x, max.y);
