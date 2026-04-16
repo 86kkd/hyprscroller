@@ -102,6 +102,33 @@ void finalize_workspace_targets(WorkspaceNode& node) {
     node.targets.push_back(makeEmptyTarget(node.workspaceId, node.monitorId, node.box, false));
 }
 
+struct WorkspaceGridShape {
+    std::size_t columns = 1;
+    std::size_t rows = 1;
+};
+
+WorkspaceGridShape choose_workspace_grid_shape(const Box& regionBox, std::size_t count) {
+    if (count <= 1)
+        return {};
+
+    const auto safeWidth = std::max(1.0, regionBox.w);
+    const auto safeHeight = std::max(1.0, regionBox.h);
+    const auto landscape = safeWidth >= safeHeight;
+    const auto dominantAspect = landscape ? safeWidth / safeHeight : safeHeight / safeWidth;
+
+    if (landscape) {
+        const auto columns = std::min(count,
+                                      std::max<std::size_t>(1, static_cast<std::size_t>(std::ceil(std::sqrt(static_cast<double>(count) * dominantAspect)))));
+        const auto rows = std::max<std::size_t>(1, static_cast<std::size_t>(std::ceil(static_cast<double>(count) / static_cast<double>(columns))));
+        return {.columns = columns, .rows = rows};
+    }
+
+    const auto rows = std::min(count,
+                               std::max<std::size_t>(1, static_cast<std::size_t>(std::ceil(std::sqrt(static_cast<double>(count) * dominantAspect)))));
+    const auto columns = std::max<std::size_t>(1, static_cast<std::size_t>(std::ceil(static_cast<double>(count) / static_cast<double>(rows))));
+    return {.columns = columns, .rows = rows};
+}
+
 void layout_workspace_grid(MonitorRegion& region) {
     std::sort(region.workspaces.begin(), region.workspaces.end(), [](const WorkspaceNode& a, const WorkspaceNode& b) {
         return a.workspaceId < b.workspaceId;
@@ -111,20 +138,25 @@ void layout_workspace_grid(MonitorRegion& region) {
     if (count == 0)
         return;
 
-    const auto aspect = region.box.h > 0.0 ? region.box.w / region.box.h : 1.0;
-    const auto columns = std::max<std::size_t>(1, static_cast<std::size_t>(std::ceil(std::sqrt(static_cast<double>(count) * std::max(0.5, aspect)))));
-    const auto rows = std::max<std::size_t>(1, static_cast<std::size_t>(std::ceil(static_cast<double>(count) / static_cast<double>(columns))));
+    if (count == 1) {
+        auto& workspace = region.workspaces.front();
+        workspace.box = region.box;
+        finalize_workspace_targets(workspace);
+        return;
+    }
+
+    const auto grid = choose_workspace_grid_shape(region.box, count);
     const auto horizontalGap = std::min(32.0, std::max(12.0, region.box.w * 0.02));
     const auto verticalGap = std::min(32.0, std::max(12.0, region.box.h * 0.03));
-    const auto totalHorizontalGap = horizontalGap * static_cast<double>(columns - 1);
-    const auto totalVerticalGap = verticalGap * static_cast<double>(rows - 1);
-    const auto cellWidth = std::max(120.0, (region.box.w - totalHorizontalGap) / static_cast<double>(columns));
-    const auto cellHeight = std::max(96.0, (region.box.h - totalVerticalGap) / static_cast<double>(rows));
+    const auto totalHorizontalGap = horizontalGap * static_cast<double>(grid.columns - 1);
+    const auto totalVerticalGap = verticalGap * static_cast<double>(grid.rows - 1);
+    const auto cellWidth = std::max(120.0, (region.box.w - totalHorizontalGap) / static_cast<double>(grid.columns));
+    const auto cellHeight = std::max(96.0, (region.box.h - totalVerticalGap) / static_cast<double>(grid.rows));
 
     for (std::size_t index = 0; index < count; ++index) {
         auto& workspace = region.workspaces[index];
-        const auto column = index % columns;
-        const auto row = index / columns;
+        const auto column = index % grid.columns;
+        const auto row = index / grid.columns;
         workspace.box = {
             region.box.x + static_cast<double>(column) * (cellWidth + horizontalGap),
             region.box.y + static_cast<double>(row) * (cellHeight + verticalGap),
