@@ -77,6 +77,27 @@ void expect_near(double actual, double expected, double epsilon, std::string_vie
     ++failures;
 }
 
+void expect_reserved_workarea(std::string_view label,
+                              const Hyprutils::Math::Vector2D &position,
+                              const Hyprutils::Math::Vector2D &rawSize,
+                              const Hyprutils::Math::Vector2D &transformedSize,
+                              wl_output_transform transform,
+                              const ScrollerCore::ReservedEdges &rawReserved,
+                              const ScrollerCore::ReservedEdges &expectedReserved,
+                              const ScrollerCore::Box &expectedWorkarea) {
+    const auto logicalReserved = ScrollerCore::logical_reserved_edges(rawSize, transformedSize, transform, rawReserved);
+    expect_near(logicalReserved.top, expectedReserved.top, 1e-9, std::string(label) + " reserved top");
+    expect_near(logicalReserved.right, expectedReserved.right, 1e-9, std::string(label) + " reserved right");
+    expect_near(logicalReserved.bottom, expectedReserved.bottom, 1e-9, std::string(label) + " reserved bottom");
+    expect_near(logicalReserved.left, expectedReserved.left, 1e-9, std::string(label) + " reserved left");
+
+    const auto workarea = ScrollerCore::logical_workarea_box(position, rawSize, transformedSize, transform, rawReserved, 0.0);
+    expect_near(workarea.x, expectedWorkarea.x, 1e-9, std::string(label) + " workarea x");
+    expect_near(workarea.y, expectedWorkarea.y, 1e-9, std::string(label) + " workarea y");
+    expect_near(workarea.w, expectedWorkarea.w, 1e-9, std::string(label) + " workarea width");
+    expect_near(workarea.h, expectedWorkarea.h, 1e-9, std::string(label) + " workarea height");
+}
+
 void test_interval() {
     expect_true(ScrollerCore::Interval::intersects(0.0, 10.0, 5.0, 15.0), "interval partial overlap intersects");
     expect_true(ScrollerCore::Interval::intersects(0.0, 20.0, 5.0, 15.0), "interval containing viewport intersects");
@@ -239,32 +260,84 @@ void test_layout_profile() {
 }
 
 void test_monitor_geometry() {
+    const Hyprutils::Math::Vector2D landscapePosition{3840.0, 0.0};
+    const Hyprutils::Math::Vector2D landscapeRawSize{3840.0, 2160.0};
+    const Hyprutils::Math::Vector2D landscapeTransformedSize{3840.0, 2160.0};
+    const Hyprutils::Math::Vector2D portraitPosition{1680.0, 0.0};
+    const Hyprutils::Math::Vector2D portraitRawSize{3840.0, 2160.0};
+    const Hyprutils::Math::Vector2D portraitTransformedSize{2160.0, 3840.0};
+
+    expect_reserved_workarea("landscape top",
+                             landscapePosition,
+                             landscapeRawSize,
+                             landscapeTransformedSize,
+                             WL_OUTPUT_TRANSFORM_NORMAL,
+                             {.top = 37.0, .right = 0.0, .bottom = 0.0, .left = 0.0},
+                             {.top = 37.0, .right = 0.0, .bottom = 0.0, .left = 0.0},
+                             {3840.0, 37.0, 3840.0, 2123.0});
+    expect_reserved_workarea("landscape right",
+                             landscapePosition,
+                             landscapeRawSize,
+                             landscapeTransformedSize,
+                             WL_OUTPUT_TRANSFORM_NORMAL,
+                             {.top = 0.0, .right = 37.0, .bottom = 0.0, .left = 0.0},
+                             {.top = 0.0, .right = 37.0, .bottom = 0.0, .left = 0.0},
+                             {3840.0, 0.0, 3803.0, 2160.0});
+    expect_reserved_workarea("landscape bottom",
+                             landscapePosition,
+                             landscapeRawSize,
+                             landscapeTransformedSize,
+                             WL_OUTPUT_TRANSFORM_NORMAL,
+                             {.top = 0.0, .right = 0.0, .bottom = 37.0, .left = 0.0},
+                             {.top = 0.0, .right = 0.0, .bottom = 37.0, .left = 0.0},
+                             {3840.0, 0.0, 3840.0, 2123.0});
+    expect_reserved_workarea("landscape left",
+                             landscapePosition,
+                             landscapeRawSize,
+                             landscapeTransformedSize,
+                             WL_OUTPUT_TRANSFORM_NORMAL,
+                             {.top = 0.0, .right = 0.0, .bottom = 0.0, .left = 37.0},
+                             {.top = 0.0, .right = 0.0, .bottom = 0.0, .left = 37.0},
+                             {3877.0, 0.0, 3803.0, 2160.0});
+
     const auto portraitSize = ScrollerCore::logical_monitor_size({3840.0, 2160.0},
                                                                  {2160.0, 3840.0},
                                                                  WL_OUTPUT_TRANSFORM_270);
     expect_near(portraitSize.x, 2160.0, 1e-9, "portrait logical width uses transformed width");
     expect_near(portraitSize.y, 3840.0, 1e-9, "portrait logical height uses transformed height");
 
-    const ScrollerCore::ReservedEdges portraitReservedRaw{.top = 37.0, .right = 0.0, .bottom = 0.0, .left = 0.0};
-    const auto portraitReserved = ScrollerCore::logical_reserved_edges({3840.0, 2160.0},
-                                                                       {2160.0, 3840.0},
-                                                                       WL_OUTPUT_TRANSFORM_270,
-                                                                       portraitReservedRaw);
-    expect_near(portraitReserved.top, 37.0, 1e-9, "portrait logical reserve keeps the semantic top edge");
-    expect_near(portraitReserved.right, 0.0, 1e-9, "transform 270 clears logical right reserve when none exists");
-    expect_near(portraitReserved.bottom, 0.0, 1e-9, "transform 270 keeps logical bottom clear");
-    expect_near(portraitReserved.left, 0.0, 1e-9, "transform 270 keeps logical left clear");
-
-    const auto portraitWorkarea = ScrollerCore::logical_workarea_box({1680.0, 0.0},
-                                                                     {3840.0, 2160.0},
-                                                                     {2160.0, 3840.0},
-                                                                     WL_OUTPUT_TRANSFORM_270,
-                                                                     portraitReservedRaw,
-                                                                     0.0);
-    expect_near(portraitWorkarea.x, 1680.0, 1e-9, "portrait workarea keeps transformed monitor x origin");
-    expect_near(portraitWorkarea.y, 37.0, 1e-9, "portrait workarea starts below the transformed top reserve");
-    expect_near(portraitWorkarea.w, 2160.0, 1e-9, "portrait workarea width matches transformed width");
-    expect_near(portraitWorkarea.h, 3803.0, 1e-9, "portrait workarea height subtracts transformed reserve");
+    expect_reserved_workarea("portrait top",
+                             portraitPosition,
+                             portraitRawSize,
+                             portraitTransformedSize,
+                             WL_OUTPUT_TRANSFORM_270,
+                             {.top = 37.0, .right = 0.0, .bottom = 0.0, .left = 0.0},
+                             {.top = 37.0, .right = 0.0, .bottom = 0.0, .left = 0.0},
+                             {1680.0, 37.0, 2160.0, 3803.0});
+    expect_reserved_workarea("portrait right",
+                             portraitPosition,
+                             portraitRawSize,
+                             portraitTransformedSize,
+                             WL_OUTPUT_TRANSFORM_270,
+                             {.top = 0.0, .right = 37.0, .bottom = 0.0, .left = 0.0},
+                             {.top = 0.0, .right = 37.0, .bottom = 0.0, .left = 0.0},
+                             {1680.0, 0.0, 2123.0, 3840.0});
+    expect_reserved_workarea("portrait bottom",
+                             portraitPosition,
+                             portraitRawSize,
+                             portraitTransformedSize,
+                             WL_OUTPUT_TRANSFORM_270,
+                             {.top = 0.0, .right = 0.0, .bottom = 37.0, .left = 0.0},
+                             {.top = 0.0, .right = 0.0, .bottom = 37.0, .left = 0.0},
+                             {1680.0, 0.0, 2160.0, 3803.0});
+    expect_reserved_workarea("portrait left",
+                             portraitPosition,
+                             portraitRawSize,
+                             portraitTransformedSize,
+                             WL_OUTPUT_TRANSFORM_270,
+                             {.top = 0.0, .right = 0.0, .bottom = 0.0, .left = 37.0},
+                             {.top = 0.0, .right = 0.0, .bottom = 0.0, .left = 37.0},
+                             {1717.0, 0.0, 2123.0, 3840.0});
 
     const auto fallbackSize = ScrollerCore::logical_monitor_size({3840.0, 2160.0},
                                                                  {0.0, 0.0},
