@@ -1,16 +1,15 @@
 /**
  * @file geometry.cpp
- * @brief Lane geometry, overview projection, and viewport relayout helpers.
+ * @brief Lane geometry, viewport relayout, and fullscreen/maximize helpers.
  *
  * This file contains the geometry-heavy part of lane behavior: stack visibility
- * checks, anchor selection, overview projection, fullscreen/maximize layout,
- * and the final relayout pass that keeps the active stack visible.
+ * checks, anchor selection, fullscreen/maximize layout, and the final relayout
+ * pass that keeps the active stack visible.
  */
 #include "lane.h"
 
 #include <cmath>
 #include <sstream>
-#include <vector>
 
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/config/ConfigManager.hpp>
@@ -99,70 +98,6 @@ std::string summarize_stacks(List<Stack *>& stacks, Mode mode) {
 	return out.str();
 }
 } // namespace logging
-
-namespace overview {
-// Compute the scaled bounding box and offset required for overview mode.
-ScrollerCore::OverviewProjection compute_projection(List<Stack *>& stacks, const ScrollerCore::Box &visible_box) {
-    std::vector<ScrollerCore::OverviewRect> items;
-    items.reserve(stacks.size());
-    for (auto stack = stacks.first(); stack != nullptr; stack = stack->next()) {
-        auto x0 = stack->data()->get_geom_x();
-        auto x1 = x0 + stack->data()->get_geom_w();
-        Vector2D height = stack->data()->get_height();
-        items.push_back(ScrollerCore::OverviewRect{
-            .x0 = x0,
-            .x1 = x1,
-            .y0 = height.x,
-            .y1 = height.y,
-        });
-    }
-
-    const auto projection = ScrollerCore::compute_overview_projection(items, visible_box);
-    if (projection.width <= 0.0 || projection.height <= 0.0) {
-        spdlog::debug("overview_projection_degenerate: width={} height={} visible_box=({}, {}, {}, {})",
-                      projection.width,
-                      projection.height,
-                      visible_box.x,
-                      visible_box.y,
-                      visible_box.w,
-                      visible_box.h);
-    }
-    return projection;
-}
-
-// Apply overview projection to every stack in the lane.
-void apply_projection(List<Stack *>& stacks, const ScrollerCore::OverviewProjection &projection,
-                      double gap, const ScrollerCore::Box &visible_box) {
-    for (auto stack = stacks.first(); stack != nullptr; stack = stack->next()) {
-        Stack *column = stack->data();
-        column->push_geom();
-        Vector2D height = column->get_height();
-        Vector2D start(projection.offset.x + visible_box.x, projection.offset.y + visible_box.y);
-        column->set_geom_pos(start.x + (column->get_geom_x() - projection.min.x) * projection.scale,
-                             start.y + (height.x - projection.min.y) * projection.scale);
-        column->set_geom_w(column->get_geom_w() * projection.scale);
-        column->set_geom_h(column->get_geom_h() * projection.scale);
-        column->scale(projection.min, start, projection.scale, gap);
-    }
-}
-
-// Restore normal geometry after overview mode ends.
-void restore_projection(List<Stack *>& stacks, ListNode<Stack *> *active, const ScrollerCore::Box &visible_box) {
-    for (auto stack = stacks.first(); stack != nullptr; stack = stack->next())
-        stack->data()->pop_geom();
-
-    Stack *activeStack = active->data();
-    const auto mode = activeStack->get_mode();
-    const auto primaryOrigin = stack_primary_origin(activeStack, mode);
-    const auto primarySpan = stack_primary_span(activeStack, mode);
-    if (primaryOrigin < visible_primary_origin(visible_box, mode)) {
-        set_stack_primary_position(activeStack, mode, visible_box, visible_primary_origin(visible_box, mode));
-    } else if (primaryOrigin + primarySpan > visible_primary_end(visible_box, mode)) {
-        set_stack_primary_position(activeStack, mode, visible_box,
-                                   visible_primary_end(visible_box, mode) - primarySpan);
-    }
-}
-} // namespace overview
 
 namespace recalc {
 // Initialize active-stack geometry when a stack is placed for the first time.
@@ -285,23 +220,6 @@ void Lane::toggle_maximize_active_stack() {
     stack->toggle_maximized(max.w, max.h);
     reorder = Reorder::Auto;
     recalculate_lane_geometry();
-}
-
-// Toggle overview mode for the whole lane.
-void Lane::toggle_overview() {
-    if (stacks.empty() || !active)
-        return;
-
-    overview = !overview;
-    if (overview) {
-        const auto projection = overview::compute_projection(stacks, max);
-        overview::apply_projection(stacks, projection, gap, max);
-        adjust_stacks(stacks.first());
-        return;
-    }
-
-    overview::restore_projection(stacks, active, max);
-    adjust_stacks(active);
 }
 
 // Main geometry pass for a lane: keep the active stack visible and reposition

@@ -101,7 +101,6 @@ public:
     void expel_window_right(int workspace);
     void set_mode(int workspace, Mode);
     void fit_size(int workspace, FitSize);
-    void toggle_overview(int workspace);
     void toggle_fullscreen(int workspace);
     void create_lane(int workspace, Direction);
     void focus_lane(int workspace, Direction);

@@ -274,16 +274,6 @@ namespace {
             overview.close(false);
     }
 
-    // togglelaneoverview: switch the old lane-local geometry overview mode.
-    void dispatch_togglelaneoverview(std::string arg) {
-        int workspace;
-        auto layout = layout_for_action(&workspace);
-        if (!layout || workspace == -1)
-            return;
-        (void)arg;
-        layout->toggle_overview(workspace);
-    }
-
     // togglefullscreen: expand the active scroller window to the monitor bounds.
     void dispatch_togglefullscreen(std::string arg) {
         int workspace;
@@ -375,7 +365,6 @@ void dispatchers::addDispatchers() {
     HyprlandAPI::addDispatcherV2(PHANDLE, "scroller:fitsize", wrap(dispatch_fitsize));
     HyprlandAPI::addDispatcherV2(PHANDLE, "scroller:toggleoverview", wrap(dispatch_toggleoverview));
     HyprlandAPI::addDispatcherV2(PHANDLE, "scroller:canceloverview", wrap(dispatch_canceloverview));
-    HyprlandAPI::addDispatcherV2(PHANDLE, "scroller:togglelaneoverview", wrap(dispatch_togglelaneoverview));
     HyprlandAPI::addDispatcherV2(PHANDLE, "scroller:togglefullscreen", wrap(dispatch_togglefullscreen));
     HyprlandAPI::addDispatcherV2(PHANDLE, "scroller:createlane", wrap(dispatch_createlane));
     HyprlandAPI::addDispatcherV2(PHANDLE, "scroller:focuslane", wrap(dispatch_focuslane));

@@ -8,7 +8,7 @@
 #include "../../core/layout_profile.h"
 
 Lane::Lane(PHLWINDOW window)
-    : overview(false), ephemeral(false), gap(0), reorder(Reorder::Auto), mode(Mode::Row), active(nullptr) {
+    : ephemeral(false), gap(0), reorder(Reorder::Auto), mode(Mode::Row), active(nullptr) {
     const auto monitor = g_pCompositor->getMonitorFromID(window->monitorID());
     if (!monitor)
         return;
@@ -18,13 +18,13 @@ Lane::Lane(PHLWINDOW window)
 }
 
 Lane::Lane(PHLMONITOR monitor, Mode laneMode)
-    : overview(false), ephemeral(false), gap(0), reorder(Reorder::Auto), mode(laneMode), active(nullptr) {
+    : ephemeral(false), gap(0), reorder(Reorder::Auto), mode(laneMode), active(nullptr) {
     if (monitor)
         update_sizes(monitor);
 }
 
 Lane::Lane(Stack *stack)
-    : overview(false), ephemeral(false), gap(0), reorder(Reorder::Auto), mode(Mode::Row), active(nullptr) {
+    : ephemeral(false), gap(0), reorder(Reorder::Auto), mode(Mode::Row), active(nullptr) {
     const auto window = stack ? stack->get_active_window() : nullptr;
     const auto monitor = window ? g_pCompositor->getMonitorFromID(window->monitorID()) : nullptr;
     if (monitor) {

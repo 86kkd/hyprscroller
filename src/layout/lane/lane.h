@@ -4,7 +4,7 @@
  *
  * `Lane` owns ordered stacks for a single workspace and handles lane-level
  * focus movement, command dispatch behavior, fullscreen/maximize transitions,
- * overview mode and geometry updates.
+ * and geometry updates.
  */
 #pragma once
 
@@ -112,7 +112,6 @@ public:
     void toggle_fullscreen_active_window();
     void toggle_maximize_active_stack();
     void fit_size(FitSize fitsize);
-    void toggle_overview();
     void recalculate_lane_geometry();
 
 private:
@@ -142,8 +141,6 @@ private:
     Box full;
     // Workarea bounds after reserved areas and gaps are applied.
     Box max;
-    // Whether overview projection is currently active.
-    bool overview;
     // Whether this lane is a temporary navigation-only lane.
     bool ephemeral;
     // Inner gap used between stacked windows.

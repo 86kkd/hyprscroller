@@ -111,7 +111,7 @@ The plugin adds the following dispatchers:
 | `scroller:expelwindow`    | Pop the current window out of its column and place it on a new column to the right.                                         |
 | `scroller:fitsize`        | Resize columns (*row* mode) or windows (*col* mode) so they fit on the screen: `active`, `visible`, `all`, `toend`, `tobeg` |
 | `scroller:togglefullscreen` | Toggle scroller fullscreen for the active window. In *row* mode it expands horizontally to the monitor width; in *column* mode it expands vertically to the monitor height. |
-| `scroller:toggleoverview` | Toggle an overview of the workspace where all the windows are temporarily scaled to fit the monitor                         |
+| `scroller:toggleoverview` | Toggle the read-only monitor/workspace/window overview overlay                                                             |
 | `scroller:marksadd`       | Add a named mark. Argument is the name of the mark                                                                          |
 | `scroller:marksdelete`    | Delete a named mark. Argument is the name of the mark                                                                       |
 | `scroller:marksvisit`     | Visit a named mark. Argument is the name of the mark                                                                        |

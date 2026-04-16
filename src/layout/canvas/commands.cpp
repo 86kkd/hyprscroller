@@ -288,14 +288,6 @@ void CanvasLayout::fit_size(int workspace, FitSize fitsize) {
     });
 }
 
-// Toggle lane overview projection.
-void CanvasLayout::toggle_overview(int workspace) {
-    (void)workspace;
-    withActiveLane(ActiveLaneSyncPolicy::WorkspaceFocus, [](Lane *lane) {
-        lane->toggle_overview();
-    });
-}
-
 // Toggle scroller-managed fullscreen/expanded behavior.
 void CanvasLayout::toggle_fullscreen(int workspace) {
     (void)workspace;

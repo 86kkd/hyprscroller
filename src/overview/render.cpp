@@ -85,6 +85,7 @@ struct SelectionPulse {
 };
 
 CHyprSignalListener                         g_renderPreListener = nullptr;
+CHyprSignalListener                         g_renderStageListener = nullptr;
 std::unordered_map<int, steady_tp>         g_openedAt;
 std::unordered_map<int, ClosingScene>      g_closingScenes;
 std::unordered_map<int, SceneMonitor>      g_liveScenes;
@@ -639,7 +640,7 @@ void fullRenderMonitor(PHLMONITOR monitor) {
 
 bool initializeRendererHooks(HANDLE handle) {
     (void)handle;
-    if (g_renderPreListener)
+    if (g_renderPreListener || g_renderStageListener)
         return true;
 
     try {
@@ -652,26 +653,39 @@ bool initializeRendererHooks(HANDLE handle) {
 
             if (session().active()) {
                 update_live_scene_for_monitor(monitor, now);
-                if (g_liveScenes.contains(monitor->m_id))
-                    g_pHyprRenderer->m_renderPass.add(makeUnique<OverviewPassElement>(monitor));
             } else {
                 auto it = g_closingScenes.find(monitor->m_id);
-                if (it != g_closingScenes.end()) {
-                    if (closing_animation_finished(it->second, now)) {
-                        g_closingScenes.erase(it);
-                    } else {
-                        g_pHyprRenderer->m_renderPass.add(makeUnique<OverviewPassElement>(monitor));
-                    }
-                }
+                if (it != g_closingScenes.end() && closing_animation_finished(it->second, now))
+                    g_closingScenes.erase(it);
             }
 
             damage_monitor_if_animating(monitor, now);
+        });
+
+        g_renderStageListener = Event::bus()->m_events.render.stage.listen([](eRenderStage stage) {
+            if (stage != RENDER_POST_WINDOWS)
+                return;
+
+            const auto monitor = g_pHyprOpenGL->m_renderData.pMonitor.lock();
+            if (!monitor)
+                return;
+
+            if (session().active()) {
+                if (g_liveScenes.contains(monitor->m_id))
+                    g_pHyprRenderer->m_renderPass.add(makeUnique<OverviewPassElement>(monitor));
+                return;
+            }
+
+            const auto it = g_closingScenes.find(monitor->m_id);
+            if (it != g_closingScenes.end() && !closing_animation_finished(it->second, std::chrono::steady_clock::now()))
+                g_pHyprRenderer->m_renderPass.add(makeUnique<OverviewPassElement>(monitor));
         });
 
         spdlog::info("overview_renderer_init: using render-pass overlay backend");
         return true;
     } catch (const std::exception& e) {
         g_renderPreListener = nullptr;
+        g_renderStageListener = nullptr;
         g_openedAt.clear();
         g_closingScenes.clear();
         g_liveScenes.clear();
@@ -686,6 +700,7 @@ bool initializeRendererHooks(HANDLE handle) {
 void shutdownRendererHooks(HANDLE handle) {
     (void)handle;
     g_renderPreListener = nullptr;
+    g_renderStageListener = nullptr;
     g_openedAt.clear();
     g_closingScenes.clear();
     g_liveScenes.clear();
