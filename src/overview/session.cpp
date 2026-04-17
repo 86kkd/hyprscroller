@@ -17,6 +17,7 @@
 #include <hyprland/src/render/Renderer.hpp>
 #include <spdlog/spdlog.h>
 
+#include "../core/workspace_selector.h"
 #include "../layout/canvas/internal.h"
 #include "logic.h"
 
@@ -24,16 +25,6 @@ namespace Overview {
 namespace {
 
 using ScrollerCore::Box;
-
-std::string workspace_selector(PHLWORKSPACE workspace) {
-    if (!workspace)
-        return {};
-
-    if (!workspace->m_name.empty())
-        return workspace->m_name;
-
-    return std::to_string(workspace->m_id);
-}
 
 void prepareAllCanvasesForOverview() {
     for (const auto& workspaceRef : g_pCompositor->getWorkspaces()) {
@@ -76,12 +67,12 @@ bool execute_accept_plan(const std::vector<OverviewLogic::AcceptAction>& plan, P
                 }
                 break;
             case OverviewLogic::AcceptActionType::Workspace: {
-                const auto selector = workspace ? workspace_selector(workspace) : std::to_string(step.workspaceId);
+                const auto selector = workspace ? ScrollerCore::workspace_selector(workspace) : std::to_string(step.workspaceId);
                 (void)CanvasLayoutInternal::invoke_dispatcher("workspace", selector, context);
                 break;
             }
             case OverviewLogic::AcceptActionType::ToggleSpecialWorkspace: {
-                const auto selector = workspace ? workspace_selector(workspace) : std::to_string(step.workspaceId);
+                const auto selector = workspace ? ScrollerCore::workspace_selector(workspace) : std::to_string(step.workspaceId);
                 (void)CanvasLayoutInternal::invoke_dispatcher("togglespecialworkspace", selector, context);
                 break;
             }

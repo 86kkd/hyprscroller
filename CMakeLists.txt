@@ -32,15 +32,15 @@ add_library(hyprscroller SHARED
             src/core/monitor_geometry.cpp
             src/core/monitor_geometry_runtime.cpp
             src/core/layout_profile.cpp
+            src/core/workspace_selector.h
             src/list.h
             src/overview/logic.h
             src/overview/logic.cpp
             src/overview/orientation_math.h
-            src/overview/orientation_math.cpp
-            src/overview/monitor_space.h
-            src/overview/monitor_space.cpp
             src/overview/model.h
             src/overview/model.cpp
+            src/overview/scene.h
+            src/overview/scene.cpp
             src/overview/session.h
             src/overview/session.cpp
             src/overview/render.h

@@ -14,6 +14,7 @@
 #include <spdlog/spdlog.h>
 
 #include "../../core/direction.h"
+#include "../../core/workspace_selector.h"
 #include "internal.h"
 
 namespace {
@@ -61,16 +62,6 @@ CanvasLayoutInternal::DispatcherRuntime *g_dispatcherRuntimeOverride = nullptr;
 CanvasLayoutInternal::DispatcherRuntime &dispatcher_runtime() {
     static HyprlandDispatcherRuntime runtime;
     return g_dispatcherRuntimeOverride ? *g_dispatcherRuntimeOverride : runtime;
-}
-
-std::string workspace_selector(PHLWORKSPACE workspace) {
-    if (!workspace)
-        return {};
-
-    if (!workspace->m_name.empty())
-        return workspace->m_name;
-
-    return std::to_string(workspace->m_id);
 }
 
 std::string monitor_name(PHLMONITOR monitor) {
@@ -131,7 +122,7 @@ void focus_monitor_workspace(PHLMONITOR monitor, PHLWORKSPACE workspace, WORKSPA
     }
 
     const auto targetWorkspaceId = workspace ? workspace->m_id : fallback_workspace_id;
-    const auto selector = workspace_selector(workspace);
+    const auto selector = ScrollerCore::workspace_selector(workspace);
     const auto fallbackSelector = (!workspace && targetWorkspaceId != WORKSPACE_INVALID)
                                     ? std::to_string(targetWorkspaceId)
                                     : std::string();

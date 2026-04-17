@@ -15,25 +15,11 @@
 #include "../../core/direction.h"
 #include "../../core/layout_profile.h"
 #include "../../core/monitor_geometry_runtime.h"
+#include "../../core/workspace_selector.h"
 #include "../lane/lane.h"
 #include "layout.h"
 #include "internal.h"
 #include "route.h"
-
-namespace {
-// Convert a workspace to the selector string expected by Hyprland workspace
-// dispatchers.
-std::string workspace_selector(PHLWORKSPACE workspace) {
-    if (!workspace)
-        return {};
-
-    if (!workspace->m_name.empty())
-        return workspace->m_name;
-
-    return std::to_string(workspace->m_id);
-}
-
-} // namespace
 
 PHLMONITOR CanvasLayout::directionalMoveTargetMonitor(PHLMONITOR sourceMonitor, Direction direction) const {
     return CanvasLayoutInternal::resolve_monitor_in_direction(sourceMonitor, direction);
@@ -50,7 +36,7 @@ bool CanvasLayout::handoffMoveWindowAcrossMonitor(int workspace, Direction direc
 
     const auto workspaceId = CanvasLayoutInternal::preferred_workspace_id(targetMonitor, workspace);
     const auto targetWorkspace = g_pCompositor->getWorkspaceByID(workspaceId);
-    const auto selector = workspace_selector(targetWorkspace);
+    const auto selector = ScrollerCore::workspace_selector(targetWorkspace);
     if (!CanvasLayoutInternal::can_invoke_dispatcher("movetoworkspacesilent", selector, "move_window_cross_monitor"))
         return false;
 
