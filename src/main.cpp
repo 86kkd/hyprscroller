@@ -5,6 +5,14 @@
  * This file is intentionally small: it wires Hyprland's plugin ABI to the
  * layout implementation, registers plugin config values and dispatchers, and
  * initializes the dedicated file logger used for debugging layout behavior.
+ *
+ * Newcomer reading guide:
+ * 1. Start at `PLUGIN_INIT` in this file.
+ * 2. Follow dispatcher registration into `src/dispatchers.cpp`.
+ * 3. Follow tiled-algorithm registration into `CanvasLayout` in
+ *    `src/layout/canvas/layout.h`.
+ * That path shows the whole runtime shell before you dive into lane or stack
+ * details.
  */
 #include <hyprland/src/config/ConfigManager.hpp>
 #include <hyprland/src/plugins/PluginAPI.hpp>
@@ -105,6 +113,10 @@ APICALL EXPORT std::string PLUGIN_API_VERSION() {
 }
 
 // Register config values, dispatchers, and the tiled algorithm implementation.
+// For code readers, this is the root of the plugin's runtime graph:
+// Hyprland loads the plugin -> `PLUGIN_INIT` runs -> dispatchers are registered
+// -> `CanvasLayout` is registered as the `scroller` tiled algorithm.
+//
 // The returned description tuple is shown by Hyprland/plugin tooling as:
 // { name, description, author, version }.
 APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {

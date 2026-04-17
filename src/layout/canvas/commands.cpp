@@ -249,6 +249,11 @@ void CanvasLayout::cycle_window_size(int workspace, int step)
 }
 
 // Move the focused window or stack according to lane/mode routing rules.
+// Reading guide:
+// `dispatch_movewindow` resolves the active `CanvasLayout` and lands here.
+// This function only decides which scope should handle the move:
+// same lane, adjacent lane, or another monitor. The actual payload transfer
+// work then happens in the lane/canvas helpers chosen by that route.
 void CanvasLayout::move_window(int workspace, Direction direction) {
     withActiveLane(ActiveLaneSyncPolicy::WorkspaceFocus, [&](Lane *lane) {
         const auto mode = lane->get_mode();

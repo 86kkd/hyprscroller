@@ -401,6 +401,11 @@ void CanvasLayout::finalizeLocalFocusMove(int workspace, Direction direction, La
 
 // Execute directional focus movement, including lane handoff, monitor handoff,
 // and temporary empty-lane creation when the user moves into blank space.
+// Reading guide:
+// `dispatch_movefocus` resolves the active `CanvasLayout` and lands here.
+// This function then turns one directional request into one of a few routes:
+// local focus move, adjacent-lane focus, cross-monitor handoff, or creation of
+// a temporary empty lane that the user can move into.
 void CanvasLayout::move_focus(int workspace, Direction direction)
 {
     static auto* const *focus_wrap = (Hyprlang::INT* const *)HyprlandAPI::getConfigValue(PHANDLE, "plugin:scroller:focus_wrap")->getDataStaticPtr();

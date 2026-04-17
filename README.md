@@ -55,6 +55,32 @@ ctest --test-dir ./Debug --output-on-failure
 For compositor-level regressions after touching canvas or lane hot paths, run
 the manual [smoke test checklist](./docs/smoke-test-checklist.md) as well.
 
+## For Developers
+
+If you are trying to understand how the project works internally, start with
+the newcomer-oriented [architecture guide](./docs/architecture.md).
+
+The shortest useful reading path is:
+
+1. [`src/main.cpp`](./src/main.cpp)
+2. [`src/dispatchers.cpp`](./src/dispatchers.cpp)
+3. [`src/layout/canvas/layout.h`](./src/layout/canvas/layout.h)
+4. [`src/layout/canvas/core.cpp`](./src/layout/canvas/core.cpp)
+5. [`src/layout/canvas/focus.cpp`](./src/layout/canvas/focus.cpp)
+6. [`src/layout/canvas/commands.cpp`](./src/layout/canvas/commands.cpp)
+
+The automated tests are now split by subsystem instead of living in one large
+file:
+
+- [`tests/core_logic_tests.cpp`](./tests/core_logic_tests.cpp)
+- [`tests/layout_logic_tests.cpp`](./tests/layout_logic_tests.cpp)
+- [`tests/overview_logic_tests.cpp`](./tests/overview_logic_tests.cpp)
+
+For stateful layout changes, pair those tests with:
+
+- [smoke test checklist](./docs/smoke-test-checklist.md)
+- [Hyprland testing notes](./docs/hyprland-testing.md)
+
 A more automated option is to use `hyprpm`.
 
 ``` sh

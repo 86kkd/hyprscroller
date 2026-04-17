@@ -425,6 +425,10 @@ void CanvasLayout::relayoutCanvas(PHLMONITOR monitor, bool honor_fullscreen) {
 }
 
 // Hyprland callback: add a new tiled target into the current canvas.
+// New reader map:
+// Hyprland knows a window now belongs to the `scroller` layout, so it calls
+// this target hook. From here scroller converts the compositor target into its
+// own model by forwarding into `onWindowCreatedTiling`.
 void CanvasLayout::newTarget(SP<Layout::ITarget> target) {
     ensureWorkspaceRuntime();
 
@@ -619,7 +623,13 @@ void CanvasLayout::switchWindows(PHLWINDOW a, PHLWINDOW b)
     debugVerifyLaneCache();
 }
 
-// Insert a newly mapped tiled window into the active lane, creating one if needed.
+// Insert a newly mapped tiled window into the active lane, creating one if
+// needed.
+// This is the main "window joins the model" step:
+// 1. reject duplicates if the window is already owned
+// 2. find or create the active lane for this canvas
+// 3. let the lane decide where the new window goes locally
+// 4. update the window -> lane cache used by later focus/move operations
 void CanvasLayout::onWindowCreatedTiling(PHLWINDOW window, Math::eDirection)
 {
     if (!window)

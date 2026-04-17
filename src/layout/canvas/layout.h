@@ -44,6 +44,18 @@ struct CanvasOverviewSnapshot {
  * API and the plugin's internal model. It owns the ordered set of lanes for a
  * canvas, keeps active-lane state in sync with Hyprland focus, and exposes the
  * dispatcher-facing operations used by the plugin.
+ *
+ * Mental model for new readers:
+ * - one workspace owns one `CanvasLayout`
+ * - one `CanvasLayout` owns an ordered list of `Lane` objects
+ * - one `Lane` owns an ordered list of `Stack` objects
+ * - one `Stack` owns an ordered list of windows
+ *
+ * Most of the project is just different ways of moving through or mutating
+ * that hierarchy:
+ * - Hyprland target callbacks enter through `newTarget` / `removeTarget`
+ * - keybindings enter through dispatcher-facing methods like `move_focus`
+ * - `Lane` and `Stack` do the local membership and geometry work
  */
 class CanvasLayout : public Layout::ITiledAlgorithm {
 public:
@@ -63,6 +75,8 @@ public:
     void                             moveTargetInDirection(SP<Layout::ITarget> t, Math::eDirection direction, bool silent = false) override;
 
     // Called when a tiled window is first mapped.
+    // This is the main "new tiled window entered scroller" hook after Hyprland
+    // has already decided the window belongs to this tiled algorithm.
     void onWindowCreatedTiling(PHLWINDOW, Math::eDirection = Math::DIRECTION_DEFAULT);
     // Return true if the layout currently manages this window.
     bool isWindowTiled(PHLWINDOW);
@@ -92,6 +106,9 @@ public:
     CanvasOverviewSnapshot buildOverviewSnapshot() const;
 
     // New dispatchers: command-facing control surface from Hyprland config.
+    // The usual call chain is:
+    // Hyprland keybind -> `src/dispatchers.cpp` -> one of these methods ->
+    // lane/stack helpers -> relayout/focus synchronization.
     void cycle_window_size(int workspace, int step);
     void move_focus(int workspace, Direction);
     void move_window(int workspace, Direction);

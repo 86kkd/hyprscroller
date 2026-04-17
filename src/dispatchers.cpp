@@ -6,6 +6,12 @@
  * into strongly typed plugin commands, resolve the active canvas layout for the
  * current monitor/workspace context, and then forward execution into
  * `CanvasLayout`.
+ *
+ * Newcomer reading guide:
+ * Hyprland keybind -> named dispatcher in this file -> active `CanvasLayout`
+ * lookup -> command method such as `move_focus` or `move_window`.
+ * If you want to understand why a keybinding changes layout state, this is the
+ * first file after `PLUGIN_INIT`.
  */
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/includes.hpp>
@@ -137,6 +143,8 @@ namespace {
 
     // movefocus <dir>: move focus inside scroller layout, with optional monitor
     // fallback when the active lane cannot move in requested direction.
+    // This is the top of the focus path:
+    // keybind -> dispatcher parse -> active canvas -> `CanvasLayout::move_focus`.
     void dispatch_movefocus(std::string arg) {
         auto args = CVarList(arg);
         const auto direction = ScrollerCore::parse_direction_arg(args[0]);
@@ -164,6 +172,8 @@ namespace {
     }
 
     // movewindow <dir>: reorder active window inside lane/stack.
+    // This is the top of the window-move path:
+    // keybind -> dispatcher parse -> active canvas -> `CanvasLayout::move_window`.
     void dispatch_movewindow(std::string arg) {
         int workspace;
         auto layout = layout_for_action(&workspace);
