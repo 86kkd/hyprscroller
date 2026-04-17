@@ -48,7 +48,9 @@ add_library(hyprscroller SHARED
             src/overview/pass_element.h
             src/overview/pass_element.cpp
             src/model/window.cpp
-            src/model/stack.cpp
+            src/model/stack_core.cpp
+            src/model/stack_membership.cpp
+            src/model/stack_geometry.cpp
             src/layout/canvas/core.cpp
             src/layout/canvas/overview.cpp
             src/layout/canvas/dispatch.cpp
@@ -86,7 +88,10 @@ set_target_properties(hyprscroller PROPERTIES PREFIX "")
 
 if(BUILD_TESTING)
     add_executable(hyprscroller_logic_tests
-                   tests/logic_tests.cpp
+                   tests/test_main.cpp
+                   tests/core_logic_tests.cpp
+                   tests/layout_logic_tests.cpp
+                   tests/overview_logic_tests.cpp
                    src/core/direction.cpp
                    src/core/layout_math.cpp
                    src/core/monitor_geometry.cpp

@@ -115,9 +115,6 @@ public:
     void recalculate_lane_geometry();
 
 private:
-    static uintptr_t windowKey(PHLWINDOW window) {
-        return reinterpret_cast<uintptr_t>(window.get());
-    }
     ScrollerModel::Stack *getStackForWindow(PHLWINDOW window) const;
     ListNode<ScrollerModel::Stack *> *getStackNode(ScrollerModel::Stack *stack) const;
     void rememberWindowStack(PHLWINDOW window, ScrollerModel::Stack *stack);

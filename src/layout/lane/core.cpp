@@ -7,6 +7,7 @@
 
 #include "../../core/layout_profile.h"
 #include "../../core/monitor_geometry_runtime.h"
+#include "../../core/window_key.h"
 
 using ScrollerCore::Box;
 using ScrollerModel::Reorder;
@@ -58,7 +59,7 @@ Stack *Lane::getStackForWindow(PHLWINDOW window) const {
     if (!window)
         return nullptr;
 
-    const auto key = windowKey(window);
+    const auto key = ScrollerCore::window_key(window);
     if (auto *cachedStack = stackByWindow.find_valid(key, [&](Stack *owner) {
             return owner && getStackNode(owner) && owner->has_window(window);
         }))
@@ -95,14 +96,14 @@ void Lane::rememberWindowStack(PHLWINDOW window, Stack *stack) {
         return;
     }
 
-    stackByWindow.remember(windowKey(window), stack);
+    stackByWindow.remember(ScrollerCore::window_key(window), stack);
 }
 
 void Lane::forgetWindowStack(PHLWINDOW window) {
     if (!window)
         return;
 
-    stackByWindow.forget(windowKey(window));
+    stackByWindow.forget(ScrollerCore::window_key(window));
 }
 
 void Lane::rememberStackWindows(Stack *stack) {
@@ -111,7 +112,7 @@ void Lane::rememberStackWindows(Stack *stack) {
 
     stackByWindow.remember_owner(stack, [&](auto &&remember) {
         stack->for_each_window([&](PHLWINDOW window) {
-            remember(windowKey(window));
+            remember(ScrollerCore::window_key(window));
         });
     });
 }
@@ -129,7 +130,7 @@ void Lane::debugVerifyStackCache() const {
         for (auto col = stacks.first(); col != nullptr; col = col->next()) {
             auto *stack = col->data();
             stack->for_each_window([&](PHLWINDOW window) {
-                addExpected(windowKey(window), stack);
+                addExpected(ScrollerCore::window_key(window), stack);
             });
         }
     }));

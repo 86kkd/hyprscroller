@@ -21,6 +21,7 @@
 #include "../../core/core.h"
 #include "../../core/layout_profile.h"
 #include "../../core/monitor_geometry_runtime.h"
+#include "../../core/window_key.h"
 #include "../lane/lane.h"
 #include "layout.h"
 #include "internal.h"
@@ -166,14 +167,14 @@ void CanvasLayout::rememberWindowLane(PHLWINDOW window, Lane *lane) {
         return;
     }
 
-    laneByWindow.remember(reinterpret_cast<uintptr_t>(window.get()), lane);
+    laneByWindow.remember(ScrollerCore::window_key(window), lane);
 }
 
 void CanvasLayout::forgetWindowLane(PHLWINDOW window) {
     if (!window)
         return;
 
-    laneByWindow.forget(reinterpret_cast<uintptr_t>(window.get()));
+    laneByWindow.forget(ScrollerCore::window_key(window));
 }
 
 void CanvasLayout::rememberLaneWindows(Lane *lane) {
@@ -182,7 +183,7 @@ void CanvasLayout::rememberLaneWindows(Lane *lane) {
 
     laneByWindow.remember_owner(lane, [&](auto &&remember) {
         lane->for_each_window([&](PHLWINDOW window) {
-            remember(reinterpret_cast<uintptr_t>(window.get()));
+            remember(ScrollerCore::window_key(window));
         });
     });
 }
@@ -200,7 +201,7 @@ void CanvasLayout::debugVerifyLaneCache() const {
         for (auto laneNode = lanes.first(); laneNode != nullptr; laneNode = laneNode->next()) {
             auto *lane = laneNode->data();
             lane->for_each_window([&](PHLWINDOW window) {
-                addExpected(reinterpret_cast<uintptr_t>(window.get()), lane);
+                addExpected(ScrollerCore::window_key(window), lane);
             });
         }
     }));
@@ -237,18 +238,18 @@ void CanvasLayout::rememberManualCrossMonitorInsertion(PHLWINDOW window) {
     if (!window)
         return;
 
-    handoffState.rememberManualCrossMonitorInsertion(reinterpret_cast<uintptr_t>(window.get()));
+    handoffState.rememberManualCrossMonitorInsertion(ScrollerCore::window_key(window));
 }
 
 void CanvasLayout::forgetManualCrossMonitorInsertion(PHLWINDOW window) {
     if (!window)
         return;
 
-    handoffState.forgetManualCrossMonitorInsertion(reinterpret_cast<uintptr_t>(window.get()));
+    handoffState.forgetManualCrossMonitorInsertion(ScrollerCore::window_key(window));
 }
 
 bool CanvasLayout::hasPendingManualCrossMonitorInsertion(PHLWINDOW window) const {
-    return window && handoffState.hasPendingManualCrossMonitorInsertion(reinterpret_cast<uintptr_t>(window.get()));
+    return window && handoffState.hasPendingManualCrossMonitorInsertion(ScrollerCore::window_key(window));
 }
 
 void CanvasLayout::requestWorkspaceFocusSyncSuppression() {
@@ -277,7 +278,7 @@ Lane *CanvasLayout::getLaneForWindow(PHLWINDOW window) {
     if (!window)
         return nullptr;
 
-    const auto key = reinterpret_cast<uintptr_t>(window.get());
+    const auto key = ScrollerCore::window_key(window);
     if (auto *cachedLane = laneByWindow.find_valid(key, [&](Lane *owner) {
             return owner && getLaneNode(owner) && owner->has_window(window);
         }))
