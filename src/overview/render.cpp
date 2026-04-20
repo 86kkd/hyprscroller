@@ -4,8 +4,7 @@
  *
  * The overview renderer intentionally avoids symbol scanning and any mutation
  * of real window geometry. It draws a monitor-local overlay from the read-only
- * overview session model and can re-render window surfaces into thumbnail cards
- * without turning overview into an editing mode.
+ * overview session model without turning overview into an editing mode.
  */
 #include "render.h"
 
@@ -30,6 +29,7 @@
 #include <hyprland/src/protocols/LayerShell.hpp>
 #include <hyprland/src/render/OpenGL.hpp>
 #include <hyprland/src/render/Renderer.hpp>
+#include <hyprland/src/render/pass/ClearPassElement.hpp>
 #include <spdlog/spdlog.h>
 
 #include "pass_element.h"
@@ -43,13 +43,7 @@ using ScrollerCore::Box;
 using steady_tp = std::chrono::steady_clock::time_point;
 
 constexpr auto kOpenDuration = std::chrono::milliseconds(180);
-constexpr auto kCloseDuration = std::chrono::milliseconds(180);
 constexpr auto kSelectionDuration = std::chrono::milliseconds(120);
-
-struct ClosingScene {
-    SceneMonitor scene;
-    steady_tp    startedAt;
-};
 
 struct SelectionPulse {
     Box      box;
@@ -60,9 +54,8 @@ CHyprSignalListener                         g_renderPreListener = nullptr;
 CHyprSignalListener                         g_renderStageListener = nullptr;
 CHyprSignalListener                         g_keyboardKeyListener = nullptr;
 std::unordered_map<int, steady_tp>         g_openedAt;
-std::unordered_map<int, ClosingScene>      g_closingScenes;
 std::unordered_map<int, SceneMonitor>      g_liveScenes;
-std::unordered_map<int, std::vector<PHLLSREF>> g_backgroundLayers;
+std::unordered_map<int, std::vector<PHLLSREF>> g_backdropLayers;
 std::unordered_map<int, SelectionPulse>    g_selectionPulses;
 std::unordered_map<std::string, SP<CTexture>> g_textCache;
 bool                                       g_lastOverviewActive = false;
@@ -194,87 +187,29 @@ void draw_rect(const Box& box, const Box& bounds, const CHyprColor& color, int r
     g_pHyprOpenGL->renderRect(to_cbox(*clipped), color, data);
 }
 
-void draw_panel(const Box& box, const Box& bounds, const CHyprColor& border, const CHyprColor& fill, int round, double borderWidth = 2.0) {
+void draw_outline_panel(const Box& box, const Box& bounds, const CHyprColor& color, double borderWidth = 2.0) {
     const auto clipped = intersect_box(box, bounds);
-    if (!clipped || clipped->w <= 2.0 || clipped->h <= 2.0)
+    if (!clipped || clipped->w <= 2.0 || clipped->h <= 2.0 || borderWidth <= 0.0)
         return;
 
-    draw_rect(*clipped, bounds, border, round);
-    draw_rect(inset_box(*clipped, borderWidth, borderWidth), bounds, fill, std::max(0, round - iround(borderWidth)));
-}
-
-bool draw_window_snapshot(const SceneTarget& target, const Box& box, const Box& bounds, double overlayAlpha) {
-    if (!target.window)
-        return false;
-
-    const auto clipped = intersect_box(box, bounds);
-    if (!clipped || clipped->w <= 4.0 || clipped->h <= 4.0)
-        return false;
-
-    const auto monitor = g_pHyprOpenGL->m_renderData.pMonitor.lock();
-    const auto sourceMonitor = g_pCompositor->getMonitorFromID(target.window->monitorID());
-    if (!monitor || !sourceMonitor || sourceMonitor->m_id != monitor->m_id)
-        return false;
-
-    const auto sourceBox = target.window->getWindowMainSurfaceBox();
-    if (sourceBox.w <= 1.0 || sourceBox.h <= 1.0)
-        return false;
-
-    const auto sourceLocal = Box{
-        sourceBox.x - sourceMonitor->m_position.x,
-        sourceBox.y - sourceMonitor->m_position.y,
-        sourceBox.w,
-        sourceBox.h,
-    };
-    const auto scale = std::min(clipped->w / std::max(1.0, sourceLocal.w),
-                                clipped->h / std::max(1.0, sourceLocal.h));
-    if (!std::isfinite(scale) || scale <= 0.0)
-        return false;
-
-    const auto centeredTarget = Box{
-        clipped->x + (clipped->w - sourceLocal.w * scale) * 0.5,
-        clipped->y + (clipped->h - sourceLocal.h * scale) * 0.5,
-        sourceLocal.w * scale,
-        sourceLocal.h * scale,
-    };
-    const auto translate = Vector2D(centeredTarget.x - sourceLocal.x * scale,
-                                    centeredTarget.y - sourceLocal.y * scale);
-
-    g_pHyprOpenGL->saveMatrix();
-    g_pHyprOpenGL->setMatrixScaleTranslate(translate, static_cast<float>(scale));
-    g_pHyprRenderer->renderSnapshot(target.window);
-    g_pHyprOpenGL->restoreMatrix();
-
-    if (overlayAlpha < 0.999) {
-        draw_rect(centeredTarget,
-                  bounds,
-                  CHyprColor(0.02F, 0.03F, 0.05F, static_cast<float>((1.0 - overlayAlpha) * 0.20)),
-                  12);
-    }
-    return true;
+    const auto stroke = std::max(1.0, borderWidth);
+    draw_rect({clipped->x, clipped->y, clipped->w, std::min(stroke, clipped->h)}, bounds, color, 0);
+    draw_rect({clipped->x, clipped->y + std::max(0.0, clipped->h - stroke), clipped->w, std::min(stroke, clipped->h)}, bounds, color, 0);
+    draw_rect({clipped->x, clipped->y, std::min(stroke, clipped->w), clipped->h}, bounds, color, 0);
+    draw_rect({clipped->x + std::max(0.0, clipped->w - stroke), clipped->y, std::min(stroke, clipped->w), clipped->h}, bounds, color, 0);
 }
 
 void draw_window_preview(const SceneTarget& target, const Box& bounds, double overlayAlpha) {
     const auto drawBox = center_scale_box(target.box, 0.97 + 0.03 * overlayAlpha);
-    const auto baseFill = target.selected ? CHyprColor(0.17F, 0.24F, 0.31F, static_cast<float>(0.30 * overlayAlpha))
-                                          : CHyprColor(0.06F, 0.08F, 0.11F, static_cast<float>(0.22 * overlayAlpha));
     const auto border = target.selected ? CHyprColor(0.64F, 0.86F, 0.98F, static_cast<float>(0.92 * overlayAlpha))
                                         : CHyprColor(0.28F, 0.31F, 0.38F, static_cast<float>(0.92 * overlayAlpha));
-    draw_panel(drawBox, bounds, border, baseFill, 16, 2.0);
-
-    const auto previewBox = inset_box(drawBox, 4.0, 4.0);
-    const auto drewSnapshot = draw_window_snapshot(target, previewBox, bounds, overlayAlpha);
-    if (!drewSnapshot) {
-        const auto fallbackFill = target.selected ? CHyprColor(0.25F, 0.38F, 0.49F, static_cast<float>(0.86 * overlayAlpha))
-                                                  : CHyprColor(0.14F, 0.16F, 0.21F, static_cast<float>(0.80 * overlayAlpha));
-        draw_rect(previewBox, bounds, fallbackFill, 12);
-    }
+    draw_outline_panel(drawBox, bounds, border, 2.0);
 
     const auto titleBackdrop = Box{
-        previewBox.x + 8.0,
-        previewBox.y + 8.0,
-        std::max(24.0, std::min(previewBox.w - 16.0, std::max(80.0, previewBox.w * 0.72))),
-        std::min(28.0, std::max(20.0, previewBox.h * 0.16)),
+        drawBox.x + 10.0,
+        drawBox.y + 10.0,
+        std::max(24.0, std::min(drawBox.w - 20.0, std::max(80.0, drawBox.w * 0.72))),
+        std::min(28.0, std::max(20.0, drawBox.h * 0.12)),
     };
     if (titleBackdrop.w > 8.0 && titleBackdrop.h > 8.0)
         draw_rect(titleBackdrop,
@@ -291,11 +226,9 @@ void draw_window_preview(const SceneTarget& target, const Box& bounds, double ov
 
 void draw_empty_target(const SceneTarget& target, const Box& bounds, double overlayAlpha) {
     const auto drawBox = center_scale_box(target.box, 0.97 + 0.03 * overlayAlpha);
-    const auto fill = target.synthetic ? CHyprColor(0.11F, 0.29F, 0.38F, static_cast<float>(0.58 * overlayAlpha))
-                                       : CHyprColor(0.12F, 0.14F, 0.18F, static_cast<float>(0.58 * overlayAlpha));
     const auto border = target.selected ? CHyprColor(0.64F, 0.86F, 0.98F, static_cast<float>(0.92 * overlayAlpha))
                                         : CHyprColor(0.28F, 0.31F, 0.38F, static_cast<float>(0.86 * overlayAlpha));
-    draw_panel(drawBox, bounds, border, fill, 20, 2.0);
+    draw_outline_panel(drawBox, bounds, border, 2.0);
     draw_text(target.label, inset_box(drawBox, 12.0, 10.0), bounds, CHyprColor(0.88F, 0.92F, 0.98F, static_cast<float>(overlayAlpha)), 16, 500);
 }
 
@@ -309,16 +242,7 @@ double overlay_progress(int monitorId, steady_tp now) {
         return ease_out_cubic(elapsed / std::chrono::duration<double>(kOpenDuration).count());
     }
 
-    const auto it = g_closingScenes.find(monitorId);
-    if (it == g_closingScenes.end())
-        return 0.0;
-
-    const auto elapsed = std::chrono::duration<double>(now - it->second.startedAt).count();
-    return 1.0 - ease_out_cubic(elapsed / std::chrono::duration<double>(kCloseDuration).count());
-}
-
-bool closing_animation_finished(const ClosingScene& scene, steady_tp now) {
-    return now - scene.startedAt >= kCloseDuration;
+    return 0.0;
 }
 
 bool selection_animation_active(int monitorId, steady_tp now) {
@@ -337,28 +261,15 @@ Box animated_selection_box(const Box& selectionBox, int monitorId, steady_tp now
     return center_scale_box(selectionBox, pulse);
 }
 
-void snapshot_window_targets() {
-    for (const auto& region : session().model().monitors()) {
-        for (const auto& workspace : region.workspaces) {
-            for (const auto& target : workspace.targets) {
-                if (target.type != TargetType::Window || !target.window)
-                    continue;
-
-                g_pHyprRenderer->makeSnapshot(target.window);
-            }
-        }
-    }
-}
-
-void snapshot_background_layers() {
-    g_backgroundLayers.clear();
+void snapshot_backdrop_layers() {
+    g_backdropLayers.clear();
 
     for (const auto& region : session().model().monitors()) {
         auto monitor = region.monitor;
         if (!monitor)
             continue;
 
-        auto& layers = g_backgroundLayers[monitor->m_id];
+        auto& layers = g_backdropLayers[monitor->m_id];
         const auto snapshotLayerList = [&layers](const auto& layerList) {
             for (const auto& layerRef : layerList) {
                 auto layer = layerRef.lock();
@@ -370,16 +281,32 @@ void snapshot_background_layers() {
             }
         };
 
-        // Wallpaper clients may sit on either background or bottom. Capture
-        // both so overview can replay the original wallpaper layer stack.
+        // Wallpaper clients are usually on background or bottom. Capture both
+        // and preserve Hyprland's normal render order.
         snapshotLayerList(monitor->m_layerSurfaceLayers[ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND]);
         snapshotLayerList(monitor->m_layerSurfaceLayers[ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM]);
     }
 }
 
-void draw_wallpaper_background(int monitorId) {
-    const auto it = g_backgroundLayers.find(monitorId);
-    if (it == g_backgroundLayers.end())
+void enqueue_monitor_backdrop(PHLMONITOR monitor) {
+    if (!monitor)
+        return;
+
+    // These pass elements must be queued while Hyprland is still building the
+    // render pass. Calling renderSnapshot from inside our own pass element
+    // draw() mutates the pass during iteration, which makes backdrop ordering
+    // unreliable.
+    //
+    // Avoid clearWithTex(): that reuses Hyprland's monitor background texture,
+    // which is not the original wallpaper layer stack and can reintroduce blur
+    // or monitor-local transition flicker. Use a stable matte under the
+    // captured background/bottom layers instead.
+    g_pHyprRenderer->m_renderPass.add(makeUnique<CClearPassElement>(CClearPassElement::SClearData{
+        CHyprColor(0.02F, 0.03F, 0.05F, 1.0F),
+    }));
+
+    const auto it = g_backdropLayers.find(monitor->m_id);
+    if (it == g_backdropLayers.end())
         return;
 
     for (const auto& layerRef : it->second) {
@@ -391,14 +318,6 @@ void draw_wallpaper_background(int monitorId) {
     }
 }
 
-void draw_monitor_backdrop(int monitorId) {
-    // The overview pass is injected after normal window rendering, so we need
-    // to restore the compositor's monitor background first or empty regions
-    // will keep showing the live desktop below the overlay.
-    g_pHyprOpenGL->clearWithTex();
-    draw_wallpaper_background(monitorId);
-}
-
 void draw_scene_monitor(const SceneMonitor& scene, steady_tp now) {
     const auto progress = overlay_progress(scene.monitorId, now);
     if (progress <= 0.0)
@@ -406,8 +325,6 @@ void draw_scene_monitor(const SceneMonitor& scene, steady_tp now) {
 
     const auto overlayBox = center_scale_box(scene.box, 0.965 + 0.035 * progress);
     const auto overlayAlpha = progress;
-
-    draw_monitor_backdrop(scene.monitorId);
 
     const auto monitorChip = Box{
         16.0,
@@ -427,30 +344,6 @@ void draw_scene_monitor(const SceneMonitor& scene, steady_tp now) {
               500);
 
     for (const auto& workspace : scene.workspaces) {
-        const auto workspaceBox = center_scale_box(workspace.box, 0.97 + 0.03 * progress);
-        const auto border = workspace.selected ? CHyprColor(0.53F, 0.74F, 0.88F, static_cast<float>(0.92 * overlayAlpha))
-                                               : CHyprColor(0.20F, 0.23F, 0.28F, static_cast<float>(0.92 * overlayAlpha));
-        const auto fill = workspace.special ? CHyprColor(0.08F, 0.12F, 0.18F, static_cast<float>(0.20 * overlayAlpha))
-                                            : CHyprColor(0.04F, 0.05F, 0.08F, static_cast<float>(0.14 * overlayAlpha));
-        draw_panel(workspaceBox, scene.box, border, fill, 24, 2.0);
-
-        const auto workspaceChip = Box{
-            workspaceBox.x + 10.0,
-            workspaceBox.y + 8.0,
-            std::min(std::max(72.0, workspaceBox.w * 0.28), std::max(72.0, workspaceBox.w - 20.0)),
-            22.0,
-        };
-        draw_rect(workspaceChip,
-                  scene.box,
-                  CHyprColor(0.05F, 0.06F, 0.09F, static_cast<float>(0.58 * overlayAlpha)),
-                  9);
-        draw_text(workspace.label,
-                  {workspaceChip.x + 8.0, workspaceChip.y + 2.0, std::max(40.0, workspaceChip.w - 16.0), workspaceChip.h - 4.0},
-                  scene.box,
-                  CHyprColor(0.92F, 0.95F, 1.0F, static_cast<float>(overlayAlpha)),
-                  16,
-                  600);
-
         for (const auto& target : workspace.targets) {
             if (target.type == TargetType::Window)
                 draw_window_preview(target, scene.box, overlayAlpha);
@@ -474,12 +367,10 @@ void draw_scene_monitor(const SceneMonitor& scene, steady_tp now) {
 
     if (scene.selectionBox) {
         const auto selectionBox = animated_selection_box(*scene.selectionBox, scene.monitorId, now);
-        draw_panel(center_scale_box(selectionBox, 1.02),
-                   scene.box,
-                   CHyprColor(0.91F, 0.76F, 0.27F, static_cast<float>(0.96 * overlayAlpha)),
-                   CHyprColor(0.91F, 0.76F, 0.27F, static_cast<float>(0.12 * overlayAlpha)),
-                   18,
-                   2.0);
+        draw_outline_panel(center_scale_box(selectionBox, 1.02),
+                           scene.box,
+                           CHyprColor(0.91F, 0.76F, 0.27F, static_cast<float>(0.96 * overlayAlpha)),
+                           2.0);
     }
 }
 
@@ -512,10 +403,6 @@ void damage_monitor_if_animating(PHLMONITOR monitor, steady_tp now) {
         g_pHyprRenderer->damageMonitor(monitor);
         return;
     }
-
-    const auto closeIt = g_closingScenes.find(monitor->m_id);
-    if (closeIt != g_closingScenes.end() && !closing_animation_finished(closeIt->second, now))
-        g_pHyprRenderer->damageMonitor(monitor);
 }
 
 void handle_session_transition(steady_tp now) {
@@ -524,12 +411,10 @@ void handle_session_transition(steady_tp now) {
         return;
 
     if (overviewActive) {
-        g_closingScenes.clear();
         g_openedAt.clear();
-        g_backgroundLayers.clear();
+        g_backdropLayers.clear();
         g_selectionPulses.clear();
-        snapshot_window_targets();
-        snapshot_background_layers();
+        snapshot_backdrop_layers();
         for (const auto& region : session().model().monitors()) {
             g_openedAt[region.monitorId] = now;
             if (region.monitor)
@@ -539,15 +424,12 @@ void handle_session_transition(steady_tp now) {
     } else {
         g_openedAt.clear();
         g_selectionPulses.clear();
-        for (const auto& [monitorId, scene] : g_liveScenes) {
-            g_closingScenes[monitorId] = ClosingScene{
-                .scene = scene,
-                .startedAt = now,
-            };
+        for (const auto& [monitorId, _scene] : g_liveScenes) {
             if (const auto monitor = g_pCompositor->getMonitorFromID(monitorId))
                 g_pHyprRenderer->damageMonitor(monitor);
         }
-        spdlog::info("overview_renderer: disabled monitors={}", g_closingScenes.size());
+        g_liveScenes.clear();
+        spdlog::info("overview_renderer: disabled monitors=0");
     }
 
     g_lastOverviewActive = overviewActive;
@@ -562,7 +444,6 @@ void update_live_scene_for_monitor(PHLMONITOR monitor, steady_tp now) {
 
     update_selection_pulse(*scene, now);
     g_liveScenes[monitor->m_id] = *scene;
-    g_closingScenes.erase(monitor->m_id);
 }
 
 } // namespace
@@ -579,14 +460,7 @@ void fullRenderMonitor(PHLMONITOR monitor) {
             return;
 
         draw_scene_monitor(it->second, now);
-        return;
     }
-
-    const auto it = g_closingScenes.find(monitor->m_id);
-    if (it == g_closingScenes.end())
-        return;
-
-    draw_scene_monitor(it->second.scene, now);
 }
 
 bool initializeRendererHooks(HANDLE handle) {
@@ -602,13 +476,8 @@ bool initializeRendererHooks(HANDLE handle) {
             const auto now = std::chrono::steady_clock::now();
             handle_session_transition(now);
 
-            if (session().active()) {
+            if (session().active())
                 update_live_scene_for_monitor(monitor, now);
-            } else {
-                auto it = g_closingScenes.find(monitor->m_id);
-                if (it != g_closingScenes.end() && closing_animation_finished(it->second, now))
-                    g_closingScenes.erase(it);
-            }
 
             damage_monitor_if_animating(monitor, now);
         });
@@ -622,14 +491,11 @@ bool initializeRendererHooks(HANDLE handle) {
                 return;
 
             if (session().active()) {
-                if (g_liveScenes.contains(monitor->m_id))
+                if (g_liveScenes.contains(monitor->m_id)) {
+                    enqueue_monitor_backdrop(monitor);
                     g_pHyprRenderer->m_renderPass.add(makeUnique<OverviewPassElement>(monitor));
-                return;
+                }
             }
-
-            const auto it = g_closingScenes.find(monitor->m_id);
-            if (it != g_closingScenes.end() && !closing_animation_finished(it->second, std::chrono::steady_clock::now()))
-                g_pHyprRenderer->m_renderPass.add(makeUnique<OverviewPassElement>(monitor));
         });
 
         g_keyboardKeyListener = Event::bus()->m_events.input.keyboard.key.listen([](IKeyboard::SKeyEvent event, Event::SCallbackInfo& info) {
@@ -653,9 +519,8 @@ bool initializeRendererHooks(HANDLE handle) {
         g_renderStageListener = nullptr;
         g_keyboardKeyListener = nullptr;
         g_openedAt.clear();
-        g_closingScenes.clear();
         g_liveScenes.clear();
-        g_backgroundLayers.clear();
+        g_backdropLayers.clear();
         g_selectionPulses.clear();
         g_textCache.clear();
         g_lastOverviewActive = false;
@@ -670,9 +535,8 @@ void shutdownRendererHooks(HANDLE handle) {
     g_renderStageListener = nullptr;
     g_keyboardKeyListener = nullptr;
     g_openedAt.clear();
-    g_closingScenes.clear();
     g_liveScenes.clear();
-    g_backgroundLayers.clear();
+    g_backdropLayers.clear();
     g_selectionPulses.clear();
     g_textCache.clear();
     g_lastOverviewActive = false;
