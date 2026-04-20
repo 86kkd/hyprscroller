@@ -161,7 +161,18 @@ Session& session() {
 
 void Session::clear() {
     active_ = false;
+    inputHandled_ = false;
     model_.clear();
+}
+
+void Session::markInputHandled() {
+    inputHandled_ = true;
+}
+
+bool Session::consumeInputHandled() {
+    const auto handled = inputHandled_;
+    inputHandled_ = false;
+    return handled;
 }
 
 bool Session::selectInitialTarget() {
@@ -392,6 +403,18 @@ void Session::close(bool acceptSelectionFlag) {
     const auto* selection = model_.selection();
     spdlog::info("overview_close: accepted={} selection_workspace={} selection_window={}",
                  acceptSelectionFlag,
+                 selection ? selection->workspaceId : WORKSPACE_INVALID,
+                 static_cast<const void*>(selection && selection->window ? selection->window.get() : nullptr));
+    damageMonitors();
+    clear();
+}
+
+void Session::dismiss() {
+    if (!active_)
+        return;
+
+    const auto* selection = model_.selection();
+    spdlog::info("overview_dismiss: selection_workspace={} selection_window={}",
                  selection ? selection->workspaceId : WORKSPACE_INVALID,
                  static_cast<const void*>(selection && selection->window ? selection->window.get() : nullptr));
     damageMonitors();

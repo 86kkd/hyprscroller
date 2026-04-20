@@ -2,10 +2,10 @@
  * @file render.cpp
  * @brief Stable overview renderer built on top of Hyprland render passes.
  *
- * The overview renderer intentionally avoids symbol scanning, renderer hooks,
- * and live window framebuffer capture. It draws a monitor-local overlay from
- * the read-only overview session model so overview stays a navigation layer
- * instead of mutating real window geometry during rendering.
+ * The overview renderer intentionally avoids symbol scanning and any mutation
+ * of real window geometry. It draws a monitor-local overlay from the read-only
+ * overview session model and can re-render window surfaces into thumbnail cards
+ * without turning overview into an editing mode.
  */
 #include "render.h"
 
@@ -22,10 +22,12 @@
 #include <vector>
 
 #include <hyprland/src/Compositor.hpp>
+#include <hyprland/src/desktop/view/LayerSurface.hpp>
 #include <hyprland/src/desktop/Workspace.hpp>
 #include <hyprland/src/event/EventBus.hpp>
 #include <hyprland/src/helpers/Color.hpp>
 #include <hyprland/src/plugins/PluginAPI.hpp>
+#include <hyprland/src/protocols/LayerShell.hpp>
 #include <hyprland/src/render/OpenGL.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 #include <spdlog/spdlog.h>
@@ -56,9 +58,11 @@ struct SelectionPulse {
 
 CHyprSignalListener                         g_renderPreListener = nullptr;
 CHyprSignalListener                         g_renderStageListener = nullptr;
+CHyprSignalListener                         g_keyboardKeyListener = nullptr;
 std::unordered_map<int, steady_tp>         g_openedAt;
 std::unordered_map<int, ClosingScene>      g_closingScenes;
 std::unordered_map<int, SceneMonitor>      g_liveScenes;
+std::unordered_map<int, std::vector<PHLLSREF>> g_backgroundLayers;
 std::unordered_map<int, SelectionPulse>    g_selectionPulses;
 std::unordered_map<std::string, SP<CTexture>> g_textCache;
 bool                                       g_lastOverviewActive = false;
@@ -199,16 +203,90 @@ void draw_panel(const Box& box, const Box& bounds, const CHyprColor& border, con
     draw_rect(inset_box(*clipped, borderWidth, borderWidth), bounds, fill, std::max(0, round - iround(borderWidth)));
 }
 
+bool draw_window_snapshot(const SceneTarget& target, const Box& box, const Box& bounds, double overlayAlpha) {
+    if (!target.window)
+        return false;
+
+    const auto clipped = intersect_box(box, bounds);
+    if (!clipped || clipped->w <= 4.0 || clipped->h <= 4.0)
+        return false;
+
+    const auto monitor = g_pHyprOpenGL->m_renderData.pMonitor.lock();
+    const auto sourceMonitor = g_pCompositor->getMonitorFromID(target.window->monitorID());
+    if (!monitor || !sourceMonitor || sourceMonitor->m_id != monitor->m_id)
+        return false;
+
+    const auto sourceBox = target.window->getWindowMainSurfaceBox();
+    if (sourceBox.w <= 1.0 || sourceBox.h <= 1.0)
+        return false;
+
+    const auto sourceLocal = Box{
+        sourceBox.x - sourceMonitor->m_position.x,
+        sourceBox.y - sourceMonitor->m_position.y,
+        sourceBox.w,
+        sourceBox.h,
+    };
+    const auto scale = std::min(clipped->w / std::max(1.0, sourceLocal.w),
+                                clipped->h / std::max(1.0, sourceLocal.h));
+    if (!std::isfinite(scale) || scale <= 0.0)
+        return false;
+
+    const auto centeredTarget = Box{
+        clipped->x + (clipped->w - sourceLocal.w * scale) * 0.5,
+        clipped->y + (clipped->h - sourceLocal.h * scale) * 0.5,
+        sourceLocal.w * scale,
+        sourceLocal.h * scale,
+    };
+    const auto translate = Vector2D(centeredTarget.x - sourceLocal.x * scale,
+                                    centeredTarget.y - sourceLocal.y * scale);
+
+    g_pHyprOpenGL->saveMatrix();
+    g_pHyprOpenGL->setMatrixScaleTranslate(translate, static_cast<float>(scale));
+    g_pHyprRenderer->renderSnapshot(target.window);
+    g_pHyprOpenGL->restoreMatrix();
+
+    if (overlayAlpha < 0.999) {
+        draw_rect(centeredTarget,
+                  bounds,
+                  CHyprColor(0.02F, 0.03F, 0.05F, static_cast<float>((1.0 - overlayAlpha) * 0.20)),
+                  12);
+    }
+    return true;
+}
+
 void draw_window_preview(const SceneTarget& target, const Box& bounds, double overlayAlpha) {
     const auto drawBox = center_scale_box(target.box, 0.97 + 0.03 * overlayAlpha);
-    const auto baseFill = target.selected ? CHyprColor(0.27F, 0.41F, 0.55F, static_cast<float>(0.88 * overlayAlpha))
-                                          : CHyprColor(0.17F, 0.19F, 0.24F, static_cast<float>(0.86 * overlayAlpha));
+    const auto baseFill = target.selected ? CHyprColor(0.17F, 0.24F, 0.31F, static_cast<float>(0.30 * overlayAlpha))
+                                          : CHyprColor(0.06F, 0.08F, 0.11F, static_cast<float>(0.22 * overlayAlpha));
     const auto border = target.selected ? CHyprColor(0.64F, 0.86F, 0.98F, static_cast<float>(0.92 * overlayAlpha))
                                         : CHyprColor(0.28F, 0.31F, 0.38F, static_cast<float>(0.92 * overlayAlpha));
     draw_panel(drawBox, bounds, border, baseFill, 16, 2.0);
 
-    const auto titleBox = inset_box(drawBox, 10.0, 8.0);
-    draw_text(target.label, {titleBox.x, titleBox.y, titleBox.w, 18.0}, bounds, CHyprColor(0.95F, 0.97F, 1.0F, static_cast<float>(overlayAlpha)), 15, 500);
+    const auto previewBox = inset_box(drawBox, 4.0, 4.0);
+    const auto drewSnapshot = draw_window_snapshot(target, previewBox, bounds, overlayAlpha);
+    if (!drewSnapshot) {
+        const auto fallbackFill = target.selected ? CHyprColor(0.25F, 0.38F, 0.49F, static_cast<float>(0.86 * overlayAlpha))
+                                                  : CHyprColor(0.14F, 0.16F, 0.21F, static_cast<float>(0.80 * overlayAlpha));
+        draw_rect(previewBox, bounds, fallbackFill, 12);
+    }
+
+    const auto titleBackdrop = Box{
+        previewBox.x + 8.0,
+        previewBox.y + 8.0,
+        std::max(24.0, std::min(previewBox.w - 16.0, std::max(80.0, previewBox.w * 0.72))),
+        std::min(28.0, std::max(20.0, previewBox.h * 0.16)),
+    };
+    if (titleBackdrop.w > 8.0 && titleBackdrop.h > 8.0)
+        draw_rect(titleBackdrop,
+                  bounds,
+                  CHyprColor(0.03F, 0.04F, 0.06F, static_cast<float>(0.72 * overlayAlpha)),
+                  9);
+    draw_text(target.label,
+              {titleBackdrop.x + 8.0, titleBackdrop.y + 3.0, std::max(24.0, titleBackdrop.w - 16.0), std::max(14.0, titleBackdrop.h - 6.0)},
+              bounds,
+              CHyprColor(0.95F, 0.97F, 1.0F, static_cast<float>(overlayAlpha)),
+              15,
+              500);
 }
 
 void draw_empty_target(const SceneTarget& target, const Box& bounds, double overlayAlpha) {
@@ -259,6 +337,68 @@ Box animated_selection_box(const Box& selectionBox, int monitorId, steady_tp now
     return center_scale_box(selectionBox, pulse);
 }
 
+void snapshot_window_targets() {
+    for (const auto& region : session().model().monitors()) {
+        for (const auto& workspace : region.workspaces) {
+            for (const auto& target : workspace.targets) {
+                if (target.type != TargetType::Window || !target.window)
+                    continue;
+
+                g_pHyprRenderer->makeSnapshot(target.window);
+            }
+        }
+    }
+}
+
+void snapshot_background_layers() {
+    g_backgroundLayers.clear();
+
+    for (const auto& region : session().model().monitors()) {
+        auto monitor = region.monitor;
+        if (!monitor)
+            continue;
+
+        auto& layers = g_backgroundLayers[monitor->m_id];
+        const auto snapshotLayerList = [&layers](const auto& layerList) {
+            for (const auto& layerRef : layerList) {
+                auto layer = layerRef.lock();
+                if (!layer || !layer->aliveAndVisible())
+                    continue;
+
+                g_pHyprRenderer->makeSnapshot(layer);
+                layers.push_back(layer);
+            }
+        };
+
+        // Wallpaper clients may sit on either background or bottom. Capture
+        // both so overview can replay the original wallpaper layer stack.
+        snapshotLayerList(monitor->m_layerSurfaceLayers[ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND]);
+        snapshotLayerList(monitor->m_layerSurfaceLayers[ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM]);
+    }
+}
+
+void draw_wallpaper_background(int monitorId) {
+    const auto it = g_backgroundLayers.find(monitorId);
+    if (it == g_backgroundLayers.end())
+        return;
+
+    for (const auto& layerRef : it->second) {
+        auto layer = layerRef.lock();
+        if (!layer || !layer->aliveAndVisible())
+            continue;
+
+        g_pHyprRenderer->renderSnapshot(layer);
+    }
+}
+
+void draw_monitor_backdrop(int monitorId) {
+    // The overview pass is injected after normal window rendering, so we need
+    // to restore the compositor's monitor background first or empty regions
+    // will keep showing the live desktop below the overlay.
+    g_pHyprOpenGL->clearWithTex();
+    draw_wallpaper_background(monitorId);
+}
+
 void draw_scene_monitor(const SceneMonitor& scene, steady_tp now) {
     const auto progress = overlay_progress(scene.monitorId, now);
     if (progress <= 0.0)
@@ -267,9 +407,20 @@ void draw_scene_monitor(const SceneMonitor& scene, steady_tp now) {
     const auto overlayBox = center_scale_box(scene.box, 0.965 + 0.035 * progress);
     const auto overlayAlpha = progress;
 
-    draw_rect(scene.box, scene.box, CHyprColor(0.05F, 0.06F, 0.08F, static_cast<float>(0.76 * overlayAlpha)), 0);
+    draw_monitor_backdrop(scene.monitorId);
+
+    const auto monitorChip = Box{
+        16.0,
+        12.0,
+        std::min(std::max(112.0, scene.box.w * 0.18), std::max(112.0, scene.box.w - 32.0)),
+        28.0,
+    };
+    draw_rect(monitorChip,
+              scene.box,
+              CHyprColor(0.04F, 0.05F, 0.08F, static_cast<float>(0.46 * overlayAlpha)),
+              12);
     draw_text(scene.monitorName.empty() ? "monitor" : scene.monitorName,
-              {18.0, 14.0, std::max(80.0, scene.box.w - 36.0), 20.0},
+              {monitorChip.x + 10.0, monitorChip.y + 3.0, std::max(56.0, monitorChip.w - 20.0), monitorChip.h - 6.0},
               scene.box,
               CHyprColor(0.84F, 0.88F, 0.94F, static_cast<float>(overlayAlpha)),
               16,
@@ -279,12 +430,22 @@ void draw_scene_monitor(const SceneMonitor& scene, steady_tp now) {
         const auto workspaceBox = center_scale_box(workspace.box, 0.97 + 0.03 * progress);
         const auto border = workspace.selected ? CHyprColor(0.53F, 0.74F, 0.88F, static_cast<float>(0.92 * overlayAlpha))
                                                : CHyprColor(0.20F, 0.23F, 0.28F, static_cast<float>(0.92 * overlayAlpha));
-        const auto fill = workspace.special ? CHyprColor(0.12F, 0.16F, 0.21F, static_cast<float>(0.88 * overlayAlpha))
-                                            : CHyprColor(0.09F, 0.10F, 0.13F, static_cast<float>(0.88 * overlayAlpha));
+        const auto fill = workspace.special ? CHyprColor(0.08F, 0.12F, 0.18F, static_cast<float>(0.20 * overlayAlpha))
+                                            : CHyprColor(0.04F, 0.05F, 0.08F, static_cast<float>(0.14 * overlayAlpha));
         draw_panel(workspaceBox, scene.box, border, fill, 24, 2.0);
 
+        const auto workspaceChip = Box{
+            workspaceBox.x + 10.0,
+            workspaceBox.y + 8.0,
+            std::min(std::max(72.0, workspaceBox.w * 0.28), std::max(72.0, workspaceBox.w - 20.0)),
+            22.0,
+        };
+        draw_rect(workspaceChip,
+                  scene.box,
+                  CHyprColor(0.05F, 0.06F, 0.09F, static_cast<float>(0.58 * overlayAlpha)),
+                  9);
         draw_text(workspace.label,
-                  {workspaceBox.x + 12.0, workspaceBox.y + 8.0, std::max(60.0, workspaceBox.w - 24.0), 18.0},
+                  {workspaceChip.x + 8.0, workspaceChip.y + 2.0, std::max(40.0, workspaceChip.w - 16.0), workspaceChip.h - 4.0},
                   scene.box,
                   CHyprColor(0.92F, 0.95F, 1.0F, static_cast<float>(overlayAlpha)),
                   16,
@@ -365,7 +526,10 @@ void handle_session_transition(steady_tp now) {
     if (overviewActive) {
         g_closingScenes.clear();
         g_openedAt.clear();
+        g_backgroundLayers.clear();
         g_selectionPulses.clear();
+        snapshot_window_targets();
+        snapshot_background_layers();
         for (const auto& region : session().model().monitors()) {
             g_openedAt[region.monitorId] = now;
             if (region.monitor)
@@ -427,7 +591,7 @@ void fullRenderMonitor(PHLMONITOR monitor) {
 
 bool initializeRendererHooks(HANDLE handle) {
     (void)handle;
-    if (g_renderPreListener || g_renderStageListener)
+    if (g_renderPreListener || g_renderStageListener || g_keyboardKeyListener)
         return true;
 
     try {
@@ -468,14 +632,30 @@ bool initializeRendererHooks(HANDLE handle) {
                 g_pHyprRenderer->m_renderPass.add(makeUnique<OverviewPassElement>(monitor));
         });
 
+        g_keyboardKeyListener = Event::bus()->m_events.input.keyboard.key.listen([](IKeyboard::SKeyEvent event, Event::SCallbackInfo& info) {
+            (void)info;
+            auto& overview = session();
+            const auto handledByOverview = overview.consumeInputHandled();
+
+            if (!overview.active() || event.state != WL_KEYBOARD_KEY_STATE_RELEASED)
+                return;
+
+            if (handledByOverview)
+                return;
+
+            overview.dismiss();
+        });
+
         spdlog::info("overview_renderer_init: using render-pass overlay backend");
         return true;
     } catch (const std::exception& e) {
         g_renderPreListener = nullptr;
         g_renderStageListener = nullptr;
+        g_keyboardKeyListener = nullptr;
         g_openedAt.clear();
         g_closingScenes.clear();
         g_liveScenes.clear();
+        g_backgroundLayers.clear();
         g_selectionPulses.clear();
         g_textCache.clear();
         g_lastOverviewActive = false;
@@ -488,9 +668,11 @@ void shutdownRendererHooks(HANDLE handle) {
     (void)handle;
     g_renderPreListener = nullptr;
     g_renderStageListener = nullptr;
+    g_keyboardKeyListener = nullptr;
     g_openedAt.clear();
     g_closingScenes.clear();
     g_liveScenes.clear();
+    g_backgroundLayers.clear();
     g_selectionPulses.clear();
     g_textCache.clear();
     g_lastOverviewActive = false;

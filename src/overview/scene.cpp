@@ -107,6 +107,7 @@ SceneTarget build_empty_workspace_target(const Box& contentBox, const Target& ta
     return {
         .type = target.type,
         .box = inset_box(contentBox, std::max(12.0, contentBox.w * 0.12), std::max(12.0, contentBox.h * 0.14)),
+        .window = nullptr,
         .synthetic = target.synthetic,
         .selected = target_matches_selection(target, selection),
         .label = empty_target_label(target),
@@ -129,6 +130,7 @@ std::vector<SceneTarget> build_projected_targets(PHLMONITOR monitor, const Works
         targets.push_back({
             .type = target.type,
             .box = apply_projection(sourceBoxes[index], contentBox, projection),
+            .window = target.window,
             .synthetic = target.synthetic,
             .selected = target_matches_selection(target, selection),
             .label = target.type == TargetType::Window ? window_target_label(target.window) : empty_target_label(target),
@@ -190,6 +192,7 @@ std::optional<SceneMonitor> buildSceneForMonitor(PHLMONITOR monitor, const Model
         SceneTarget syntheticTarget;
         syntheticTarget.type = synthetic->type;
         syntheticTarget.box = localize_box(monitor, synthetic->box);
+        syntheticTarget.window = synthetic->window;
         syntheticTarget.synthetic = true;
         syntheticTarget.selected = target_matches_selection(*synthetic, selection);
         syntheticTarget.label = empty_target_label(*synthetic);

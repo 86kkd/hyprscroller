@@ -18,6 +18,7 @@ namespace Overview {
 struct SceneTarget {
     TargetType        type = TargetType::Window;
     ScrollerCore::Box box;
+    PHLWINDOW         window = nullptr;
     bool              synthetic = false;
     bool              selected = false;
     std::string       label;

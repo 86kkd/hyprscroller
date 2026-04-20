@@ -19,7 +19,10 @@ class Session {
     bool active() const;
     void open();
     void close(bool acceptSelectionFlag);
+    void dismiss();
     bool moveSelection(Direction direction);
+    void markInputHandled();
+    bool consumeInputHandled();
     const Model& model() const;
     void damageMonitors() const;
 
@@ -32,6 +35,7 @@ class Session {
     void clear();
 
     bool                  active_ = false;
+    bool                  inputHandled_ = false;
     Model                 model_;
 };
 

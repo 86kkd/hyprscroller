@@ -155,6 +155,7 @@ namespace {
 
         if (Overview::session().active()) {
             spdlog::info("dispatch_movefocus: overview arg='{}'", arg);
+            Overview::session().markInputHandled();
             (void)Overview::session().moveSelection(*direction);
             return;
         }
@@ -254,6 +255,8 @@ namespace {
     // toggleoverview: enter or accept the global logical overview session.
     void dispatch_toggleoverview(std::string arg) {
         auto& overview = Overview::session();
+        overview.markInputHandled();
+
         if (is_overview_cancel_arg(arg)) {
             if (overview.active())
                 overview.close(false);
@@ -280,6 +283,7 @@ namespace {
     void dispatch_canceloverview(std::string arg) {
         (void)arg;
         auto& overview = Overview::session();
+        overview.markInputHandled();
         if (overview.active())
             overview.close(false);
     }
