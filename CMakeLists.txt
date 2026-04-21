@@ -14,6 +14,7 @@ option(HYPRSCROLLER_ENABLE_SANITIZERS "Enable ASan/UBSan in debug builds" OFF)
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(DEPS REQUIRED hyprland pixman-1 libdrm)
+pkg_check_modules(HYPRLAND REQUIRED IMPORTED_TARGET hyprland)
 find_package(spdlog REQUIRED)
 
 # Compile flags
@@ -37,14 +38,33 @@ add_library(hyprscroller SHARED
             src/overview/logic.h
             src/overview/logic.cpp
             src/overview/orientation_math.h
+            src/overview/geometry_utils.h
+            src/overview/animation.h
+            src/overview/style.h
+            src/overview/workspace_grid.h
+            src/overview/workspace_grid.cpp
             src/overview/model.h
             src/overview/model.cpp
+            src/overview/model_layout.h
+            src/overview/model_layout.cpp
             src/overview/scene.h
             src/overview/scene.cpp
+            src/overview/scene_layout.h
+            src/overview/scene_layout.cpp
             src/overview/session.h
             src/overview/session.cpp
+            src/overview/session_effects.h
+            src/overview/session_effects.cpp
+            src/overview/session_selection.h
+            src/overview/session_selection.cpp
             src/overview/render.h
             src/overview/render.cpp
+            src/overview/render_state.h
+            src/overview/render_state.cpp
+            src/overview/render_draw.h
+            src/overview/render_draw.cpp
+            src/overview/render_hooks.h
+            src/overview/render_hooks.cpp
             src/overview/pass_element.h
             src/overview/pass_element.cpp
             src/model/window.cpp
@@ -92,12 +112,18 @@ if(BUILD_TESTING)
                    tests/core_logic_tests.cpp
                    tests/layout_logic_tests.cpp
                    tests/overview_logic_tests.cpp
+                   tests/overview_model_tests.cpp
+                   tests/overview_scene_tests.cpp
+                   tests/overview_session_logic_tests.cpp
                    src/core/direction.cpp
                    src/core/layout_math.cpp
                    src/core/monitor_geometry.cpp
                    src/core/layout_profile.cpp
                    src/overview/logic.cpp
                    src/overview/orientation_math.cpp
+                   src/overview/workspace_grid.cpp
+                   src/overview/scene_layout.cpp
+                   src/overview/session_selection.cpp
                    src/layout/canvas/dispatch_logic.cpp
                    src/layout/canvas/route_logic.cpp)
     target_include_directories(hyprscroller_logic_tests PRIVATE
@@ -105,7 +131,7 @@ if(BUILD_TESTING)
         ${DEPS_INCLUDE_DIRS}
         /usr/include/hyprland/wlroots-hyprland/hyprland
         /usr/include/hyprland/src)
-    target_link_libraries(hyprscroller_logic_tests PRIVATE spdlog::spdlog_header_only stdc++ m)
+    target_link_libraries(hyprscroller_logic_tests PRIVATE PkgConfig::HYPRLAND ${DEPS_LIBRARIES} spdlog::spdlog_header_only stdc++ m)
     set_target_properties(hyprscroller_logic_tests PROPERTIES LINKER_LANGUAGE CXX)
     add_test(NAME hyprscroller.logic COMMAND hyprscroller_logic_tests)
 endif()

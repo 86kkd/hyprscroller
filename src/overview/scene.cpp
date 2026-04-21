@@ -5,18 +5,17 @@
 #include "scene.h"
 
 #include <algorithm>
-#include <span>
-
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/desktop/Workspace.hpp>
 
-#include "../core/layout_math.h"
+#include "geometry_utils.h"
+#include "scene_layout.h"
+#include "style.h"
 
 namespace Overview {
 namespace {
 
 using ScrollerCore::Box;
-using ScrollerCore::OverviewProjection;
 
 Box localize_box(PHLMONITOR monitor, const Box& box) {
     if (!monitor)
@@ -66,47 +65,10 @@ std::string window_target_label(PHLWINDOW window) {
     return "window";
 }
 
-Box inset_box(const Box& box, double insetX, double insetY) {
-    return {
-        box.x + insetX,
-        box.y + insetY,
-        std::max(1.0, box.w - insetX * 2.0),
-        std::max(1.0, box.h - insetY * 2.0),
-    };
-}
-
-OverviewProjection compute_projection(std::span<const Box> items, const Box& visibleBox) {
-    std::vector<ScrollerCore::OverviewRect> rects;
-    rects.reserve(items.size());
-
-    for (const auto& item : items) {
-        rects.push_back({
-            .x0 = item.x,
-            .x1 = item.x + item.w,
-            .y0 = item.y,
-            .y1 = item.y + item.h,
-        });
-    }
-
-    return ScrollerCore::compute_overview_projection(rects, visibleBox);
-}
-
-Box apply_projection(const Box& source, const Box& visibleBox, const OverviewProjection& projection) {
-    if (projection.width <= 0.0 || projection.height <= 0.0)
-        return visibleBox;
-
-    return {
-        visibleBox.x + projection.offset.x + (source.x - projection.min.x) * projection.scale,
-        visibleBox.y + projection.offset.y + (source.y - projection.min.y) * projection.scale,
-        std::max(24.0, source.w * projection.scale),
-        std::max(24.0, source.h * projection.scale),
-    };
-}
-
 SceneTarget build_empty_workspace_target(const Box& contentBox, const Target& target, const Target* selection) {
     return {
         .type = target.type,
-        .box = inset_box(contentBox, std::max(12.0, contentBox.w * 0.12), std::max(12.0, contentBox.h * 0.14)),
+        .box = buildEmptyWorkspacePreviewBox(contentBox),
         .window = nullptr,
         .synthetic = target.synthetic,
         .selected = target_matches_selection(target, selection),
@@ -121,7 +83,7 @@ std::vector<SceneTarget> build_projected_targets(PHLMONITOR monitor, const Works
     for (const auto& target : workspace.targets)
         sourceBoxes.push_back(localize_box(monitor, target.box));
 
-    const auto projection = compute_projection(sourceBoxes, contentBox);
+    const auto projectedBoxes = projectBoxesToContent(sourceBoxes, contentBox);
 
     std::vector<SceneTarget> targets;
     targets.reserve(workspace.targets.size());
@@ -129,7 +91,7 @@ std::vector<SceneTarget> build_projected_targets(PHLMONITOR monitor, const Works
         const auto& target = workspace.targets[index];
         targets.push_back({
             .type = target.type,
-            .box = apply_projection(sourceBoxes[index], contentBox, projection),
+            .box = projectedBoxes[index],
             .window = target.window,
             .synthetic = target.synthetic,
             .selected = target_matches_selection(target, selection),
@@ -159,9 +121,11 @@ std::optional<SceneMonitor> buildSceneForMonitor(PHLMONITOR monitor, const Model
     for (const auto& workspace : region->workspaces) {
         SceneWorkspace sceneWorkspace;
         sceneWorkspace.box = localize_box(monitor, workspace.box);
-        sceneWorkspace.contentBox = inset_box(sceneWorkspace.box, 14.0, 14.0);
-        sceneWorkspace.contentBox.y += 26.0;
-        sceneWorkspace.contentBox.h = std::max(36.0, sceneWorkspace.contentBox.h - 26.0);
+        sceneWorkspace.contentBox = insetBox(sceneWorkspace.box,
+                                             Style::kWorkspaceContentInset,
+                                             Style::kWorkspaceContentInset);
+        sceneWorkspace.contentBox.y += Style::kWorkspaceHeaderHeight;
+        sceneWorkspace.contentBox.h = std::max(36.0, sceneWorkspace.contentBox.h - Style::kWorkspaceHeaderHeight);
 
         const auto workspaceRef = g_pCompositor->getWorkspaceByID(workspace.workspaceId);
         sceneWorkspace.special = workspaceRef ? workspaceRef->m_isSpecialWorkspace : false;

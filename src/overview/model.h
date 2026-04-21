@@ -93,7 +93,6 @@ class Model {
     std::optional<TargetRef> findByWindow(PHLWINDOW window) const;
     std::optional<TargetRef> findByWorkspace(WORKSPACEID workspaceId) const;
     std::optional<TargetRef> firstTarget() const;
-    WORKSPACEID nextWorkspaceId() const;
 
   private:
     void rebuildTargetGraph();

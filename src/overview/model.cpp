@@ -5,17 +5,15 @@
 #include "model.h"
 
 #include <algorithm>
-#include <cmath>
 
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/desktop/Workspace.hpp>
 
 #include "../layout/canvas/internal.h"
+#include "model_layout.h"
 
 namespace Overview {
 namespace {
-
-using ScrollerCore::Box;
 
 PHLMONITOR monitor_for_workspace(PHLWORKSPACE workspace) {
     if (!workspace)
@@ -29,17 +27,6 @@ PHLMONITOR monitor_for_workspace(PHLWORKSPACE workspace) {
 
 bool is_tiled_overview_window(PHLWINDOW window) {
     return window && window->m_isMapped && !window->m_isFloating;
-}
-
-Box inset_box(const Box& box, double ratio, double minimumInset = 18.0) {
-    const auto insetX = std::min(std::max(minimumInset, box.w * ratio), std::max(0.0, box.w / 2.5));
-    const auto insetY = std::min(std::max(minimumInset, box.h * ratio), std::max(0.0, box.h / 2.5));
-    return {
-        box.x + insetX,
-        box.y + insetY,
-        std::max(24.0, box.w - insetX * 2.0),
-        std::max(24.0, box.h - insetY * 2.0),
-    };
 }
 
 MonitorRegion make_monitor_region(PHLMONITOR monitor) {
@@ -95,90 +82,7 @@ WorkspaceNode build_workspace_node(const CanvasOverviewSnapshot& snapshot, int m
     return node;
 }
 
-void finalize_workspace_targets(WorkspaceNode& node) {
-    if (!node.targets.empty())
-        return;
-
-    node.targets.push_back(makeEmptyTarget(node.workspaceId, node.monitorId, node.box, false));
-}
-
-struct WorkspaceGridShape {
-    std::size_t columns = 1;
-    std::size_t rows = 1;
-};
-
-WorkspaceGridShape choose_workspace_grid_shape(const Box& regionBox, std::size_t count) {
-    if (count <= 1)
-        return {};
-
-    const auto safeWidth = std::max(1.0, regionBox.w);
-    const auto safeHeight = std::max(1.0, regionBox.h);
-    const auto landscape = safeWidth >= safeHeight;
-    const auto dominantAspect = landscape ? safeWidth / safeHeight : safeHeight / safeWidth;
-
-    if (landscape) {
-        const auto columns = std::min(count,
-                                      std::max<std::size_t>(1, static_cast<std::size_t>(std::ceil(std::sqrt(static_cast<double>(count) * dominantAspect)))));
-        const auto rows = std::max<std::size_t>(1, static_cast<std::size_t>(std::ceil(static_cast<double>(count) / static_cast<double>(columns))));
-        return {.columns = columns, .rows = rows};
-    }
-
-    const auto rows = std::min(count,
-                               std::max<std::size_t>(1, static_cast<std::size_t>(std::ceil(std::sqrt(static_cast<double>(count) * dominantAspect)))));
-    const auto columns = std::max<std::size_t>(1, static_cast<std::size_t>(std::ceil(static_cast<double>(count) / static_cast<double>(rows))));
-    return {.columns = columns, .rows = rows};
-}
-
-void layout_workspace_grid(MonitorRegion& region) {
-    std::sort(region.workspaces.begin(), region.workspaces.end(), [](const WorkspaceNode& a, const WorkspaceNode& b) {
-        return a.workspaceId < b.workspaceId;
-    });
-
-    const auto count = region.workspaces.size();
-    if (count == 0)
-        return;
-
-    if (count == 1) {
-        auto& workspace = region.workspaces.front();
-        workspace.box = region.box;
-        finalize_workspace_targets(workspace);
-        return;
-    }
-
-    const auto grid = choose_workspace_grid_shape(region.box, count);
-    const auto horizontalGap = std::min(32.0, std::max(12.0, region.box.w * 0.02));
-    const auto verticalGap = std::min(32.0, std::max(12.0, region.box.h * 0.03));
-    const auto totalHorizontalGap = horizontalGap * static_cast<double>(grid.columns - 1);
-    const auto totalVerticalGap = verticalGap * static_cast<double>(grid.rows - 1);
-    const auto cellWidth = std::max(120.0, (region.box.w - totalHorizontalGap) / static_cast<double>(grid.columns));
-    const auto cellHeight = std::max(96.0, (region.box.h - totalVerticalGap) / static_cast<double>(grid.rows));
-
-    for (std::size_t index = 0; index < count; ++index) {
-        auto& workspace = region.workspaces[index];
-        const auto column = index % grid.columns;
-        const auto row = index / grid.columns;
-        workspace.box = {
-            region.box.x + static_cast<double>(column) * (cellWidth + horizontalGap),
-            region.box.y + static_cast<double>(row) * (cellHeight + verticalGap),
-            cellWidth,
-            cellHeight,
-        };
-        finalize_workspace_targets(workspace);
-    }
-}
-
 } // namespace
-
-Target makeEmptyTarget(WORKSPACEID workspaceId, int monitorId, const Box& workspaceBox, bool synthetic) {
-    Target target;
-    target.type = TargetType::EmptyWorkspace;
-    target.workspaceId = workspaceId;
-    target.monitorId = monitorId;
-    target.window = nullptr;
-    target.box = inset_box(workspaceBox, synthetic ? 0.16 : 0.20);
-    target.synthetic = synthetic;
-    return target;
-}
 
 void Model::clear() {
     origin_ = {};
@@ -298,20 +202,6 @@ std::optional<TargetRef> Model::firstTarget() const {
     return targetGraph_.front().ref;
 }
 
-WORKSPACEID Model::nextWorkspaceId() const {
-    WORKSPACEID maxWorkspaceId = 0;
-
-    for (const auto& workspaceRef : g_pCompositor->getWorkspaces()) {
-        const auto workspace = workspaceRef.lock();
-        if (!workspace)
-            continue;
-
-        maxWorkspaceId = std::max(maxWorkspaceId, workspace->m_id);
-    }
-
-    return maxWorkspaceId + 1;
-}
-
 void Model::rebuildTargetGraph() {
     targetGraph_.clear();
 
@@ -377,7 +267,7 @@ void Model::rebuild() {
     }
 
     for (auto& region : monitors_)
-        layout_workspace_grid(region);
+        layoutWorkspaceGrid(region);
 
     rebuildTargetGraph();
 }

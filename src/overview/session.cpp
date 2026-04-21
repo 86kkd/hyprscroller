@@ -9,78 +9,16 @@
  */
 #include "session.h"
 
-#include <algorithm>
-#include <string>
-
 #include <hyprland/src/Compositor.hpp>
-#include <hyprland/src/desktop/Workspace.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 #include <spdlog/spdlog.h>
 
-#include "../core/workspace_selector.h"
-#include "../layout/canvas/internal.h"
 #include "logic.h"
+#include "session_effects.h"
+#include "session_selection.h"
 
 namespace Overview {
 namespace {
-
-using ScrollerCore::Box;
-
-void prepareAllCanvasesForOverview() {
-    for (const auto& workspaceRef : g_pCompositor->getWorkspaces()) {
-        const auto workspace = workspaceRef.lock();
-        if (!workspace)
-            continue;
-
-        auto* layout = CanvasLayoutInternal::get_canvas_for_workspace(workspace->m_id);
-        if (!layout)
-            continue;
-
-        layout->prepareForOverviewSnapshot();
-    }
-}
-
-int resolved_monitor_id(PHLWORKSPACE workspace, PHLWINDOW window, int fallbackMonitorId) {
-    if (window) {
-        if (const auto monitor = g_pCompositor->getMonitorFromID(window->monitorID()))
-            return monitor->m_id;
-    }
-
-    if (workspace) {
-        if (const auto monitor = CanvasLayoutInternal::visible_monitor_for_workspace(workspace))
-            return monitor->m_id;
-
-        if (const auto workspaceMonitor = g_pCompositor->getMonitorFromID(workspace->monitorID()))
-            return workspaceMonitor->m_id;
-    }
-
-    return fallbackMonitorId;
-}
-
-bool execute_accept_plan(const std::vector<OverviewLogic::AcceptAction>& plan, PHLWORKSPACE workspace, const char* context) {
-    for (const auto& step : plan) {
-        switch (step.type) {
-            case OverviewLogic::AcceptActionType::FocusMonitor:
-                if (const auto monitor = g_pCompositor->getMonitorFromID(step.monitorId)) {
-                    if (!monitor->m_name.empty())
-                        (void)CanvasLayoutInternal::invoke_dispatcher("focusmonitor", monitor->m_name, context);
-                }
-                break;
-            case OverviewLogic::AcceptActionType::Workspace: {
-                const auto selector = workspace ? ScrollerCore::workspace_selector(workspace) : std::to_string(step.workspaceId);
-                (void)CanvasLayoutInternal::invoke_dispatcher("workspace", selector, context);
-                break;
-            }
-            case OverviewLogic::AcceptActionType::ToggleSpecialWorkspace: {
-                const auto selector = workspace ? ScrollerCore::workspace_selector(workspace) : std::to_string(step.workspaceId);
-                (void)CanvasLayoutInternal::invoke_dispatcher("togglespecialworkspace", selector, context);
-                break;
-            }
-        }
-    }
-
-    return true;
-}
 
 const MonitorRegion* initial_empty_region(const Model& model) {
     if (model.monitors().empty())
@@ -94,8 +32,8 @@ const MonitorRegion* initial_empty_region(const Model& model) {
     return region ? region : &model.monitors().front();
 }
 
-Target initial_empty_target(const Model& model, const MonitorRegion& region) {
-    return makeEmptyTarget(model.nextWorkspaceId(),
+Target initial_empty_target(const MonitorRegion& region) {
+    return makeEmptyTarget(SessionEffects::nextWorkspaceId(),
                            region.monitorId,
                            {region.box.x + region.box.w * 0.16,
                             region.box.y + region.box.h * 0.16,
@@ -128,13 +66,6 @@ bool try_select_origin_workspace(Model& model) {
 
     model.setSelection(*ref);
     return true;
-}
-
-void focus_workspace_target(PHLWORKSPACE workspace, WORKSPACEID workspaceId, int monitorId, const char* context) {
-    const auto acceptPlan = workspace
-        ? OverviewLogic::buildWorkspaceAcceptPlan(monitorId, workspace->m_id, workspace->m_isSpecialWorkspace)
-        : OverviewLogic::buildEmptyAcceptPlan(monitorId, workspaceId);
-    execute_accept_plan(acceptPlan, workspace, context);
 }
 
 } // namespace
@@ -176,50 +107,42 @@ bool Session::consumeInputHandled() {
 }
 
 bool Session::selectInitialTarget() {
-    const auto& targetGraph = model_.targetGraph();
-    if (targetGraph.empty()) {
-        const auto* region = initial_empty_region(model_);
-        if (!region)
+    const auto choice = chooseInitialSelectionChoice(!model_.targetGraph().empty(),
+                                                     model_.findByWindow(model_.origin().window).has_value(),
+                                                     model_.findByWorkspace(model_.origin().workspaceId).has_value(),
+                                                     model_.firstTarget().has_value(),
+                                                     initial_empty_region(model_) != nullptr);
+
+    switch (choice) {
+        case InitialSelectionChoice::OriginWindow:
+            return try_select_origin_window(model_);
+        case InitialSelectionChoice::OriginWorkspace:
+            return try_select_origin_workspace(model_);
+        case InitialSelectionChoice::FirstTarget:
+            if (const auto ref = model_.firstTarget()) {
+                model_.setSelection(*ref);
+                return true;
+            }
             return false;
-
-        model_.setSyntheticSelection(initial_empty_target(model_, *region));
-        return true;
+        case InitialSelectionChoice::InitialEmpty:
+            if (const auto* region = initial_empty_region(model_)) {
+                model_.setSyntheticSelection(initial_empty_target(*region));
+                return true;
+            }
+            return false;
+        case InitialSelectionChoice::None:
+        default:
+            return false;
     }
-
-    if (try_select_origin_window(model_))
-        return true;
-
-    if (try_select_origin_workspace(model_))
-        return true;
-
-    if (const auto ref = model_.firstTarget()) {
-        model_.setSelection(*ref);
-        return true;
-    }
-
-    return false;
 }
 
 void Session::open() {
     if (active_)
         return;
 
-    auto originWorkspace = CanvasLayoutInternal::get_workspace_id();
-    auto originWindow = PHLWINDOW{};
-    auto originMonitor = MONITOR_INVALID;
-
-    if (const auto workspace = g_pCompositor->getWorkspaceByID(originWorkspace)) {
-        originWindow = workspace->getLastFocusedWindow();
-        originMonitor = resolved_monitor_id(workspace, originWindow, workspace->monitorID());
-    }
-
-    if (originMonitor == MONITOR_INVALID) {
-        if (const auto monitor = g_pCompositor->getMonitorFromCursor())
-            originMonitor = monitor->m_id;
-    }
-
-    model_.setOrigin(originMonitor, originWorkspace, originWindow);
-    prepareAllCanvasesForOverview();
+    const auto origin = SessionEffects::captureOrigin();
+    model_.setOrigin(origin.monitorId, origin.workspaceId, origin.window);
+    SessionEffects::prepareSnapshots();
     model_.rebuild();
     if (!selectInitialTarget()) {
         clear();
@@ -296,7 +219,7 @@ bool Session::createSyntheticEmptyTarget(Direction direction) {
         return false;
 
     const auto& region = model_.monitors()[*regionIndex];
-    model_.setSyntheticSelection(makeEmptyTarget(model_.nextWorkspaceId(),
+    model_.setSyntheticSelection(makeEmptyTarget(SessionEffects::nextWorkspaceId(),
                                                  region.monitorId,
                                                  OverviewLogic::buildSyntheticTargetBox(regions[*regionIndex], selection->box, direction),
                                                  true));
@@ -340,55 +263,11 @@ void Session::acceptSelection() {
     if (!selection)
         return;
 
-    const auto workspace = g_pCompositor->getWorkspaceByID(selection->workspaceId);
-    const auto monitorId = resolved_monitor_id(workspace, selection->window, selection->monitorId);
-
-    if (selection->type == TargetType::EmptyWorkspace) {
-        focus_workspace_target(workspace, selection->workspaceId, monitorId, "overview_accept_empty");
-        spdlog::info("overview_accept_empty: workspace={} monitor={} synthetic={}",
-                     selection->workspaceId,
-                     monitorId,
-                     selection->synthetic);
-        return;
-    }
-
-    if (!workspace || !selection->window) {
-        spdlog::warn("overview_accept_window: invalid target workspace={} window={}",
-                     selection->workspaceId,
-                     static_cast<const void*>(selection->window ? selection->window.get() : nullptr));
-        return;
-    }
-
-    focus_workspace_target(workspace, workspace->m_id, monitorId, "overview_accept_window");
-    CanvasLayoutInternal::switch_to_window(selection->window, true);
-    spdlog::info("overview_accept_window: workspace={} window={} special={}",
-                 selection->workspaceId,
-                 static_cast<const void*>(selection->window.get()),
-                 workspace->m_isSpecialWorkspace);
+    SessionEffects::acceptTarget(*selection);
 }
 
 void Session::restoreOrigin() {
-    const auto workspace = g_pCompositor->getWorkspaceByID(model_.origin().workspaceId);
-    const auto monitorId = resolved_monitor_id(workspace, model_.origin().window, model_.origin().monitorId);
-
-    if (model_.origin().window && model_.origin().window->m_isMapped && workspace) {
-        focus_workspace_target(workspace, workspace->m_id, monitorId, "overview_restore_origin_window");
-        CanvasLayoutInternal::switch_to_window(model_.origin().window, false);
-        spdlog::info("overview_restore_origin_window: workspace={} monitor={} window={}",
-                     workspace->m_id,
-                     monitorId,
-                     static_cast<const void*>(model_.origin().window.get()));
-        return;
-    }
-
-    if (!workspace)
-        return;
-
-    focus_workspace_target(workspace, workspace->m_id, monitorId, "overview_restore_origin_workspace");
-    spdlog::info("overview_restore_origin_workspace: workspace={} monitor={} special={}",
-                 workspace->m_id,
-                 monitorId,
-                 workspace->m_isSpecialWorkspace);
+    SessionEffects::restoreOrigin(model_.origin());
 }
 
 void Session::close(bool acceptSelectionFlag) {
