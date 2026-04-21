@@ -120,6 +120,11 @@ private:
  * It owns the ordered windows inside one slot, tracks the active model window,
  * applies width/height policies, and recalculates the stacked window geometry
  * that the lane layer later positions on the canvas.
+ *
+ * Recommended implementation reading order:
+ * - `stack_core.cpp` for presets, local-axis helpers, and construction rules
+ * - `stack_geometry.cpp` for relayout and viewport-adjustment behavior
+ * - `stack_membership.cpp` for focus, admit/expel, and ordering changes
  */
 class Stack {
 public:

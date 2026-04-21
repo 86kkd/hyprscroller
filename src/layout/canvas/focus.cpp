@@ -6,6 +6,12 @@
  * It keeps plugin state aligned with Hyprland focus, routes directional focus
  * requests across stacks, lanes, and monitors, and handles temporary empty-lane
  * navigation used to emulate moving into blank space.
+ *
+ * New-reader mental model:
+ * - local focus movement happens inside `Lane`
+ * - this file decides when local movement is not enough
+ * - if a move exits the current lane/page, this file chooses adjacent-lane,
+ *   cross-monitor, or temporary-empty-lane behavior
  */
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/config/ConfigValue.hpp>
@@ -20,6 +26,7 @@
 extern HANDLE PHANDLE;
 
 namespace {
+// Human-readable result names used by logs after a focus route completes.
 const char* focus_move_result_name(FocusMoveResult result) {
     switch (result) {
     case FocusMoveResult::Moved:
@@ -158,6 +165,9 @@ bool CanvasLayout::adoptFocusedLane(PHLWINDOW focusedWindow, PHLMONITOR fallback
     if (!targetLane)
         return false;
 
+    // If Hyprland focus jumped back onto a real window while the canvas still
+    // points at a blank ephemeral lane, discard that temporary lane first so
+    // the active-lane pointer reattaches to real model state.
     if (activeLane && currentLane && currentLane->is_ephemeral() && currentLane->empty() && targetLane != currentLane)
         dropEmptyLane(activeLane, targetLane, fallbackMonitor, true);
 
@@ -205,6 +215,9 @@ PHLWINDOW CanvasLayout::resolveCrossMonitorFocusTarget(CanvasLayout *targetLayou
     auto *resolvedLane = targetLayout ? targetLayout->getActiveLane() : nullptr;
     const char *resolvedSelection = "geometry";
 
+    // First try to let the destination canvas re-adopt its remembered focused
+    // lane/window. That preserves local intent better than pure geometry-based
+    // fallback when the target workspace already has a meaningful active item.
     if (targetLayout)
         targetLayout->syncActiveStateFromWorkspaceFocus();
 
@@ -233,6 +246,9 @@ void CanvasLayout::activateCrossMonitorFocusTarget(CanvasLayout *targetLayout, L
     if (!targetLayout || !targetLane || !targetWindow)
         return;
 
+    // Make the destination canvas internally coherent before Hyprland focus is
+    // switched. Otherwise subsequent relayout/focus-sync code would still think
+    // the old lane is active.
     targetLayout->setActiveLane(targetLane);
     targetLane->focus_window(targetWindow);
 
@@ -266,15 +282,20 @@ void CanvasLayout::handoffFocusAcrossMonitor(int workspace, Direction direction,
         return;
     }
 
+    // Phase 1: choose the destination workspace/lane/window.
     const char *targetSelection = "geometry";
     auto *targetLayout = CanvasLayoutInternal::get_canvas_for_workspace(workspaceId);
     auto *targetLane = static_cast<Lane *>(nullptr);
     auto crossMonitorTarget = resolveCrossMonitorFocusTarget(targetLayout, targetMonitor, workspaceId, direction, sourceWindow, &targetLane, &targetSelection);
+    // Phase 2: if the user left a blank ephemeral lane behind, clean it up
+    // before we hand control to another monitor/workspace.
     if (dropEmptyLane(sourceLaneNode, nullptr, sourceMonitor, true)) {
         spdlog::info("move_focus: dropped empty lane after leaving workspace={} direction={}",
                      workspace, ScrollerCore::direction_name(direction));
     }
 
+    // Phase 3: either focus an empty target workspace or activate the chosen
+    // destination window and let Hyprland follow that focus.
     if (!crossMonitorTarget) {
         const auto targetWorkspace = g_pCompositor->getWorkspaceByID(workspaceId);
         spdlog::info("move_focus: no target window for crossed monitor workspace={} target_monitor={} target_workspace_found={}",
@@ -348,6 +369,9 @@ void CanvasLayout::focusAdjacentLane(int workspace, Direction direction, ListNod
     if (!targetLaneNode)
         return;
 
+    // Adjacent-lane focus is the local-page analogue of cross-monitor handoff:
+    // update active-lane state first, then prune any empty source lane, then
+    // switch Hyprland focus to the destination lane's active window.
     activeLane = targetLaneNode;
     if (dropEmptyLane(sourceLaneNode, activeLane ? activeLane->data() : nullptr, sourceMonitor, true)) {
         spdlog::info("move_focus: dropped empty lane after leaving workspace={} direction={}",
@@ -370,6 +394,9 @@ void CanvasLayout::focusAdjacentLane(int workspace, Direction direction, ListNod
 
 void CanvasLayout::createEphemeralLaneForFocus(int workspace, Direction direction, PHLMONITOR sourceMonitor,
                                                Mode mode, ListNode<Lane *> *anchor) {
+    // Empty lanes are navigation-only placeholders. They let the user "move
+    // into blank space" and then create/move content there later without
+    // immediately mutating existing real lanes.
     auto *newLane = new Lane(sourceMonitor, mode);
     newLane->set_ephemeral(true);
     auto newLaneNode = insertLaneNode(newLane, direction, anchor);
@@ -394,6 +421,9 @@ void CanvasLayout::finalizeLocalFocusMove(int workspace, Direction direction, La
                  static_cast<const void*>(after ? after.get() : nullptr),
                  moveResultName);
 
+    // Keep the plugin's active-lane pointer in sync before handing focus back
+    // to Hyprland. Command code assumes the model already points at the same
+    // lane/window Hyprland is about to focus.
     setActiveLane(lane);
     requestWorkspaceFocusSyncSuppression();
     CanvasLayoutInternal::switch_to_window(after, true);
@@ -465,10 +495,8 @@ void CanvasLayout::move_focus(int workspace, Direction direction)
     }
 
     // Phase 2: lane-axis routing stays pure until the final action dispatch so
-    // the empty-lane, adjacent-lane, and cross-monitor cases remain unit-testable.
-    // Lane-axis navigation goes through a pure routing plan so the tricky
-    // combination of empty ephemeral lanes, adjacent lanes, and cross-monitor
-    // exits stays readable and unit-testable.
+    // the empty-lane, adjacent-lane, and cross-monitor cases remain readable
+    // and unit-testable.
     const auto handoffPlan = betweenLanes
         ? CanvasLayoutInternal::plan_directional_handoff(
               lanes, activeLane, sourceMonitor, mode, direction, !laneEmpty, CanvasLayoutInternal::resolve_monitor_in_direction)

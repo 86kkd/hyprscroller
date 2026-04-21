@@ -1,3 +1,13 @@
+/**
+ * @file logic.cpp
+ * @brief Pure directional-target selection and accept-plan helpers for overview.
+ *
+ * This file is intentionally renderer-free and compositor-free. It answers
+ * questions such as:
+ * - which target should directional navigation land on?
+ * - which monitor region should host a synthetic empty-workspace target?
+ * - which ordered dispatcher steps should be executed when the user accepts?
+ */
 #include "logic.h"
 
 #include <cmath>
@@ -6,6 +16,8 @@
 namespace OverviewLogic {
 namespace {
 
+// Overview navigation compares item centers rather than edges so targets of
+// different sizes can still be ranked consistently.
 double center_x(const ScrollerCore::Box& box) {
     return box.x + box.w / 2.0;
 }
@@ -29,6 +41,8 @@ bool is_in_direction(const ScrollerCore::Box& from, const ScrollerCore::Box& can
     }
 }
 
+// Primary distance measures "how far along the navigation axis" the candidate
+// sits from the current target. Lower is always better.
 double primary_distance(const ScrollerCore::Box& from, const ScrollerCore::Box& candidate, Direction direction) {
     switch (direction) {
         case Direction::Left:
@@ -44,6 +58,8 @@ double primary_distance(const ScrollerCore::Box& from, const ScrollerCore::Box& 
     }
 }
 
+// Secondary distance breaks ties using the perpendicular axis so horizontally
+// aligned moves prefer targets that are also vertically aligned, and vice versa.
 double secondary_distance(const ScrollerCore::Box& from, const ScrollerCore::Box& candidate, Direction direction) {
     switch (direction) {
         case Direction::Left:
@@ -69,6 +85,11 @@ std::optional<size_t> pickTargetIndex(const std::vector<TargetCandidate>& target
     auto bestMonitorPenalty = std::numeric_limits<int>::max();
     auto bestSecondary = std::numeric_limits<double>::infinity();
 
+    // Ranking order:
+    // 1. candidate must lie in the requested direction
+    // 2. nearest candidate on the primary axis wins
+    // 3. same-monitor targets beat cross-monitor ones
+    // 4. better perpendicular alignment breaks final ties
     for (size_t index = 0; index < targets.size(); ++index) {
         if (index == currentIndex)
             continue;
@@ -100,6 +121,8 @@ std::optional<size_t> pickRegionIndexForSyntheticTarget(const std::vector<Region
         return std::nullopt;
 
     const auto& current = regions[currentRegionIndex];
+    // Synthetic targets only leave the current region when the proposed box
+    // would overflow that region in the requested direction.
     const auto overflowsCurrentRegion = [&] {
         switch (direction) {
             case Direction::Left:
@@ -122,6 +145,9 @@ std::optional<size_t> pickRegionIndexForSyntheticTarget(const std::vector<Region
     auto bestPrimary = std::numeric_limits<double>::infinity();
     auto bestSecondary = std::numeric_limits<double>::infinity();
 
+    // Region selection is simpler than concrete target selection: regions are
+    // already monitor-sized buckets, so we only compare directional proximity
+    // and then alignment with the source box.
     for (size_t index = 0; index < regions.size(); ++index) {
         if (index == currentRegionIndex)
             continue;
@@ -147,6 +173,8 @@ std::optional<size_t> pickRegionIndexForSyntheticTarget(const std::vector<Region
 
 ScrollerCore::Box buildSyntheticTargetBox(const RegionCandidate& region, const ScrollerCore::Box& sourceBox, Direction direction) {
     auto box = sourceBox;
+    // Advance by at least one source-box size, but also by a fraction of the
+    // destination region so very small source boxes still move perceptibly.
     const auto stepX = std::max(box.w, region.box.w * 0.35);
     const auto stepY = std::max(box.h, region.box.h * 0.35);
 
@@ -167,6 +195,8 @@ ScrollerCore::Box buildSyntheticTargetBox(const RegionCandidate& region, const S
             break;
     }
 
+    // Synthetic empty-workspace targets must stay fully inside the destination
+    // region because later hit-testing assumes valid in-bounds boxes.
     box.w = std::min(box.w, region.box.w);
     box.h = std::min(box.h, region.box.h);
     box.x = std::clamp(box.x, region.box.x, region.box.x + std::max(0.0, region.box.w - box.w));
@@ -175,6 +205,8 @@ ScrollerCore::Box buildSyntheticTargetBox(const RegionCandidate& region, const S
 }
 
 std::vector<AcceptAction> buildEmptyAcceptPlan(int monitorId, WorkspaceId workspaceId) {
+    // Empty targets create/focus a workspace but do not need any follow-up
+    // window activation step.
     return {
         {.type = AcceptActionType::FocusMonitor, .monitorId = monitorId, .workspaceId = WORKSPACE_ID_INVALID},
         {.type = AcceptActionType::Workspace, .monitorId = MONITOR_ID_INVALID, .workspaceId = workspaceId},
@@ -182,6 +214,8 @@ std::vector<AcceptAction> buildEmptyAcceptPlan(int monitorId, WorkspaceId worksp
 }
 
 std::vector<AcceptAction> buildWorkspaceAcceptPlan(int monitorId, WorkspaceId workspaceId, bool specialWorkspace) {
+    // Existing workspaces always start with monitor focus, then either switch to
+    // a regular workspace or toggle a special workspace on that monitor.
     auto plan = std::vector<AcceptAction>{
         {.type = AcceptActionType::FocusMonitor, .monitorId = monitorId, .workspaceId = WORKSPACE_ID_INVALID},
     };

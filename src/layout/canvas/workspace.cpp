@@ -112,6 +112,8 @@ WORKSPACEID preferred_workspace_id(PHLMONITOR monitor, WORKSPACEID) {
     if (!monitor)
         return WORKSPACE_INVALID;
 
+    // Special workspaces have priority because, visually, they are what the
+    // user is actually seeing on that monitor when they are open.
     const auto special_workspace_id = monitor->activeSpecialWorkspaceID();
     if (g_pCompositor->getWorkspaceByID(special_workspace_id))
         return special_workspace_id;
@@ -174,6 +176,9 @@ PHLWINDOW pick_cross_monitor_target_window(PHLMONITOR monitor, WORKSPACEID works
     auto best_primary = std::numeric_limits<double>::infinity();
     auto best_secondary = std::numeric_limits<double>::infinity();
 
+    // We only consider mapped tiled windows on the destination workspace. The
+    // score prefers windows nearest the crossing edge, then windows aligned with
+    // the source window on the perpendicular axis.
     for (const auto& window : g_pCompositor->m_windows) {
         if (!window || window->workspaceID() != workspace_id || window->m_isFloating || !window->m_isMapped || window->isHidden())
             continue;
@@ -208,6 +213,9 @@ int get_workspace_id() {
 
 void CanvasLayout::syncHiddenSpecialWorkspaceCanvases()
 {
+    // Hidden special workspaces still keep a backing canvas. If that canvas only
+    // contains an empty ephemeral lane, refresh its visibility bookkeeping so it
+    // does not retain stale "visible" state from the last monitor it was on.
     for (const auto& workspaceRef : g_pCompositor->getWorkspaces()) {
         const auto workspace = workspaceRef.lock();
         if (!workspace || !workspace->m_isSpecialWorkspace)
@@ -234,6 +242,8 @@ void CanvasLayout::recalculateMonitor(const int &monitor_id)
     if (!workspace)
         return;
 
+    // Monitor-scoped relayout is only meaningful for the monitor currently
+    // displaying this workspace. Everything else should be ignored.
     syncHiddenSpecialWorkspaceCanvases();
     const auto monitor = CanvasLayoutInternal::visible_monitor_for_workspace(workspace);
     (void)syncSpecialWorkspaceVisibilityState(monitor);

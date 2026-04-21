@@ -56,6 +56,13 @@ struct CanvasOverviewSnapshot {
  * - Hyprland target callbacks enter through `newTarget` / `removeTarget`
  * - keybindings enter through dispatcher-facing methods like `move_focus`
  * - `Lane` and `Stack` do the local membership and geometry work
+ *
+ * Recommended reading order for new contributors:
+ * - start here for the high-level ownership model
+ * - then read `src/layout/canvas/core.cpp` for lifecycle and relayout flow
+ * - then `src/layout/canvas/focus.cpp` for directional navigation and handoff
+ * - then `src/layout/lane/lane.h` and `src/layout/lane/core.cpp`
+ * - finally `src/model/stack.h` plus the stack implementation files
  */
 class CanvasLayout : public Layout::ITiledAlgorithm {
 public:

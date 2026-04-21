@@ -1,6 +1,11 @@
 /**
  * @file stack_geometry.cpp
  * @brief Stack geometry transforms, relayout, and resize logic.
+ *
+ * A Stack owns one viewport-sized strip inside a lane. The functions here keep
+ * that strip internally consistent: they rescale child windows, clamp the
+ * active window back into view, and translate stack-local coordinates into
+ * actual Hyprland window position/size fields.
  */
 #include "stack_internal.h"
 
@@ -19,6 +24,9 @@ namespace ScrollerModel {
 
 void Stack::scale(const Vector2D &bmin, const Vector2D &start, double scale, double gap) {
     for (auto win = windows.first(); win != nullptr; win = win->next()) {
+        // Window geometry is stored in stack-local coordinates. Rescaling the
+        // stack therefore means rescaling each child's local offset and span
+        // first, then rebuilding compositor coordinates from that local state.
         const auto oldLocal = win->data()->get_geom_y();
         const auto newLocal = mode == Mode::Column
             ? start.x + (oldLocal - bmin.x) * scale
@@ -52,6 +60,8 @@ bool Stack::toggle_fullscreen(const ScrollerCore::Box &fullbbox) {
     if (!active)
         return false;
 
+    // Only the stack box itself is swapped here. The actual active-window
+    // compositor geometry will be refreshed by recalculate_stack_geometry().
     fullscreened = !fullscreened;
     if (fullscreened) {
         mem.geom = geom;
@@ -70,6 +80,8 @@ void Stack::set_fullscreen(const ScrollerCore::Box &fullbbox) {
 }
 
 void Stack::push_geom() {
+    // Save both the stack frame and every child window so temporary states like
+    // maximize can be reversed without reconstructing geometry from scratch.
     mem.geom = geom;
     for (auto w = windows.first(); w != nullptr; w = w->next())
         w->data()->push_geom();
@@ -85,6 +97,9 @@ void Stack::toggle_maximized(double maxw, double maxh) {
     if (!active)
         return;
 
+    // "Maximized" here means: expand the stack along the lane axis and expand
+    // the active window along the cross axis, while preserving enough state to
+    // restore the previous free-form geometry later.
     maxdim = !maxdim;
     if (maxdim) {
         mem.geom = geom;
@@ -106,6 +121,8 @@ void Stack::recalculate_stack_geometry(const Vector2D &gap_x, double gap) {
     if (!active)
         return;
 
+    // Scroller-managed fullscreen is a hard override: only the active window is
+    // shown and it should exactly match the fullscreen box.
     if (fullscreen()) {
         PHLWINDOW activeWindow = active->data()->ptr().lock();
         if (!activeWindow)
@@ -137,6 +154,8 @@ void Stack::recalculate_stack_geometry(const Vector2D &gap_x, double gap) {
                   geom.h,
                   mode == Mode::Column ? "column" : "row");
 
+    // Clamp first when the active window has drifted outside the stack viewport.
+    // This catches direct resizes or moves before any reordering heuristics run.
     if (a0 < viewportStart) {
         wactive->set_geom_y(viewportStart);
         adjust_windows(active, gap_x, gap);
@@ -147,6 +166,8 @@ void Stack::recalculate_stack_geometry(const Vector2D &gap_x, double gap) {
         adjust_windows(active, gap_x, gap);
         return;
     }
+    // Lazy reorder means the caller deliberately positioned the active window;
+    // we only need to propagate that anchor to neighbors.
     if (reorder != Reorder::Auto) {
         adjust_windows(active, gap_x, gap);
         return;
@@ -156,6 +177,8 @@ void Stack::recalculate_stack_geometry(const Vector2D &gap_x, double gap) {
     Window *next = active->next() ? active->next()->data() : nullptr;
     const bool prevVisible = StackInternal::is_window_fully_visible(prev, geom, mode);
     const bool nextVisible = StackInternal::is_window_fully_visible(next, geom, mode);
+    // When at least one neighbor is still fully visible, keeping the current
+    // anchor avoids unnecessary jumps while navigating within a stack.
     if (prevVisible || nextVisible) {
         adjust_windows(active, gap_x, gap);
         return;
@@ -164,6 +187,8 @@ void Stack::recalculate_stack_geometry(const Vector2D &gap_x, double gap) {
     const auto nextSize = next ? next->get_geom_h() : 0.0;
     const auto prevSize = prev ? prev->get_geom_h() : 0.0;
     const auto activeSize = wactive->get_geom_h();
+    // If both adjacent windows fell out of view, choose a fresh anchor that
+    // brings the active window back to a readable position in the viewport.
     const double newPos =
         mode == Mode::Column
             ? ScrollerCore::choose_anchor_x(next != nullptr, prev != nullptr, activeSize, nextSize, prevSize, wactive->get_geom_y(), geom)
@@ -179,6 +204,9 @@ void Stack::recalculate_stack_geometry(const Vector2D &gap_x, double gap) {
 
 void Stack::fit_size(FitSize fitsize, const Vector2D &gap_x, double gap) {
     reorder = Reorder::Auto;
+    // Fit-size acts on a contiguous range of windows. The helpers decide which
+    // range should be scaled (all / visible / before / after active), then
+    // normalize that range so the chosen windows exactly fill the stack span.
     const auto [from, to] = ScrollerCore::select_fit_size_range(
         fitsize,
         windows.first(),
@@ -209,6 +237,8 @@ void Stack::adjust_windows(ListNode<Window *> *win, const Vector2D &gap_x, doubl
     if (!win)
         return;
 
+    // First rebuild pure local ordering around the anchor window. At this point
+    // we still operate in stack-local coordinates, not compositor coordinates.
     for (auto w = win->prev(), p = win; w != nullptr; p = w, w = w->prev()) {
         auto *wdata = w->data();
         auto *pdata = p->data();
@@ -264,6 +294,9 @@ void Stack::adjust_windows(ListNode<Window *> *win, const Vector2D &gap_x, doubl
                       shiftedBelow);
     }
 
+    // The final pass is the "bridge" back to Hyprland. Every local window box
+    // is translated into actual monitor-relative position/size and synced to the
+    // compositor's animated target geometry.
     for (auto w = windows.first(); w != nullptr; w = w->next()) {
         PHLWINDOW window = w->data()->ptr().lock();
         if (!window)
@@ -287,6 +320,9 @@ void Stack::resize_active_window(const ScrollerCore::Box &bounds, const Vector2D
         return;
 
     auto border = activeWindow->getRealBorderSize();
+    // A pointer drag can resize along two logical axes at once:
+    // - stackDelta changes the outer stack size inside the lane
+    // - windowDelta changes the active child size inside that stack
     const auto stackDelta = mode == Mode::Column ? delta.y : delta.x;
     const auto windowDelta = mode == Mode::Column ? delta.x : delta.y;
     auto renderedStackSpan = StackInternal::stack_primary_span(geom, mode) + stackDelta - 2.0 * border - gap_x.x - gap_x.y;
@@ -295,6 +331,8 @@ void Stack::resize_active_window(const ScrollerCore::Box &bounds, const Vector2D
     if (maxStackSpan <= 0.0 || renderedStackSpan >= maxPrimary)
         return;
 
+    // Validate the inner resize before mutating anything. Every window must stay
+    // positive-sized and the active one must still fit inside the stack viewport.
     if (std::abs(static_cast<int>(windowDelta)) > 0) {
         for (auto win = windows.first(); win != nullptr; win = win->next()) {
             auto gap0 = win == windows.first() ? 0.0 : gap;
@@ -312,6 +350,8 @@ void Stack::resize_active_window(const ScrollerCore::Box &bounds, const Vector2D
     reorder = Reorder::Auto;
     width = StackWidth::Free;
 
+    // Resizing by drag always puts the stack into free-width mode because the
+    // result no longer matches the predefined fractional width presets.
     if (mode == Mode::Column)
         geom.h += stackDelta;
     else

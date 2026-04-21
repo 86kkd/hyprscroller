@@ -6,6 +6,12 @@
  * tiled windows, keeps a logical selection independent from Hyprland focus,
  * and resolves the final workspace/window jump only when overview closes with
  * acceptance.
+ *
+ * Reading guide:
+ * - `session.cpp` is the control-flow layer for overview
+ * - `model.cpp` builds the read-only target graph
+ * - `scene.cpp` reshapes that graph into render DTOs
+ * - `session_effects.cpp` performs real Hyprland side effects on accept/restore
  */
 #include "session.h"
 
@@ -20,6 +26,9 @@
 namespace Overview {
 namespace {
 
+// When overview opens with no existing targets selected, prefer the monitor
+// under the cursor so a synthetic empty target appears where the user is
+// already interacting.
 const MonitorRegion* initial_empty_region(const Model& model) {
     if (model.monitors().empty())
         return nullptr;
@@ -32,6 +41,8 @@ const MonitorRegion* initial_empty_region(const Model& model) {
     return region ? region : &model.monitors().front();
 }
 
+// Synthetic empty targets are intentionally smaller than the full monitor box so
+// they render as a clear "new workspace candidate" instead of a full-screen fill.
 Target initial_empty_target(const MonitorRegion& region) {
     return makeEmptyTarget(SessionEffects::nextWorkspaceId(),
                            region.monitorId,
@@ -42,6 +53,8 @@ Target initial_empty_target(const MonitorRegion& region) {
                            true);
 }
 
+// Initial selection prefers the concrete origin window when it is still present
+// in the rebuilt model.
 bool try_select_origin_window(Model& model) {
     const auto originWindow = model.origin().window;
     if (!originWindow)
@@ -55,6 +68,8 @@ bool try_select_origin_window(Model& model) {
     return true;
 }
 
+// If the origin window disappeared, fall back to "same workspace" before using
+// an arbitrary first target.
 bool try_select_origin_workspace(Model& model) {
     const auto originWorkspace = model.origin().workspaceId;
     if (originWorkspace == WORKSPACE_INVALID)
@@ -107,6 +122,8 @@ bool Session::consumeInputHandled() {
 }
 
 bool Session::selectInitialTarget() {
+    // `chooseInitialSelectionChoice` stays pure and testable. This method turns
+    // that decision into actual model mutation in one place.
     const auto choice = chooseInitialSelectionChoice(!model_.targetGraph().empty(),
                                                      model_.findByWindow(model_.origin().window).has_value(),
                                                      model_.findByWorkspace(model_.origin().workspaceId).has_value(),
@@ -140,6 +157,10 @@ void Session::open() {
     if (active_)
         return;
 
+    // Open happens in three phases:
+    // 1. capture enough origin state to restore or accept later
+    // 2. prepare/rebuild the read-only logical overview model
+    // 3. choose an initial selection and start damaging monitors for rendering
     const auto origin = SessionEffects::captureOrigin();
     model_.setOrigin(origin.monitorId, origin.workspaceId, origin.window);
     SessionEffects::prepareSnapshots();
@@ -170,6 +191,8 @@ std::optional<TargetRef> Session::findBestTarget(Direction direction) const {
     if (targetGraph.empty())
         return std::nullopt;
 
+    // Convert the richer overview target graph into the minimal pure-routing
+    // representation that `OverviewLogic` understands.
     std::vector<OverviewLogic::TargetCandidate> candidates;
     candidates.reserve(targetGraph.size());
     auto currentIndex = size_t{0};
@@ -198,6 +221,9 @@ bool Session::createSyntheticEmptyTarget(Direction direction) {
     if (!selection)
         return false;
 
+    // Synthetic targets are routed at monitor-region granularity rather than
+    // real-target granularity. The current selection box becomes the seed for
+    // where the "empty workspace" box should appear next.
     std::vector<OverviewLogic::RegionCandidate> regions;
     regions.reserve(model_.monitors().size());
     auto currentRegionIndex = size_t{0};
@@ -263,6 +289,8 @@ void Session::acceptSelection() {
     if (!selection)
         return;
 
+    // Real side effects live in `session_effects.cpp`; keeping that split makes
+    // this file about control flow rather than compositor mutation details.
     SessionEffects::acceptTarget(*selection);
 }
 
@@ -274,6 +302,9 @@ void Session::close(bool acceptSelectionFlag) {
     if (!active_)
         return;
 
+    // Overview always resolves exactly once on close: either accept the current
+    // selection or restore the remembered origin. Only after that do we clear
+    // the logical model and remove the overlay.
     if (acceptSelectionFlag)
         acceptSelection();
     else
@@ -292,6 +323,8 @@ void Session::dismiss() {
     if (!active_)
         return;
 
+    // Dismiss differs from close(false): it simply tears the overlay down
+    // without running accept/restore side effects.
     const auto* selection = model_.selection();
     spdlog::info("overview_dismiss: selection_workspace={} selection_window={}",
                  selection ? selection->workspaceId : WORKSPACE_INVALID,

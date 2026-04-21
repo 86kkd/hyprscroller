@@ -18,6 +18,8 @@ WorkspaceGridShape chooseWorkspaceGridShape(const ScrollerCore::Box& regionBox, 
     const auto landscape = safeWidth >= safeHeight;
     const auto dominantAspect = landscape ? safeWidth / safeHeight : safeHeight / safeWidth;
 
+    // The square-root heuristic gives a near-square grid, then biases the
+    // longer axis to follow the monitor region's dominant aspect ratio.
     if (landscape) {
         const auto columns = std::min(count,
                                       std::max<std::size_t>(1, static_cast<std::size_t>(std::ceil(std::sqrt(static_cast<double>(count) * dominantAspect)))));
@@ -32,6 +34,8 @@ WorkspaceGridShape chooseWorkspaceGridShape(const ScrollerCore::Box& regionBox, 
 }
 
 std::vector<WorkspaceGridCell> layoutWorkspaceGridCells(const ScrollerCore::Box& regionBox, std::vector<int> workspaceIds) {
+    // Stable ordering keeps the same workspace ids in the same grid positions
+    // across rebuilds, which reduces selection jumps during overview refreshes.
     std::sort(workspaceIds.begin(), workspaceIds.end());
 
     std::vector<WorkspaceGridCell> cells;
@@ -48,6 +52,8 @@ std::vector<WorkspaceGridCell> layoutWorkspaceGridCells(const ScrollerCore::Box&
     }
 
     const auto grid = chooseWorkspaceGridShape(regionBox, workspaceIds.size());
+    // Gaps scale gently with monitor size but are clamped so small monitors
+    // still breathe and large monitors do not waste too much space.
     const auto horizontalGap = std::min(32.0, std::max(12.0, regionBox.w * 0.02));
     const auto verticalGap = std::min(32.0, std::max(12.0, regionBox.h * 0.03));
     const auto totalHorizontalGap = horizontalGap * static_cast<double>(grid.columns - 1);
@@ -55,6 +61,8 @@ std::vector<WorkspaceGridCell> layoutWorkspaceGridCells(const ScrollerCore::Box&
     const auto cellWidth = std::max(120.0, (regionBox.w - totalHorizontalGap) / static_cast<double>(grid.columns));
     const auto cellHeight = std::max(96.0, (regionBox.h - totalVerticalGap) / static_cast<double>(grid.rows));
 
+    // Cells are emitted row-major so neighboring workspace ids stay spatially
+    // close when the sorted id list increases by one.
     for (std::size_t index = 0; index < workspaceIds.size(); ++index) {
         const auto column = index % grid.columns;
         const auto row = index / grid.columns;

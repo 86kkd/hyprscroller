@@ -21,6 +21,8 @@ void fullRenderMonitor(PHLMONITOR monitor) {
     if (!monitor || !session().active())
         return;
 
+    // Render state owns the precomputed scene per monitor. The top-level render
+    // entry point only needs to fetch that scene and hand it to the draw layer.
     const auto* scene = renderState().sceneForMonitor(monitor->m_id);
     if (!scene)
         return;
@@ -29,10 +31,13 @@ void fullRenderMonitor(PHLMONITOR monitor) {
 }
 
 bool initializeRendererHooks(HANDLE handle) {
+    // The public API stays tiny on purpose; hook installation details live in
+    // render_hooks.cpp so the renderer entry points remain easy to follow.
     return initializeRendererHooksImpl(handle);
 }
 
 void shutdownRendererHooks(HANDLE handle) {
+    // Symmetric teardown keeps render hook lifetime management in one place.
     shutdownRendererHooksImpl(handle);
 }
 

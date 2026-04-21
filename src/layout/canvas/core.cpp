@@ -5,6 +5,17 @@
  * This file owns the non-directional core of `CanvasLayout`: lane list
  * management, relayout of the whole canvas, Hyprland target callbacks, and
  * removal/creation flows that keep canvas state coherent.
+ *
+ * Reading guide for new contributors:
+ * - `layout.h` explains the ownership hierarchy (`CanvasLayout` -> `Lane` -> `Stack`)
+ * - this file answers "who owns what and when do we relayout?"
+ * - `focus.cpp` answers "where should focus move next?"
+ *
+ * In practice, this file is the state-maintenance layer around the model:
+ * - it owns the ordered lane list for one workspace
+ * - it keeps cache structures in sync with that list
+ * - it attaches/detaches workspace listeners
+ * - it translates monitor/workspace changes into lane relayout calls
  */
 #include <algorithm>
 #include <cassert>
@@ -44,6 +55,9 @@ void clear_lanes(List<Lane*>& lanes) {
 } // namespace
 
 CanvasLayout::CanvasLayout() {
+    // Keep canvas-local active-lane state aligned with Hyprland's focused
+    // window. `resetRuntimeState` can tear this listener down when a canvas is
+    // detached from a workspace and later rebuild it on demand.
     m_focusCallback = Event::bus()->m_events.window.active.listen([this](PHLWINDOW window, Desktop::eFocusReason) {
         onWindowFocusChange(window);
     });
@@ -54,6 +68,9 @@ CanvasLayout::~CanvasLayout() {
 }
 
 void CanvasLayout::resetRuntimeState() {
+    // Drop every workspace-bound runtime seam. This is the "canvas instance is
+    // no longer attached to a live workspace" cleanup path, so it must clear
+    // both listeners and all cached ownership/handoff state.
     m_focusCallback = nullptr;
     m_workspaceActiveCallback = nullptr;
     workspaceRuntimeId = WORKSPACE_INVALID;
@@ -65,6 +82,9 @@ void CanvasLayout::resetRuntimeState() {
 }
 
 void CanvasLayout::ensureWorkspaceRuntime() {
+    // A `CanvasLayout` can outlive the concrete workspace it is currently bound
+    // to. Rebuild listeners lazily so command paths can safely call this before
+    // touching workspace-bound state.
     if (!m_focusCallback) {
         m_focusCallback = Event::bus()->m_events.window.active.listen([this](PHLWINDOW window, Desktop::eFocusReason) {
             onWindowFocusChange(window);
@@ -83,6 +103,9 @@ void CanvasLayout::ensureWorkspaceRuntime() {
 
     workspaceRuntimeId = workspace->m_id;
     m_workspaceActiveCallback = workspace->m_events.activeChanged.listen([this] {
+        // Special workspaces can disappear without their hidden canvas ticking.
+        // When the active state flips, resync hidden-canvas bookkeeping first,
+        // then relayout if the visibility transition changed the lane state.
         const auto workspace = getCanvasWorkspace();
         if (!workspace)
             return;
@@ -99,6 +122,10 @@ CanvasLayoutInternal::CanvasBounds CanvasLayoutInternal::compute_canvas_bounds(P
     auto *const PGAPSIN = (CCssGapData *)(PGAPSINDATA.ptr())->getData();
     auto *const PGAPSOUT = (CCssGapData *)(PGAPSOUTDATA.ptr())->getData();
 
+    // Scroller uses one shared interpretation of monitor space. `full` is the
+    // logical monitor rectangle and `max` is the workarea after reserved areas
+    // and outer gaps are applied. Every lane relayout path should go through
+    // this helper so lane and stack code agree on the same coordinate space.
     const auto gaps_in = PGAPSIN->m_top;
     const auto gaps_out = PGAPSOUT->m_top;
 
@@ -116,6 +143,9 @@ PHLWORKSPACE CanvasLayout::getCanvasWorkspace() const {
 }
 
 Lane *CanvasLayout::getActiveLane() {
+    // New readers often expect "no active lane" to remain null. In practice we
+    // default to the first lane so command paths have a stable current lane as
+    // soon as the canvas contains anything.
     if (activeLane)
         return activeLane->data();
     if (lanes.first()) {
@@ -167,6 +197,9 @@ void CanvasLayout::rememberWindowLane(PHLWINDOW window, Lane *lane) {
         return;
     }
 
+    // The owner index is an optimization only. Every write path still has to
+    // treat it as a cache and keep it synchronized with the authoritative lane
+    // list.
     laneByWindow.remember(ScrollerCore::window_key(window), lane);
 }
 
@@ -217,6 +250,8 @@ ListNode<Lane *> *CanvasLayout::insertLaneNode(Lane *lane, Direction direction, 
     if (!anchor || anchor == node)
         return node;
 
+    // Direction semantics are orientation-aware. "insert left" and "insert up"
+    // both mean "before current lane" once the lane mode is resolved.
     if (CanvasLayoutInternal::direction_inserts_before_current(lane->get_mode(), direction))
         lanes.move_before(anchor, node);
     else
@@ -265,6 +300,9 @@ void CanvasLayout::resetHandoffState() {
 }
 
 void CanvasLayout::finishLaneTransfer(ListNode<Lane *> *sourceLaneNode, PHLMONITOR sourceMonitor, bool ephemeralOnly, bool warpCursor) {
+    // Payload transfer helpers in focus/move-window paths call this as the last
+    // phase: prune an empty source lane if needed, relayout the visible canvas,
+    // then let Hyprland focus follow the lane's new active window.
     if (!dropEmptyLane(sourceLaneNode, activeLane ? activeLane->data() : nullptr, sourceMonitor, ephemeralOnly))
         relayoutVisibleCanvas(sourceMonitor);
 
@@ -278,6 +316,8 @@ Lane *CanvasLayout::getLaneForWindow(PHLWINDOW window) {
     if (!window)
         return nullptr;
 
+    // This is the lane-level sibling of `Lane::getStackForWindow`: consult the
+    // cache first, validate the cached owner, then fall back to a full scan.
     const auto key = ScrollerCore::window_key(window);
     if (auto *cachedLane = laneByWindow.find_valid(key, [&](Lane *owner) {
             return owner && getLaneNode(owner) && owner->has_window(window);
@@ -304,6 +344,9 @@ PHLMONITOR CanvasLayout::getVisibleCanvasMonitor(PHLMONITOR fallbackMonitor) con
 }
 
 void CanvasLayout::prepareForActionContext() {
+    // Dispatcher-facing entrypoints call this before mutating the canvas. It is
+    // the "make sure hidden special workspaces and listeners are not stale"
+    // checkpoint shared by command code.
     ensureWorkspaceRuntime();
 
     syncHiddenSpecialWorkspaceCanvases();
@@ -332,6 +375,9 @@ bool CanvasLayout::dropEmptyLane(ListNode<Lane *> *laneNode, Lane *preferredLane
     if (!lane->empty())
         return false;
 
+    // Once a lane is removed we must still leave the canvas pointing at a valid
+    // active lane. Prefer the explicit caller choice, otherwise pick an
+    // adjacent lane when the removed lane used to be active.
     Lane *fallbackLane = preferredLane;
     if (!fallbackLane && activeLane == laneNode) {
         if (laneNode->next())
@@ -382,6 +428,8 @@ void CanvasLayout::relayoutCanvas(PHLMONITOR monitor, bool honor_fullscreen) {
     if (!workspace || !monitor || lanes.empty())
         return;
 
+    // Single-lane canvases delegate the whole monitor to one lane. Multi-lane
+    // canvases instead treat lanes like pages inside a larger logical strip.
     if (lanes.size() == 1) {
         CanvasLayoutInternal::recalculate_workspace_lane(lanes.first()->data(), monitor, workspace, honor_fullscreen);
         return;
@@ -402,6 +450,10 @@ void CanvasLayout::relayoutCanvas(PHLMONITOR monitor, bool honor_fullscreen) {
     for (auto lane = lanes.first(); lane != nullptr; lane = lane->next(), ++index) {
         Box laneBox = max;
         if (paged) {
+            // Page-mode keeps every lane full-sized and offsets it relative to
+            // the active lane. Only one page is visible at a time; the others
+            // stay laid out off-screen so focus/move commands can page between
+            // them predictably.
             const auto delta = static_cast<double>(index) - static_cast<double>(activeIndex);
             if (ScrollerCore::mode_pages_lanes_vertically(mode))
                 laneBox = Box(max.x, max.y + delta * full.h, max.w, max.h);

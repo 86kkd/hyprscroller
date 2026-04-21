@@ -31,6 +31,9 @@ using ScrollerModel::Stack;
 using ScrollerModel::StackWidth;
 
 namespace {
+// Read/write helpers in this anonymous namespace keep the later relayout code
+// phrased in terms of the lane "primary" axis. For column mode that axis is Y;
+// for row mode it is X.
 double stack_primary_origin(const Stack *stack, Mode mode) {
     return mode == Mode::Column ? stack->get_geom_y() : stack->get_geom_x();
 }
@@ -125,6 +128,8 @@ double initialize_active_stack_geometry(ListNode<Stack *> *active, const Scrolle
     if (active->data()->get_init())
         return stack_primary_origin(active->data(), mode);
 
+    // Brand-new stacks inherit their initial anchor from the nearest neighbor if
+    // one already exists. Only a single-stack lane needs synthetic centering.
     double active_pos;
     if (active->prev()) {
         Stack *prev = active->prev()->data();
@@ -247,6 +252,8 @@ void Lane::recalculate_lane_geometry() {
     if (active == nullptr)
         return;
 
+    // Hyprland-native fullscreen bypasses the normal overview/scroller viewport
+    // rules. In that mode we only refresh the active stack's child-window layout.
     if (const auto activeWindow = active->data()->get_active_window(); activeWindow && activeWindow->isFullscreen()) {
         active->data()->recalculate_stack_geometry(calculate_gap_x(active), gap);
         return;
@@ -263,6 +270,8 @@ void Lane::recalculate_lane_geometry() {
     }
     g_pEventManager->postEvent(SHyprIPCEvent{"scroller", active->data()->get_width_name() + "," + active->data()->get_height_name()});
 #endif
+    // Degenerate case: one stack with one window should just occupy the entire
+    // lane instead of running the more general anchor-selection logic below.
     if (stacks.size() == 1 && active->data()->size() == 1) {
         auto *stack = active->data();
         stack->update_width(stack->get_width(), max.w, max.h);
@@ -288,6 +297,8 @@ void Lane::recalculate_lane_geometry() {
                   max.w,
                   max.h,
                   logging::summarize_stacks(stacks, mode));
+    // First clamp the active stack back into the visible viewport. This handles
+    // drag/resize overflow before we think about smarter re-anchoring.
     if (activePos < visible_primary_origin(max, mode)) {
         activePos = visible_primary_origin(max, mode);
         set_stack_primary_position(active->data(), mode, max, activePos);
@@ -308,6 +319,8 @@ void Lane::recalculate_lane_geometry() {
                       logging::summarize_stacks(stacks, mode));
         return;
     }
+    // Lazy reorder means "respect the caller's explicit position" and only
+    // restack neighbors around it. Auto reorder may still move the active stack.
     if (reorder != Reorder::Auto) {
         set_stack_primary_position(active->data(), mode, max, activePos);
         adjust_stacks(active);
@@ -328,6 +341,9 @@ void Lane::recalculate_lane_geometry() {
     const bool keep_current = prev_inside || next_inside;
     const auto prevSpan = prev ? stack_primary_span(prev, mode) : 0.0;
     const auto nextSpan = next ? stack_primary_span(next, mode) : 0.0;
+    // If at least one adjacent stack still intersects the viewport we keep the
+    // current anchor. Otherwise we choose a fresh anchor that pulls the active
+    // stack back toward the visible center while preserving stack order.
     const double newPos = keep_current
         ? activePos
         : (mode == Mode::Column
@@ -345,6 +361,8 @@ void Lane::recalculate_lane_geometry() {
 }
 
 void Lane::adjust_stacks(ListNode<Stack *> *stack) {
+    // Expand outward from the anchor stack so the linked-list order directly
+    // maps to geometric order on screen.
     for (auto col = stack->prev(), prev = stack; col != nullptr; prev = col, col = col->prev()) {
         set_stack_primary_position(col->data(), mode, max,
                                    stack_primary_origin(prev->data(), mode) - stack_primary_span(col->data(), mode));
@@ -367,6 +385,9 @@ void Lane::adjust_stacks(ListNode<Stack *> *stack) {
     size_t shiftedBefore = 0;
     size_t shiftedAfter = 0;
 
+    // Stacks that are completely clipped by reserved monitor margins should
+    // stay offset into those margins. Without this extra shift they would be
+    // pulled back to the viewport edge every relayout and appear to jitter.
     for (auto col = stacks.first(); col != nullptr; col = col->next()) {
         auto gap0 = col == stacks.first() ? 0.0 : gap;
         auto gap1 = col == stacks.last() ? 0.0 : gap;
@@ -395,6 +416,8 @@ void Lane::adjust_stacks(ListNode<Stack *> *stack) {
                       logging::summarize_stacks(stacks, mode));
     }
 
+    // Once every stack box has been placed, each stack performs its own inner
+    // window relayout using the lane-relative gap pair we just established.
     for (auto col = stacks.first(); col != nullptr; col = col->next()) {
         auto gap0 = col == stacks.first() ? 0.0 : gap;
         auto gap1 = col == stacks.last() ? 0.0 : gap;

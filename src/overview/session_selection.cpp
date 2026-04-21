@@ -11,6 +11,11 @@ InitialSelectionChoice chooseInitialSelectionChoice(bool hasTargets,
                                                     bool hasOriginWorkspaceTarget,
                                                     bool hasFirstTarget,
                                                     bool hasInitialEmptyRegion) {
+    // Selection priority mirrors user expectations:
+    // 1. return to the exact origin window when possible
+    // 2. else return to the origin workspace
+    // 3. else pick the first concrete target
+    // 4. else fall back to an initial empty region placeholder
     if (!hasTargets)
         return hasInitialEmptyRegion ? InitialSelectionChoice::InitialEmpty : InitialSelectionChoice::None;
 

@@ -1,6 +1,16 @@
 /**
  * @file render_draw.cpp
  * @brief Rendering helpers for overview scene drawing and snapshot setup.
+ *
+ * This file is the last step of the overview pipeline:
+ * - `session.cpp` decides what should be selected
+ * - `scene.cpp` turns the model into render DTOs
+ * - this file turns those DTOs into OpenGL draw calls and snapshot setup
+ *
+ * New-reader rule of thumb:
+ * - helpers in the anonymous namespace are low-level drawing primitives
+ * - exported functions at the bottom are the render pipeline entrypoints
+ * - whenever OpenGL render state is temporarily changed, restore it before exit
  */
 #include "render_draw.h"
 
@@ -27,6 +37,7 @@ namespace {
 
 using ScrollerCore::Box;
 
+// Render APIs expect integer-ish boxes; overview layout math works in doubles.
 int iround(double value) {
     return static_cast<int>(std::lround(value));
 }
@@ -40,6 +51,9 @@ CBox to_cbox(const Box& box) {
     };
 }
 
+// Text rendering is expensive enough that overview keeps a small cache keyed by
+// text + style. The cache lives in `RenderState`; these helpers only compute the
+// lookup key and populate the cache on misses.
 std::string text_cache_key(const std::string& text, const CHyprColor& color, int pt, int maxWidth, int weight) {
     return text + "|" + std::to_string(color.stripA().getAsHex()) + "|" + std::to_string(pt) + "|" + std::to_string(maxWidth) + "|" + std::to_string(weight);
 }
@@ -66,6 +80,7 @@ void draw_text(RenderState& state, const std::string& text, const Box& box, cons
     if (!texture || texture->m_size.x <= 0.0 || texture->m_size.y <= 0.0)
         return;
 
+    // Scale text to fit the requested title box while preserving aspect ratio.
     const auto scale = std::min(clipped->w / texture->m_size.x, clipped->h / texture->m_size.y);
     const auto width = std::max(1.0, texture->m_size.x * scale);
     const auto height = std::max(1.0, texture->m_size.y * scale);
@@ -116,6 +131,8 @@ struct PreviewShape {
     float roundingPower = 2.0F;
 };
 
+// Snapshot previews try to mimic the live window's rounded-corner style after
+// the preview has been scaled down into overview space.
 PreviewShape preview_shape_for_window(const SceneTarget& target, const Box& box) {
     PreviewShape shape;
     if (!target.window)
@@ -133,6 +150,9 @@ PreviewShape preview_shape_for_window(const SceneTarget& target, const Box& box)
     return shape;
 }
 
+// Draw one window preview directly from Hyprland's window framebuffer snapshot.
+// This path temporarily overrides a few OpenGL render-state fields so the
+// preview samples the correct UV rectangle from the source monitor texture.
 bool draw_window_snapshot(const SceneTarget& target, const Box& box, const Box& bounds) {
     if (!target.window)
         return false;
@@ -184,6 +204,8 @@ bool draw_window_snapshot(const SceneTarget& target, const Box& box, const Box& 
     };
     uvBox.transform(Math::wlTransformToHyprutils(Math::invertTransform(sourceMonitor->m_transform)), 1.0, 1.0);
 
+    // Save every mutable render-state field we touch so overview drawing leaves
+    // the surrounding render pass exactly as it found it.
     const auto lastUVTL = g_pHyprOpenGL->m_renderData.primarySurfaceUVTopLeft;
     const auto lastUVBR = g_pHyprOpenGL->m_renderData.primarySurfaceUVBottomRight;
     const auto lastWindow = g_pHyprOpenGL->m_renderData.currentWindow;
@@ -216,6 +238,11 @@ bool draw_window_snapshot(const SceneTarget& target, const Box& box, const Box& 
 }
 
 void draw_window_preview(RenderState& state, const SceneTarget& target, const Box& bounds, double overlayAlpha) {
+    // The preview draw order is:
+    // 1. shadow
+    // 2. live snapshot or matte fallback
+    // 3. outline
+    // 4. title backdrop + text
     const auto drawBox = centerScaleBox(target.box, Style::kTargetScaleBase + Style::kTargetScaleRange * overlayAlpha);
     const auto previewBox = insetBox(drawBox, Style::kPreviewInset, Style::kPreviewInset);
     const auto previewShape = preview_shape_for_window(target, previewBox);
@@ -259,6 +286,8 @@ void draw_window_preview(RenderState& state, const SceneTarget& target, const Bo
 }
 
 void draw_empty_target(const SceneTarget& target, const Box& bounds, double overlayAlpha) {
+    // Empty targets are intentionally minimal: they only need an outline to
+    // show "there is navigable blank space here".
     const auto drawBox = centerScaleBox(target.box, Style::kTargetScaleBase + Style::kTargetScaleRange * overlayAlpha);
     const auto border = Style::previewBorder(target.selected, static_cast<float>((target.selected ? 0.92 : 0.86) * overlayAlpha));
     draw_outline_panel(drawBox, bounds, border, Style::kEmptyTargetRound, 2.0F);
@@ -267,6 +296,9 @@ void draw_empty_target(const SceneTarget& target, const Box& bounds, double over
 } // namespace
 
 void snapshotWindowTargets(const Model& model) {
+    // Window previews prefer cached snapshots over re-rendering live window
+    // trees during overview draw. Snapshot the participating windows up front at
+    // session transition time so later draw passes are simple and stable.
     for (const auto& region : model.monitors()) {
         for (const auto& workspace : region.workspaces) {
             for (const auto& target : workspace.targets) {
@@ -280,6 +312,9 @@ void snapshotWindowTargets(const Model& model) {
 }
 
 void snapshotBackdropLayers(const Model& model, RenderState& state) {
+    // The backdrop is captured separately from window targets so overview can
+    // recreate "wallpaper beneath previews" without mutating the normal window
+    // render order.
     state.clearBackdropLayers();
 
     for (const auto& region : model.monitors()) {
@@ -307,6 +342,9 @@ void enqueueMonitorBackdrop(PHLMONITOR monitor, const RenderState& state) {
     if (!monitor)
         return;
 
+    // Always paint a stable matte first, then replay captured background/bottom
+    // layer snapshots. That keeps overview visually stable even if the monitor
+    // background texture itself is changing underneath us.
     g_pHyprRenderer->m_renderPass.add(makeUnique<CClearPassElement>(CClearPassElement::SClearData{
         Style::matteBackground(),
     }));
@@ -329,6 +367,10 @@ void drawSceneMonitor(const SceneMonitor& scene, steady_tp now, RenderState& sta
     if (progress <= 0.0)
         return;
 
+    // Draw in increasing specificity:
+    // - workspace targets
+    // - synthetic empty target, if any
+    // - one monitor-local selection outline on top
     for (const auto& workspace : scene.workspaces) {
         for (const auto& target : workspace.targets) {
             if (target.type == TargetType::Window)

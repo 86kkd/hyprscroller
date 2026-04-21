@@ -19,6 +19,8 @@
 
 namespace {
 
+// Default production runtime backed by Hyprland globals. Tests can replace it
+// with a fake implementation through set_dispatcher_runtime_for_tests().
 class HyprlandDispatcherRuntime final : public CanvasLayoutInternal::DispatcherRuntime {
 public:
     bool hasDispatcherRegistry() const override {
@@ -136,6 +138,10 @@ void focus_monitor_workspace(PHLMONITOR monitor, PHLWORKSPACE workspace, WORKSPA
                   targetWorkspaceId,
                   priorMonitorName);
 
+    // Prefer direct monitor APIs first because they avoid dispatcher parsing and
+    // can switch special workspaces explicitly. Dispatcher calls still follow as
+    // verification/normalization because some compositor state only settles once
+    // the public dispatch path runs.
     bool switched = false;
     if (workspace) {
         if (workspace->m_isSpecialWorkspace)
@@ -157,6 +163,8 @@ void focus_monitor_workspace(PHLMONITOR monitor, PHLWORKSPACE workspace, WORKSPA
                       targetWorkspaceId);
     }
 
+    // First public pass: make sure cursor focus and active workspace line up
+    // with the direct API result.
     if (!is_cursor_monitor(monitor))
         (void)invoke_dispatcher("focusmonitor", monitor->m_name, ctx);
 
@@ -165,6 +173,8 @@ void focus_monitor_workspace(PHLMONITOR monitor, PHLWORKSPACE workspace, WORKSPA
     else if (!workspace && !fallbackSelector.empty())
         (void)invoke_dispatcher("workspace", fallbackSelector, ctx);
 
+    // Retry once when cursor focus still did not move. This is defensive code
+    // for compositor timing edges around monitor focus/workspace activation.
     if (!is_cursor_monitor(monitor)) {
         const auto retryContext = std::string(ctx).append("_retry");
         (void)invoke_dispatcher("focusmonitor", monitor->m_name, retryContext.c_str());
@@ -186,6 +196,8 @@ void focus_monitor_workspace(PHLMONITOR monitor, PHLWORKSPACE workspace, WORKSPA
     if (focusedMonitor == monitor)
         return;
 
+    // Final verify pass with explicit log context so failures are easy to spot
+    // in logs when cross-monitor focus regresses.
     if (workspace && !workspace->m_isSpecialWorkspace && !selector.empty()) {
         spdlog::warn("{}: monitor {} still not focused after attempts workspace={} target={}",
                      ctx,
@@ -231,6 +243,8 @@ void switch_to_window(PHLWINDOW window, bool warp_cursor)
     if (!window)
         return;
 
+    // Window focus is split into two steps because Hyprland may reject focusing
+    // a window on an unfocused monitor unless that monitor is focused first.
     focus_window_monitor(window);
 
     if (!dispatcher_runtime().isWindowActive(window)) {

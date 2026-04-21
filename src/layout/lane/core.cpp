@@ -1,3 +1,17 @@
+/**
+ * @file core.cpp
+ * @brief Lane construction, stack ownership, and payload-transfer mechanics.
+ *
+ * `Lane` is the bridge between canvas-level commands and stack-level layout
+ * work. A lane owns ordered `Stack` objects, tracks which stack is active, and
+ * implements the "take one active window out here, reinsert it there" flows used
+ * by move-window and cross-monitor handoff code.
+ *
+ * Reading guide:
+ * - constructors and cache helpers explain lane ownership rules
+ * - payload helpers explain how an active window leaves and re-enters a lane
+ * - geometry setters describe how a lane reacts when the canvas moves/resizes
+ */
 #include "lane.h"
 
 #include <algorithm>
@@ -32,6 +46,9 @@ Lane::Lane(PHLMONITOR monitor, Mode laneMode)
 
 Lane::Lane(Stack *stack)
     : ephemeral(false), gap(0), reorder(Reorder::Auto), mode(Mode::Row), active(nullptr) {
+    // This constructor is primarily used when a whole stack is transferred into
+    // a fresh lane. Derive mode/sizes from the stack's active window so the new
+    // lane starts in a monitor-consistent coordinate space.
     const auto window = stack ? stack->get_active_window() : nullptr;
     const auto monitor = window ? g_pCompositor->getMonitorFromID(window->monitorID()) : nullptr;
     if (monitor) {
@@ -59,6 +76,8 @@ Stack *Lane::getStackForWindow(PHLWINDOW window) const {
     if (!window)
         return nullptr;
 
+    // `stackByWindow` is a cache over the authoritative stack list. Validate a
+    // cached owner before trusting it, then fall back to a whole-lane scan.
     const auto key = ScrollerCore::window_key(window);
     if (auto *cachedStack = stackByWindow.find_valid(key, [&](Stack *owner) {
             return owner && getStackNode(owner) && owner->has_window(window);
@@ -183,6 +202,9 @@ ActiveWindowRestorePlan Lane::capture_active_window_restore_plan(Direction direc
     if (!stack || stack->size() <= 1)
         return plan;
 
+    // If the active stack still contains siblings after extraction, a failed
+    // handoff should put the window back next to those siblings instead of
+    // materializing a brand-new stack.
     plan.restoreIntoCurrentStack = true;
     plan.insertBeforeCurrent = stack->active_at_edge(ScrollerCore::stack_item_backward_direction(mode));
     return plan;
@@ -192,6 +214,9 @@ Stack *Lane::extract_active_stack() {
     if (!active)
         return nullptr;
 
+    // Whole-stack extraction is simpler than window-payload extraction because
+    // the stack remains structurally intact; we only need to detach it from the
+    // lane list and repair the active pointer/cache.
     auto node = active;
     auto stack = node->data();
     forgetStackWindows(stack);
@@ -205,6 +230,9 @@ ActiveWindowPayload Lane::extract_active_window_payload() {
     if (!active)
         return {};
 
+    // This is the central "move one active window out of the lane" primitive.
+    // The returned payload must carry both the model window and enough sizing
+    // intent for the destination lane to rebuild an equivalent stack.
     auto *stack = active->data();
     ActiveWindowPayload payload;
     // Free-width stacks need to carry their current rendered primary span so a
@@ -221,6 +249,9 @@ ActiveWindowPayload Lane::extract_active_window_payload() {
     reorder = Reorder::Auto;
 
     if (stack->size() == 0) {
+        // If the extracted window was the last member of its stack, the lane no
+        // longer owns that stack at all. Remove the empty stack immediately so
+        // later relayout code only sees live stacks.
         auto *emptyNode = active;
         active = emptyNode == stacks.last() ? emptyNode->prev() : emptyNode->next();
         stacks.erase(emptyNode);
@@ -239,6 +270,8 @@ double Lane::stack_primary_span_for_transfer(const Stack *stack) const {
     if (!stack)
         return 0.0;
 
+    // Preset-width stacks can recompute their span from the destination lane's
+    // bounds. Only free-width stacks need to carry an explicit axis span.
     if (stack->get_width() != StackWidth::Free)
         return mode == Mode::Column ? max.h : max.w;
 
@@ -249,6 +282,9 @@ Stack *Lane::create_stack_from_payload(ActiveWindowPayload payload) {
     if (!payload)
         return nullptr;
 
+    // Rebuild a single-window stack in this lane's orientation. The payload is
+    // already detached from the source lane, so from here on the destination
+    // lane becomes the sole owner of the transferred model window.
     auto window = payload.release_window();
     if (!window)
         return nullptr;
@@ -293,6 +329,8 @@ void Lane::insert_window_payload(ActiveWindowPayload payload, Direction directio
     if (!payload)
         return;
 
+    // Insertion always resets reorder policy because the lane structure has
+    // materially changed and later relayout should be free to normalize it.
     reorder = Reorder::Auto;
     const bool singleWindowLane = stacks.size() == 1 && stacks.first()->data()->size() == 1;
     if (singleWindowLane)
@@ -314,6 +352,8 @@ void Lane::insert_window_payload(ActiveWindowPayload payload, Direction directio
         return;
     }
 
+    // Insert relative to the current active stack, then repair widths when row
+    // mode would otherwise overflow the visible lane width.
     auto *current = active;
     auto *currentStack = current->data();
     if (currentStack->expanded())
@@ -335,6 +375,9 @@ void Lane::insert_window_payload(ActiveWindowPayload payload, Direction directio
             return;
         }
 
+        // Two free-width stacks can easily overflow a row lane. Scale both
+        // widths down proportionally so insertion preserves relative intent but
+        // still fits the lane box.
         const auto scale = max.w / totalWidth;
         currentStack->set_width_free();
         currentStack->set_geom_w(currentWidth * scale);
@@ -352,6 +395,9 @@ void Lane::restore_active_window_payload(ActiveWindowPayload payload, const Acti
     if (!payload)
         return;
 
+    // Failed handoff fallback: either rebuild a standalone stack or put the
+    // window back into the original active stack, depending on what was
+    // captured before extraction.
     if (!plan.restoreIntoCurrentStack || !active || !active->data()) {
         insert_window_payload(std::move(payload), plan.direction);
         return;
@@ -371,6 +417,9 @@ void Lane::restore_active_window_payload(ActiveWindowPayload payload, const Acti
 }
 
 void Lane::set_canvas_geometry(const Box &full_box, const Box &max_box, int gap_size) {
+    // Lanes store stack-local positions relative to the canvas workarea. If the
+    // workarea origin shifts, every owned stack must shift by the same delta so
+    // their local coordinates remain visually stable after relayout.
     const auto previousLocalOrigin = mode == Mode::Column ? max.x : max.y;
     const auto nextLocalOrigin = mode == Mode::Column ? max_box.x : max_box.y;
     const auto localDelta = nextLocalOrigin - previousLocalOrigin;

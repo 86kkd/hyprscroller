@@ -46,13 +46,22 @@ struct ActiveWindowPayload {
 };
 
 struct ActiveWindowRestorePlan {
+    // Original user-facing direction for the failed move/handoff.
     Direction direction = Direction::End;
+    // When true, the payload came out of a multi-window stack and should go
+    // back into that same stack instead of being rebuilt as a standalone stack.
     bool      restoreIntoCurrentStack = false;
+    // Reinsert relative to the current active window so order is preserved.
     bool      insertBeforeCurrent = false;
 };
 
 class Lane {
     // A lane owns the ordered stacks visible on one canvas strip.
+    //
+    // Companion reading note:
+    // - `lane.h` describes the public responsibilities of a lane
+    // - `lane/core.cpp` explains stack ownership, payload transfer, and cache upkeep
+    // - `lane/geometry.cpp` explains how those stacks are physically laid out
 public:
     Lane(PHLWINDOW window);
     Lane(PHLMONITOR monitor, Mode mode);

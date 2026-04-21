@@ -9,6 +9,8 @@
 #include "layout.h"
 
 void CanvasLayout::prepareForOverviewSnapshot() {
+    // Overview captures whatever geometry the live layout currently exposes, so
+    // the workspace runtime and lane geometry must be fresh before snapshotting.
     ensureWorkspaceRuntime();
     prepareForActionContext();
 
@@ -20,6 +22,9 @@ void CanvasLayout::prepareForOverviewSnapshot() {
     if (!monitor)
         return;
 
+    // Snapshot preparation is read-only at the overview layer, but it still
+    // asks the canvas to relayout first so window boxes reflect the latest
+    // monitor state, gaps, and fullscreen rules.
     relayoutCanvas(monitor, !workspace->m_isSpecialWorkspace);
 }
 
@@ -35,6 +40,8 @@ CanvasOverviewSnapshot CanvasLayout::buildOverviewSnapshot() const {
     const auto monitor = getVisibleCanvasMonitor(g_pCompositor->getMonitorFromID(workspace->monitorID()));
     snapshot.monitorId = monitor ? monitor->m_id : workspace->monitorID();
 
+    // The snapshot is intentionally lightweight: it carries only monitor/workspace
+    // ids plus already-laid-out window boxes so overview model code stays pure.
     for (auto laneNode = lanes.first(); laneNode != nullptr; laneNode = laneNode->next()) {
         auto* lane = laneNode->data();
         if (!lane)

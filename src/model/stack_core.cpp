@@ -1,6 +1,16 @@
 /**
  * @file stack_core.cpp
  * @brief Stack construction, preset sizing, and basic state accessors.
+ *
+ * This file introduces the coordinate vocabulary used by the rest of the stack
+ * implementation. The important idea for new readers is that a `Stack` reasons
+ * in a stack-local axis:
+ * - in row mode, the local axis is vertical (`y` / `h`)
+ * - in column mode, the local axis is horizontal (`x` / `w`)
+ *
+ * Later files (`stack_geometry.cpp`, `stack_membership.cpp`) build on that
+ * vocabulary, so understanding the helpers below makes the rest of the stack
+ * code much easier to follow.
  */
 #include "stack_internal.h"
 
@@ -21,6 +31,9 @@ extern HANDLE PHANDLE;
 
 namespace ScrollerModel::StackInternal {
 
+// These helpers translate one `ScrollerCore::Box` into "what does this mean
+// along the stack's scrolling axis versus the cross axis?" They are small, but
+// they remove a huge amount of mode-dependent branching from later code.
 double stack_local_origin(const ScrollerCore::Box &geom, Mode mode) {
     return mode == Mode::Column ? geom.x : geom.y;
 }
@@ -41,6 +54,9 @@ double local_viewport_end(const ScrollerCore::Box &geom, Mode mode) {
     return stack_local_origin(geom, mode) + stack_local_span(geom, mode);
 }
 
+// Turn a logical geometry request back into compositor-space coordinates. The
+// caller passes values in stack-local vocabulary (`local_pos`, `local_size`);
+// these helpers remap them onto x/y/w/h depending on the current mode.
 Vector2D compose_window_position(const ScrollerCore::Box &geom, Mode mode, double border,
                                  const Vector2D &cross_gap, double local_pos, double local_gap) {
     if (mode == Mode::Column)
@@ -60,6 +76,8 @@ Vector2D compose_window_size(const ScrollerCore::Box &geom, Mode mode, double bo
     return Vector2D(cross_size, main_size);
 }
 
+// Convert width presets such as one-half or two-thirds into a concrete span on
+// the active primary axis.
 double preset_extent(StackWidth width, double max) {
     switch (width) {
     case StackWidth::OneThird:
@@ -79,6 +97,9 @@ StackWidthPreset parse_stack_width_preset(PHLWINDOW window, double fallback_maxw
     static auto const *column_default_width =
         (Hyprlang::STRING const *)HyprlandAPI::getConfigValue(PHANDLE, "plugin:scroller:column_default_width")->getDataStaticPtr();
 
+    // The "floating" preset means "seed the stack from the window's last known
+    // floating size when possible". Every other preset maps directly to one of
+    // the proportional width enums.
     const std::string preset = *column_default_width;
     if (preset == "onehalf")
         return {.width = StackWidth::OneHalf, .maxw = fallback_maxw};
@@ -116,6 +137,9 @@ bool is_window_intersect_viewport(Window *window, const ScrollerCore::Box &geom,
     return ScrollerCore::Interval::intersects(p0, p1, stack_local_origin(geom, mode), local_viewport_end(geom, mode));
 }
 
+// Keep Hyprland's layout target in sync after stack code mutates the logical
+// model geometry. Stack/lane code treats the model as authoritative, then
+// mirrors the final result back into the compositor target.
 void sync_window_target_geometry(PHLWINDOW window) {
     if (!window)
         return;
@@ -133,6 +157,8 @@ namespace ScrollerModel {
 
 Stack::Stack(PHLWINDOW cwindow, double maxw, double maxh, Mode mode)
     : mode(mode), height(WindowHeight::One), reorder(Reorder::Auto), initialized(false), maxdim(false) {
+    // New stacks start from the configured default width preset, then create one
+    // model window whose local-axis span matches the stack's current mode.
     const auto preset = StackInternal::parse_stack_width_preset(cwindow, maxw);
     width = preset.width;
     maxw = preset.maxw;
@@ -145,6 +171,8 @@ Stack::Stack(PHLWINDOW cwindow, double maxw, double maxh, Mode mode)
 
 Stack::Stack(std::unique_ptr<Window> window, StackWidth width, double maxw, double maxh, Mode mode)
     : width(width), mode(mode), height(WindowHeight::One), reorder(Reorder::Auto), initialized(true), maxdim(false) {
+    // This constructor is used when a window model is already detached from a
+    // source stack and must be rebuilt into a fresh one-window destination stack.
     update_width(width, maxw, maxh);
     if (!window)
         return;
@@ -235,6 +263,9 @@ void Stack::set_mode(Mode nextMode, double maxw, double maxh) {
     if (mode == nextMode)
         return;
 
+    // Mode flips reinterpret which axis is local. Recompute stack bounds for the
+    // new orientation, then rewrite the single active window when the stack only
+    // owns one item so that its local coordinates still span the whole stack.
     mode = nextMode;
     update_width(width, maxw, maxh);
     if (active && size() == 1) {
@@ -294,6 +325,8 @@ std::string Stack::get_height_name() const {
 #endif
 
 void Stack::update_width(StackWidth cwidth, double maxw, double maxh) {
+    // Width presets apply to the stack's primary axis. In column mode that axis
+    // is height-like (`geom.h`); in row mode it is width-like (`geom.w`).
     if (mode == Mode::Column) {
         geom.w = maxw;
         geom.h = maximized() ? maxh : StackInternal::preset_extent(cwidth, maxh);

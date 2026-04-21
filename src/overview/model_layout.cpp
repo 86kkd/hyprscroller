@@ -10,6 +10,8 @@
 namespace Overview {
 namespace {
 
+// Empty-workspace targets are inset slightly so they read as a tile inside the
+// workspace region rather than being mistaken for the full region background.
 ScrollerCore::Box inset_box(const ScrollerCore::Box& box, double ratio, double minimumInset = 18.0) {
     const auto insetX = std::min(std::max(minimumInset, box.w * ratio), std::max(0.0, box.w / 2.5));
     const auto insetY = std::min(std::max(minimumInset, box.h * ratio), std::max(0.0, box.h / 2.5));
@@ -25,6 +27,8 @@ void finalizeWorkspaceTargets(WorkspaceNode& node) {
     if (!node.targets.empty())
         return;
 
+    // A workspace with no real windows still needs a selectable target so
+    // directional navigation and "accept" keep working uniformly.
     node.targets.push_back(makeEmptyTarget(node.workspaceId, node.monitorId, node.box, false));
 }
 
@@ -45,6 +49,8 @@ void layoutWorkspaceGrid(MonitorRegion& region) {
     if (region.workspaces.empty())
         return;
 
+    // Grid helpers operate on workspace ids only; the richer WorkspaceNode data
+    // is stitched back in once grid cells have been chosen.
     std::vector<int> workspaceIds;
     workspaceIds.reserve(region.workspaces.size());
     for (const auto& workspace : region.workspaces)
@@ -55,6 +61,8 @@ void layoutWorkspaceGrid(MonitorRegion& region) {
         return a.workspaceId < b.workspaceId;
     });
 
+    // After boxes are assigned, ensure every workspace exposes at least one
+    // selectable target, even if that target is synthetic/empty.
     for (std::size_t index = 0; index < region.workspaces.size(); ++index) {
         auto& workspace = region.workspaces[index];
         workspace.box = cells[index].box;
