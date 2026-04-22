@@ -38,6 +38,7 @@ add_library(hyprscroller SHARED
             src/overview/logic.h
             src/overview/logic.cpp
             src/overview/orientation_math.h
+            src/overview/orientation_math.cpp
             src/overview/geometry_utils.h
             src/overview/animation.h
             src/overview/style.h
