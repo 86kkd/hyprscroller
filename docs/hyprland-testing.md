@@ -59,6 +59,16 @@ overview”这条固定链路，优先直接用仓库里的脚本：
 ./scripts/repro-overview.sh --outer-monitor HDMI-A-1 --keep-open
 ```
 
+如果你要复现“overview 里的 `movefocus` 没按视觉上下关系走”的问题，
+优先用这条更定向的脚本：
+
+```bash
+./scripts/repro-overview-movefocus.sh --outer-monitor HDMI-A-1
+```
+
+它会在 nested 会话里构造两个 `column` 模式 workspace，自动执行
+`toggleoverview -> movefocus u -> accept`，并把最终落点写到 result 文件里。
+
 ## 3. 手工启动嵌套 Hyprland 测试实例
 
 先写一份最小测试配置，例如 `/tmp/hyprscroller-test.conf`：
@@ -322,6 +332,7 @@ hyprctl -i <instance-signature> dispatch exit
 
 - 手工回归清单见 [smoke-test-checklist.md](./smoke-test-checklist.md)
 - 提交规范见 [commit-convention.md](./commit-convention.md)
+- 推荐工程流程见 [feature-debug-workflow.md](./feature-debug-workflow.md)
 
 ## 15. 排障记录：overview 里的空 workspace 卡片
 

@@ -33,6 +33,9 @@ Use this checklist after changing `src/layout/canvas/*`, `src/layout/lane/*`, or
 
 ## Notes
 
+- For `overview`, render, or navigation work, follow the step-by-step process in
+  [feature-debug-workflow.md](./feature-debug-workflow.md) instead of relying on
+  ad-hoc manual reproduction.
 - If any step fails, capture the exact dispatcher, workspace, monitor orientation, and whether the active lane was empty/fullscreen/special.
 - Re-run steps 10-15 after any change touching cross-monitor handoff, dispatcher helpers, or focus suppression.
 - Re-run steps 16-19 after any change touching `src/overview/*`, renderer integration, or overview accept/cancel flow.

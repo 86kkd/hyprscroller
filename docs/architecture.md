@@ -243,7 +243,9 @@ worth keeping stable across refactors.
 When you change real stateful behavior in `CanvasLayout`, `Lane`, or `Stack`,
 the automated tests are necessary but not sufficient. Pair them with the manual
 [smoke test checklist](./smoke-test-checklist.md) and, when needed, the
-[Hyprland testing notes](./hyprland-testing.md).
+[Hyprland testing notes](./hyprland-testing.md). For changes that need nested
+repro scripts or staged debug work, also follow the
+[feature/debug workflow](./feature-debug-workflow.md).
 
 ## Suggested Reading Strategy
 
