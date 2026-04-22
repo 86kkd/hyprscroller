@@ -46,11 +46,18 @@ overview”这条固定链路，优先直接用仓库里的脚本：
 - 生成一份最小 nested `Hyprland` 配置并加载 `./Debug/hyprscroller.so`
 - 把嵌套 Hyprland 作为一个浮动窗口放到指定 outer monitor
 - 在 nested 实例里创建一个图片预览窗口和四个终端窗口
-- 自动执行 `scroller:toggleoverview`
-- 输出 nested 实例 id、日志路径和退出命令
+- 在 nested 实例内部自动执行 `scroller:toggleoverview`
+- 默认等待短暂可见期后自动退出 nested 实例
+- 输出 nested 实例 id、日志路径和测试结果
 
 如果不传 `--outer-monitor`，脚本会优先选择第一块竖屏 monitor，
 否则退回当前 focused monitor。
+
+如果你想保留 nested 实例做手工观察，可以显式传：
+
+```bash
+./scripts/repro-overview.sh --outer-monitor HDMI-A-1 --keep-open
+```
 
 ## 3. 手工启动嵌套 Hyprland 测试实例
 

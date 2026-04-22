@@ -5,7 +5,8 @@
 # 1. writes a minimal nested Hyprland config that loads the debug plugin,
 # 2. opens the nested compositor as a floating window on the requested monitor,
 # 3. creates enough tiled windows to push the first preview off-screen, and
-# 4. opens `scroller:toggleoverview` so the repro is ready to inspect.
+# 4. opens `scroller:toggleoverview` from inside the nested session itself so
+#    the visual overview test actually runs before the nested compositor exits.
 
 set -euo pipefail
 
@@ -22,10 +23,12 @@ Options:
   --outer-monitor NAME   Place the floating nested Hyprland window on NAME.
   --window-size WxH      Outer floating window size. Default: 1400x1800.
   --plugin PATH          Plugin .so to load. Default: ./Debug/hyprscroller.so.
+  --keep-open            Leave the nested Hyprland instance running after setup.
+  --hold-seconds N       Keep overview visible for N seconds before exit. Default: 2.
   -h, --help             Show this help text.
 
-The script keeps the nested Hyprland instance running after setup and prints the
-instance signature plus the exact exit command at the end.
+By default the script runs the overview flow and then exits the nested Hyprland
+instance automatically. Use --keep-open if you want to inspect it manually.
 EOF
 }
 
@@ -124,6 +127,24 @@ wait_for_nested_client_count_gt_stable() {
     return 1
 }
 
+instance_exists() {
+    hyprctl instances -j | jq -e --arg instance "$NESTED_INSTANCE" '
+        any(.[]; .instance == $instance)
+    ' >/dev/null
+}
+
+wait_for_instance_exit() {
+    for ((attempt = 0; attempt < 80; ++attempt)); do
+        if ! instance_exists; then
+            return 0
+        fi
+
+        sleep 0.25
+    done
+
+    return 1
+}
+
 launch_terminal_window() {
     local index="$1"
 
@@ -198,7 +219,22 @@ PATTERN_PATH="$REPO_ROOT/tests/assets/overview-pattern.svg"
 PLUGIN_PATH="$REPO_ROOT/Debug/hyprscroller.so"
 WINDOW_WIDTH=1400
 WINDOW_HEIGHT=1800
+KEEP_OPEN=0
+OVERVIEW_HOLD_SECONDS=2
 OUTER_MONITOR=""
+NESTED_INSTANCE=""
+
+cleanup() {
+    if [[ "${KEEP_OPEN:-0}" -eq 1 ]]; then
+        return
+    fi
+
+    if [[ -n "${NESTED_INSTANCE:-}" ]]; then
+        hyprctl -i "$NESTED_INSTANCE" dispatch exit >/dev/null 2>&1 || true
+    fi
+}
+
+trap cleanup EXIT INT TERM
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -217,6 +253,16 @@ while [[ $# -gt 0 ]]; do
         --plugin)
             [[ $# -ge 2 ]] || die "--plugin requires a path"
             PLUGIN_PATH="$2"
+            shift 2
+            ;;
+        --keep-open)
+            KEEP_OPEN=1
+            shift
+            ;;
+        --hold-seconds)
+            [[ $# -ge 2 ]] || die "--hold-seconds requires an integer value"
+            OVERVIEW_HOLD_SECONDS="$2"
+            [[ "$OVERVIEW_HOLD_SECONDS" =~ ^[0-9]+$ ]] || die "invalid --hold-seconds: $2"
             shift 2
             ;;
         -h|--help)
@@ -250,6 +296,7 @@ CONFIG_PATH="$RUN_DIR/hyprland.conf"
 LOG_PATH="$RUN_DIR/hyprland.log"
 LAUNCHER_PATH="$RUN_DIR/launch-nested.sh"
 PREVIEW_TERMINAL_PATH="$RUN_DIR/preview-terminal.sh"
+FINISHER_PATH="$RUN_DIR/finish-overview.sh"
 
 cat >"$CONFIG_PATH" <<EOF
 monitor = , preferred, auto, 1
@@ -309,7 +356,6 @@ BEFORE_MAX_TIME="$(hyprctl instances -j | jq '[.[].time] | max // 0')"
 LAUNCH_RULES="[monitor $OUTER_MONITOR; float; size $WINDOW_WIDTH $WINDOW_HEIGHT; center]"
 hyprctl dispatch exec "$LAUNCH_RULES $LAUNCHER_PATH" >/dev/null
 
-NESTED_INSTANCE=""
 for ((attempt = 0; attempt < 80; ++attempt)); do
     NESTED_INSTANCE="$(hyprctl instances -j | jq -r --argjson before "$BEFORE_MAX_TIME" '
         (map(select(.time > $before))) as $instances
@@ -343,9 +389,22 @@ done
 
 wait_for_nested_client_count 5 || die "timed out waiting for preview window plus four terminals"
 
-sleep 2
-hyprctl -i "$NESTED_INSTANCE" dispatch scroller:toggleoverview >/dev/null
+cat >"$FINISHER_PATH" <<EOF
+#!/usr/bin/env bash
 sleep 1
+hyprctl dispatch scroller:toggleoverview
+sleep $OVERVIEW_HOLD_SECONDS
+$(if [[ "$KEEP_OPEN" -eq 1 ]]; then printf ':\n'; else printf 'hyprctl dispatch exit\n'; fi)
+EOF
+chmod +x "$FINISHER_PATH"
+
+launch_nested_exec "$FINISHER_PATH"
+
+if [[ "$KEEP_OPEN" -eq 1 ]]; then
+    sleep $((OVERVIEW_HOLD_SECONDS + 1))
+else
+    wait_for_instance_exit || die "timed out waiting for nested Hyprland to exit"
+fi
 
 printf 'nested instance: %s\n' "$NESTED_INSTANCE"
 printf 'nested socket:   %s\n' "$NESTED_SOCKET"
@@ -355,4 +414,8 @@ printf 'terminal app:    %s\n' "$TERMINAL_KIND"
 printf 'run dir:         %s\n' "$RUN_DIR"
 printf 'config:          %s\n' "$CONFIG_PATH"
 printf 'log:             %s\n' "$LOG_PATH"
-printf 'exit command:    hyprctl -i %q dispatch exit\n' "$NESTED_INSTANCE"
+if [[ "$KEEP_OPEN" -eq 1 ]]; then
+    printf 'exit command:    hyprctl -i %q dispatch exit\n' "$NESTED_INSTANCE"
+else
+    printf 'result:          nested overview test completed and exited\n'
+fi
