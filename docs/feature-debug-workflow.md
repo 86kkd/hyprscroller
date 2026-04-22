@@ -7,6 +7,16 @@
 
 目标不是记录一次性的细节，而是把以后做 feature 和 debug 时应该遵循的步骤固定下来。
 
+需要先说明一点：
+
+- 这份文档最初来源于两次真实排障，所以前半部分天然更偏 debug 语境
+- 但仓库里的大量改动并不是“先有 bug 再修”，而是“先定义能力，再补验证”
+
+因此下面把流程明确拆成两条：
+
+1. 新 feature 开发流程
+2. debug / 回归排障流程
+
 ## 适用范围
 
 这套流程默认适用于：
@@ -19,37 +29,255 @@
 
 ## 核心原则
 
-1. 先保护主会话，再开始排障
+1. 先保护主会话，再开始开发或排障
 
 - 默认优先用 nested `Hyprland`
 - 不直接在用户的主会话里反复热加载、切换 workspace、试错式下命令
 - 所有 nested 操作尽量显式带 `hyprctl -i <instance>`
 
-2. 先把现象固定下来，再改代码
+2. 新 feature 先定义 contract，再写代码
+
+- 先写清楚“这次要新增什么能力”
+- 先写清楚“哪些已有行为必须保持不变”
+- 对状态型 feature，先写清楚状态属于 window / stack / lane / canvas / workspace / session 的哪一层
+
+3. debug 先把现象固定下来，再改代码
 
 - 先写清“用户看到了什么”和“预期应该是什么”
 - 在没有稳定复现之前，不要急着猜是 render、model 还是 dispatcher 问题
 
-3. 先缩小问题层级，再选择修复点
+4. 先缩小问题层级，再选择实现点或修复点
 
 - 先判断是渲染层、overview 模型层、导航评分层，还是运行态副作用层
 - 不要一上来同时改多层逻辑
 
-4. 手工复现一旦稳定，就尽快固化成脚本
+5. 手工复现或手工 feature 场景一旦稳定，就尽快固化成脚本
 
 - 如果问题需要重复观察，优先写 `scripts/repro-*.sh`
+- 如果 feature 需要反复验证状态流转，也优先写 `scripts/repro-*.sh`
 - 脚本应该输出：
   - nested instance
   - log 路径
   - result 路径或关键结论
 
-5. 修复必须同时留下“纯测试”和“运行态复现”中的至少一种
+6. 新增能力或修复都必须留下“纯测试”和“运行态复现”中的至少一种
 
 - 纯数学/评分/路由问题，优先补 `tests/*`
 - 依赖 compositor 行为的问题，至少补 nested repro 脚本
 - 最稳妥的是两者都补
 
-## 标准流程
+## 新 Feature 标准流程
+
+### 1. 先定义 feature contract
+
+开始编码前，先把下面几件事写清楚：
+
+- 用户要得到什么新能力
+- 明确的触发入口是什么
+  - 新 dispatcher
+  - 现有 dispatcher 行为扩展
+  - workspace / layout 生命周期钩子
+  - overview / render 表现变化
+- 明确不做什么
+- 哪些已有行为绝对不能被顺手改掉
+
+推荐至少写清下面这几个问题：
+
+- 这个 feature 是用户可见行为，还是纯内部结构准备？
+- 它的“成功标准”是什么？
+- 它的“失败表现”会长什么样？
+- 它会影响哪些模块：
+  - `overview`
+  - `canvas`
+  - `lane`
+  - `stack`
+  - dispatcher / session / render
+
+### 2. 先确定状态归属和生命周期
+
+这一步对 layout 类 feature 尤其重要。
+
+先回答：
+
+- 状态属于哪一层：
+  - `Window`
+  - `Stack`
+  - `Lane`
+  - `CanvasLayout`
+  - `Workspace`
+  - session / runtime repository
+- 状态要活多久：
+  - 一次 dispatcher 调用内
+  - 当前 lane / stack 生命周期内
+  - workspace 切换后还在
+  - layout 切换后还在
+  - plugin reload 后还在
+  - 整个 Hyprland 重启后还在
+- 状态丢失时应该怎么 fallback
+
+如果这里不先写清楚，后面很容易出现：
+
+- 把短生命周期状态放到过高层，导致脏状态泄漏
+- 把长生命周期状态放到过低层，导致 layout switch / reload 后丢失
+- 多个层同时维护一份语义相近但不同步的状态
+
+### 3. 先选一个最小的纵向切片
+
+不要一上来把所有边界情况一起做完。
+
+推荐先选一个最小但真实的用户路径：
+
+- 一个入口
+- 一个核心状态流转
+- 一个可观察结果
+
+例如：
+
+- “增加一个 overview 里的新选择行为”
+- “让 scroller 在 layout switch 后恢复当前 workspace 布局”
+- “让某个 dispatcher 在 column 模式下新增一种尺寸策略”
+
+最小纵向切片的目标不是“功能做完”，而是：
+
+- 先证明设计方向是对的
+- 先证明状态归属没有选错
+- 先得到一个可以写测试和脚本的稳定行为
+
+### 4. 在动代码前先设计验证面
+
+先决定这个 feature 最终如何被证明“真的完成了”。
+
+默认至少考虑三类验证：
+
+1. 纯逻辑测试
+
+- 适合纯选择、评分、状态转换、序列化 / 反序列化
+
+2. nested 运行态脚本
+
+- 适合 layout switch
+- 适合 plugin reload
+- 适合 workspace / monitor / focus / fullscreen / overview 交互
+
+3. 文档或配置入口
+
+- 新 dispatcher 是否要写入 README
+- 新 workflow 是否要写进 docs
+- 新脚本是否要写进 testing docs
+
+对 stateful feature，建议额外补一个“状态边界表”：
+
+- 正常路径是否生效
+- layout switch 后是否还生效
+- plugin reload 后是否还生效
+- 多 workspace / special workspace 下是否还生效
+
+### 5. 用 nested `Hyprland` 建立最小 feature 场景
+
+即便不是 debug，也不要默认只靠脑补和 unit test。
+
+优先做下面几件事：
+
+- 复用已有 `scripts/repro-*.sh`
+- 如果现有脚本不够，在其基础上扩展
+- 如果 feature 本身就是一个新的状态链路，就补一个新的 repro 脚本
+
+脚本要求尽量和 debug 场景一致：
+
+- 最小配置启动 nested `Hyprland`
+- 自动加载 `./Debug/hyprscroller.so`
+- 明确窗口拓扑和 dispatcher 序列
+- 输出 run dir、log、result
+- 默认自动退出
+
+### 6. 在正确层做最小实现
+
+实现前先问：
+
+- 这个能力应该在哪一层拥有唯一语义？
+- 哪一层应该只消费结果，而不是重复推导？
+- 哪些旧路径只是需要接入，不应该重新定义一套语义？
+
+优先选择：
+
+- 让状态只有一个主拥有者
+- 让公共逻辑能抽成 helper 或 snapshot / repository
+- 让 runtime 副作用仍然留在 dispatcher / effects / lifecycle 入口层
+
+避免：
+
+- 为了赶 feature，把同一语义在 `scene` 和 `logic` 各写一遍
+- 同时改 render、model、dispatcher，却没有明确主语义源
+- 先铺很多 edge case，但主路径还没跑通
+
+### 7. 先跑通主路径，再补边界
+
+主路径通了之后，再系统补边界：
+
+- 多 workspace
+- special workspace
+- 多 monitor
+- fullscreen / maximize
+- overview 打开期间
+- layout switch / plugin reload
+- 缺失状态或部分状态恢复失败时的 fallback
+
+如果某个边界会显著改变设计，回到前面的生命周期和状态归属重新确认，不要硬补 patch。
+
+### 8. 把 feature 经验固化成测试、脚本和文档
+
+一个新 feature 完成后，至少要留下下面几类资产中的两类，最好三类都有：
+
+- `tests/*` 里的纯逻辑测试
+- `scripts/repro-*.sh` 里的 nested 运行态脚本
+- `docs/*` 或 `README.md` 里的使用 / 验证说明
+
+对用户可见入口，优先补文档：
+
+- 新 dispatcher
+- 新配置项
+- 新的验证脚本
+- 新的开发约定
+
+### 9. 三层验证
+
+新 feature 默认也按三层验证：
+
+1. 构建层
+
+```bash
+cmake --build Debug -j
+```
+
+2. 纯逻辑测试层
+
+```bash
+ctest --test-dir Debug --output-on-failure
+```
+
+3. nested 运行态层
+
+- 跑与这个 feature 对应的 `scripts/repro-*.sh`
+- 如果没有现成脚本，先补脚本再验证
+
+### 10. 最后再提交
+
+提交前确认：
+
+- 新功能的主路径和边界路径都已经被验证
+- 文档、脚本、测试和代码修改在同一条功能链上
+- commit message 与提交类型匹配
+  - `feat`
+  - `refactor`
+  - `docs`
+  - 其他合适的 type
+- 正文说明清楚：
+  - 目标 / 动机
+  - 用户可见变化
+  - 实现摘要
+  - 验证命令
+
+## Debug / 回归标准流程
 
 ### 1. 定义问题
 
@@ -335,7 +563,24 @@ ctest --test-dir Debug --output-on-failure
 
 ## 以后默认怎么做
 
-以后在这个仓库里做 debug 或 feature，默认按下面顺序走：
+以后在这个仓库里，先判断你做的是哪一类工作：
+
+### 如果是新 feature
+
+默认按下面顺序走：
+
+1. 先定义 feature contract
+2. 先确定状态归属和生命周期
+3. 先选最小纵向切片
+4. 先设计测试和 nested 验证面
+5. 用 nested `Hyprland` 跑通主路径
+6. 再补边界情况
+7. 固化成测试、脚本和文档
+8. 最后再按提交规范提交
+
+### 如果是 debug / 回归修复
+
+默认按下面顺序走：
 
 1. 先用 nested `Hyprland` 建立最小复现
 2. 先确认失败发生在 render、model、logic 还是 runtime 层
