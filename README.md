@@ -60,6 +60,9 @@ the manual [smoke test checklist](./docs/smoke-test-checklist.md) as well.
 If you are trying to understand how the project works internally, start with
 the newcomer-oriented [architecture guide](./docs/architecture.md).
 
+For repository workflow and commit writing, see the
+[commit convention](./docs/commit-convention.md).
+
 The shortest useful reading path is:
 
 1. [`src/plugin/entry.cpp`](./src/plugin/entry.cpp)
