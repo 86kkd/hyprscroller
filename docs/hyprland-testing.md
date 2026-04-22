@@ -322,3 +322,46 @@ hyprctl -i <instance-signature> dispatch exit
 
 - 手工回归清单见 [smoke-test-checklist.md](./smoke-test-checklist.md)
 - 提交规范见 [commit-convention.md](./commit-convention.md)
+
+## 15. 排障记录：overview 里的空 workspace 卡片
+
+有一次排查竖屏 monitor 上 `toggleoverview` 时多出“空 workspace 卡片”，
+最后确认那不是 overview 自己创建了 phantom workspace，而是主会话里本来就
+残留了一个 `special:scratchpad`。
+
+当时的关键现象：
+
+- `hyprctl workspaces -j` 里能看到 `special:scratchpad`
+- 这个 workspace 归属到竖屏 monitor
+- workspace 里只有 floating window，没有 tiled window
+- overview 建模时会先过滤 floating window，再给空 workspace 补一个空 target
+
+这会让人误以为“toggleoverview 额外生成了一个空 workspace”，但真正发生的
+事情是：
+
+- 主会话之前某次测试把窗口放进了 `special:scratchpad`
+- 测试结束后没有把这个 special workspace 清掉
+- overview 读取到这个 workspace 记录后，把它渲染成了空卡片
+
+这次排障里最容易犯错的点是把下面两个状态混为一谈：
+
+- `hyprctl monitors -j` 里的 `specialWorkspace`
+- `hyprctl workspaces -j` 里存在的 `special:*` workspace 记录
+
+它们含义不同：
+
+- `monitor.specialWorkspace` 表示这个 monitor 当前正在显示哪个 special workspace
+- `workspaces -j` 里的 `special:*` 只表示 Hyprland 会话里存在这个 workspace，
+  并且当前归属到某个 monitor
+
+所以：
+
+- 看到 `workspaces -j` 里有 `special:scratchpad`，不代表它此刻正展开显示
+- 但只要 overview 的数据源把它纳入模型，它仍然可能变成一张空卡片
+
+建议以后遇到类似问题时按这个顺序确认：
+
+1. `hyprctl monitors -j`，确认 special workspace 是否真的处于显示状态
+2. `hyprctl workspaces -j`，确认是否有残留的 `special:*` workspace 记录
+3. `hyprctl clients -j`，确认该 workspace 里是否只有 floating window
+4. 如果是测试遗留状态，先清理 special workspace，再判断是否真有 overview bug
