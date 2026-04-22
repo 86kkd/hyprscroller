@@ -29,6 +29,7 @@ bool focus_monitor_workspace(const DispatcherRuntime& runtime,
                              PHLMONITOR monitor,
                              PHLWORKSPACE workspace,
                              WORKSPACEID fallback_workspace_id,
+                             bool require_monitor_focus,
                              const char* context) {
     const auto *ctx = context ? context : "focus_monitor_workspace";
     if (!monitor)
@@ -93,7 +94,7 @@ bool focus_monitor_workspace(const DispatcherRuntime& runtime,
 
     const auto monitorFocused = focusedMonitor == monitor;
     const auto workspaceActive = runtime.isWorkspaceActiveOnMonitor(monitor, workspace, fallback_workspace_id);
-    if (monitorFocused && workspaceActive)
+    if (workspaceActive && (!require_monitor_focus || monitorFocused))
         return true;
 
     if (workspace && !specialWorkspace && !selector.empty()) {
@@ -115,8 +116,8 @@ bool focus_monitor_workspace(const DispatcherRuntime& runtime,
     }
 
     const auto finalFocusedMonitor = runtime.getMonitorFromCursor();
-    return finalFocusedMonitor == monitor
-        && runtime.isWorkspaceActiveOnMonitor(monitor, workspace, fallback_workspace_id);
+    return runtime.isWorkspaceActiveOnMonitor(monitor, workspace, fallback_workspace_id)
+        && (!require_monitor_focus || finalFocusedMonitor == monitor);
 }
 
 void focus_window_monitor(const DispatcherRuntime& runtime, PHLWINDOW window) {

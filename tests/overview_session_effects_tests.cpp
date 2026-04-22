@@ -53,6 +53,7 @@ struct FakeSessionEffectsRuntime final : Overview::SessionEffects::Runtime {
     mutable MONITORID lastFocusedMonitorId = INVALID_MONITOR_ID;
     mutable WORKSPACEID lastFocusedWorkspaceId = INVALID_WORKSPACE_ID;
     mutable WORKSPACEID lastFallbackWorkspaceId = INVALID_WORKSPACE_ID;
+    mutable bool lastRequireMonitorFocus = true;
     mutable const char* lastFocusContext = nullptr;
     mutable const void* lastSyncedWindow = nullptr;
     mutable MONITORID lastSyncedMonitorId = INVALID_MONITOR_ID;
@@ -133,11 +134,13 @@ struct FakeSessionEffectsRuntime final : Overview::SessionEffects::Runtime {
         workspaces[workspace.get()].snapshotPrepared = true;
     }
 
-    bool focusMonitorWorkspace(PHLMONITOR monitor, PHLWORKSPACE workspace, WORKSPACEID fallbackWorkspaceId, const char* context) const override {
+    bool focusMonitorWorkspace(PHLMONITOR monitor, PHLWORKSPACE workspace, WORKSPACEID fallbackWorkspaceId,
+                               bool requireMonitorFocus, const char* context) const override {
         callLog.emplace_back("focus_monitor_workspace");
         lastFocusedMonitorId = monitorId(monitor);
         lastFocusedWorkspaceId = workspaceId(workspace);
         lastFallbackWorkspaceId = fallbackWorkspaceId;
+        lastRequireMonitorFocus = requireMonitorFocus;
         lastFocusContext = context;
         return focusMonitorWorkspaceResult;
     }
@@ -214,6 +217,8 @@ void test_accept_window_target_runs_focus_sync_switch_chain() {
               "acceptTarget focuses the target workspace before syncing");
     expect_eq(runtime.lastFallbackWorkspaceId, static_cast<WORKSPACEID>(7),
               "acceptTarget forwards the workspace id as fallback focus state");
+    expect_true(!runtime.lastRequireMonitorFocus,
+                "acceptTarget lets window activation finish cross-monitor handoff");
     expect_eq(runtime.lastSyncedWindow, static_cast<const void*>(window.get()),
               "acceptTarget syncs the selected window into the canvas state");
     expect_eq(runtime.lastSyncedMonitorId, static_cast<MONITORID>(2),
@@ -270,6 +275,8 @@ void test_accept_empty_workspace_target_only_focuses_workspace() {
               "empty workspace accept does not require a live workspace object");
     expect_eq(runtime.lastFallbackWorkspaceId, static_cast<WORKSPACEID>(12),
               "empty workspace accept forwards the synthetic workspace id as fallback");
+    expect_true(runtime.lastRequireMonitorFocus,
+                "empty workspace accept still requires the target monitor to become active");
     expect_call_sequence(runtime.callLog,
                          {"focus_monitor_workspace"},
                          "empty workspace accept does not sync or switch windows");
@@ -294,6 +301,8 @@ void test_restore_origin_prefers_original_window_when_still_mapped() {
                 "restoreOrigin restores the original mapped window");
     expect_eq(runtime.lastFocusedMonitorId, static_cast<MONITORID>(5),
               "restoreOrigin prefers the window's live monitor when it still exists");
+    expect_true(!runtime.lastRequireMonitorFocus,
+                "restoreOrigin uses relaxed monitor-focus requirements for concrete windows");
     expect_eq(runtime.lastSwitchedWindow, static_cast<const void*>(window.get()),
               "restoreOrigin switches back to the original window");
     expect_true(!runtime.lastSwitchWarpCursor,
@@ -324,6 +333,8 @@ void test_restore_origin_falls_back_to_workspace_when_window_is_unmapped() {
               "restoreOrigin fallback still focuses the original monitor");
     expect_eq(runtime.lastFocusedWorkspaceId, static_cast<WORKSPACEID>(11),
               "restoreOrigin fallback focuses the original workspace");
+    expect_true(runtime.lastRequireMonitorFocus,
+                "workspace-only restore still requires the target monitor to become active");
     expect_call_sequence(runtime.callLog,
                          {"focus_monitor_workspace"},
                          "restoreOrigin does not sync or switch a vanished window");

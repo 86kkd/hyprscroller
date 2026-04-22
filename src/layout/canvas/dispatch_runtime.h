@@ -35,6 +35,7 @@ bool focus_monitor_workspace(const DispatcherRuntime& runtime,
                              PHLMONITOR monitor,
                              PHLWORKSPACE workspace,
                              WORKSPACEID fallback_workspace_id,
+                             bool require_monitor_focus = true,
                              const char* context = nullptr);
 void focus_window_monitor(const DispatcherRuntime& runtime, PHLWINDOW window);
 bool switch_to_window(const DispatcherRuntime& runtime, PHLWINDOW window, bool warp_cursor = false);

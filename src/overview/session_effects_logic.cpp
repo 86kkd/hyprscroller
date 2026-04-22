@@ -30,19 +30,20 @@ MONITORID resolved_monitor_id(const Runtime& runtime, PHLWORKSPACE workspace, PH
     return fallbackMonitorId;
 }
 
-bool focus_workspace_target(const Runtime& runtime, PHLWORKSPACE workspace, WORKSPACEID workspaceId, MONITORID monitorId, const char* context) {
+bool focus_workspace_target(const Runtime& runtime, PHLWORKSPACE workspace, WORKSPACEID workspaceId, MONITORID monitorId,
+                            bool requireMonitorFocus, const char* context) {
     const auto monitor = runtime.getMonitorFromID(monitorId);
     if (!monitor)
         return false;
 
-    return runtime.focusMonitorWorkspace(monitor, workspace, workspaceId, context);
+    return runtime.focusMonitorWorkspace(monitor, workspace, workspaceId, requireMonitorFocus, context);
 }
 
 bool focus_window_target(const Runtime& runtime, PHLWORKSPACE workspace, PHLWINDOW window, MONITORID monitorId, bool warpCursor, const char* context) {
     if (!workspace || !window)
         return false;
 
-    if (!focus_workspace_target(runtime, workspace, runtime.workspaceId(workspace), monitorId, context))
+    if (!focus_workspace_target(runtime, workspace, runtime.workspaceId(workspace), monitorId, false, context))
         return false;
 
     runtime.syncCanvasTargetWindow(workspace, window, monitorId);
@@ -100,7 +101,7 @@ bool acceptTarget(const Runtime& runtime, const Target& selection) {
     const auto monitorId = resolved_monitor_id(runtime, workspace, selection.window, selection.monitorId);
 
     if (selection.type == TargetType::EmptyWorkspace) {
-        const auto focused = focus_workspace_target(runtime, workspace, selection.workspaceId, monitorId, "overview_accept_empty");
+        const auto focused = focus_workspace_target(runtime, workspace, selection.workspaceId, monitorId, true, "overview_accept_empty");
         if (!focused) {
             spdlog::warn("overview_accept_empty: failed workspace={} monitor={} synthetic={}",
                          selection.workspaceId,
@@ -158,7 +159,7 @@ bool restoreOrigin(const Runtime& runtime, const OriginState& origin) {
     if (!workspace)
         return false;
 
-    if (!focus_workspace_target(runtime, workspace, runtime.workspaceId(workspace), monitorId, "overview_restore_origin_workspace")) {
+    if (!focus_workspace_target(runtime, workspace, runtime.workspaceId(workspace), monitorId, true, "overview_restore_origin_workspace")) {
         spdlog::warn("overview_restore_origin_workspace: failed workspace={} monitor={} special={}",
                      runtime.workspaceId(workspace),
                      monitorId,

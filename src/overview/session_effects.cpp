@@ -106,8 +106,9 @@ class HyprlandSessionEffectsRuntime final : public Runtime {
         layout->prepareForOverviewSnapshot();
     }
 
-    bool focusMonitorWorkspace(PHLMONITOR monitor, PHLWORKSPACE workspace, WORKSPACEID fallbackWorkspaceId, const char* context) const override {
-        return CanvasLayoutInternal::focus_monitor_workspace(monitor, workspace, fallbackWorkspaceId, context);
+    bool focusMonitorWorkspace(PHLMONITOR monitor, PHLWORKSPACE workspace, WORKSPACEID fallbackWorkspaceId,
+                               bool requireMonitorFocus, const char* context) const override {
+        return CanvasLayoutInternal::focus_monitor_workspace(monitor, workspace, fallbackWorkspaceId, requireMonitorFocus, context);
     }
 
     bool switchToWindow(PHLWINDOW window, bool warpCursor) const override {

@@ -162,8 +162,9 @@ void dispatch_builtin_movefocus(Direction direction) {
 }
 
 // Focus a monitor even when no concrete target window exists yet.
-bool focus_monitor_workspace(PHLMONITOR monitor, PHLWORKSPACE workspace, WORKSPACEID fallback_workspace_id, const char* context) {
-    return focus_monitor_workspace(dispatcher_runtime(), monitor, workspace, fallback_workspace_id, context);
+bool focus_monitor_workspace(PHLMONITOR monitor, PHLWORKSPACE workspace, WORKSPACEID fallback_workspace_id,
+                             bool require_monitor_focus, const char* context) {
+    return focus_monitor_workspace(dispatcher_runtime(), monitor, workspace, fallback_workspace_id, require_monitor_focus, context);
 }
 
 // Focus the monitor hosting a target window before focusing the window itself.

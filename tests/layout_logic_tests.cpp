@@ -381,7 +381,7 @@ void test_focus_monitor_workspace_logic() {
     const auto targetWorkspace = runtime.addWorkspace(5, "5");
     runtime.cursorMonitor = primaryMonitor;
 
-    expect_true(focus_monitor_workspace(runtime, targetMonitor, targetWorkspace, INVALID_WORKSPACE_ID, "layout_test"),
+    expect_true(focus_monitor_workspace(runtime, targetMonitor, targetWorkspace, INVALID_WORKSPACE_ID, true, "layout_test"),
                 "focus_monitor_workspace focuses target monitor and workspace");
     expect_eq(runtime.getMonitorFromCursor(), targetMonitor,
               "focus_monitor_workspace updates cursor monitor");
@@ -397,8 +397,24 @@ void test_focus_monitor_workspace_logic() {
     const auto otherWorkspace = missingFocusRuntime.addWorkspace(7, "7");
     missingFocusRuntime.cursorMonitor = sourceMonitor;
 
-    expect_true(!focus_monitor_workspace(missingFocusRuntime, otherMonitor, otherWorkspace, INVALID_WORKSPACE_ID, "layout_test"),
+    expect_true(!focus_monitor_workspace(missingFocusRuntime, otherMonitor, otherWorkspace, INVALID_WORKSPACE_ID, true, "layout_test"),
                 "focus_monitor_workspace fails when monitor focus never lands on the target");
+
+    FakeDispatcherRuntime workspaceOnlyRuntime;
+    workspaceOnlyRuntime.knownDispatchers = {"focusmonitor", "workspace"};
+    workspaceOnlyRuntime.focusMonitorSuccessOnAttempt = 0;
+    const auto sourceMonitorForWindow = workspaceOnlyRuntime.addMonitor(1, "HDMI-A-1", 1);
+    const auto targetMonitorForWindow = workspaceOnlyRuntime.addMonitor(2, "DP-1", 3);
+    const auto targetWorkspaceForWindow = workspaceOnlyRuntime.addWorkspace(11, "11");
+    workspaceOnlyRuntime.cursorMonitor = sourceMonitorForWindow;
+
+    expect_true(focus_monitor_workspace(workspaceOnlyRuntime, targetMonitorForWindow, targetWorkspaceForWindow,
+                                        INVALID_WORKSPACE_ID, false, "layout_test"),
+                "window handoff only requires the destination workspace to become active");
+    expect_eq(workspaceOnlyRuntime.getMonitorFromCursor(), sourceMonitorForWindow,
+              "relaxed window handoff does not require cursor monitor movement");
+    expect_true(workspaceOnlyRuntime.isWorkspaceActiveOnMonitor(targetMonitorForWindow, targetWorkspaceForWindow, INVALID_WORKSPACE_ID),
+                "relaxed window handoff still activates the destination workspace");
 
     FakeDispatcherRuntime missingWorkspaceRuntime;
     missingWorkspaceRuntime.knownDispatchers = {"focusmonitor", "workspace"};
@@ -409,7 +425,7 @@ void test_focus_monitor_workspace_logic() {
     const auto workspace = missingWorkspaceRuntime.addWorkspace(9, "9");
     missingWorkspaceRuntime.cursorMonitor = priorMonitor;
 
-    expect_true(!focus_monitor_workspace(missingWorkspaceRuntime, workspaceMonitor, workspace, INVALID_WORKSPACE_ID, "layout_test"),
+    expect_true(!focus_monitor_workspace(missingWorkspaceRuntime, workspaceMonitor, workspace, INVALID_WORKSPACE_ID, true, "layout_test"),
                 "focus_monitor_workspace fails when workspace activation never settles");
 }
 

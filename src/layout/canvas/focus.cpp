@@ -305,6 +305,7 @@ void CanvasLayout::handoffFocusAcrossMonitor(int workspace, Direction direction,
         CanvasLayoutInternal::focus_monitor_workspace(targetMonitor,
                                                       targetWorkspace,
                                                       workspaceId,
+                                                      true,
                                                       "move_focus_cross_monitor_empty_target");
         return;
     }

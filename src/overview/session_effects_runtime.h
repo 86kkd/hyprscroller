@@ -31,7 +31,8 @@ struct Runtime {
     virtual PHLMONITOR              visibleMonitorForWorkspace(PHLWORKSPACE workspace) const = 0;
     virtual void                    syncCanvasTargetWindow(PHLWORKSPACE workspace, PHLWINDOW window, MONITORID monitorId) const = 0;
     virtual void                    prepareWorkspaceSnapshot(PHLWORKSPACE workspace) const = 0;
-    virtual bool                    focusMonitorWorkspace(PHLMONITOR monitor, PHLWORKSPACE workspace, WORKSPACEID fallbackWorkspaceId, const char* context) const = 0;
+    virtual bool                    focusMonitorWorkspace(PHLMONITOR monitor, PHLWORKSPACE workspace, WORKSPACEID fallbackWorkspaceId,
+                                                          bool requireMonitorFocus, const char* context) const = 0;
     virtual bool                    switchToWindow(PHLWINDOW window, bool warpCursor) const = 0;
 };
 
