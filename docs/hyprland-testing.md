@@ -6,7 +6,7 @@
 - 在不污染当前桌面会话的前提下复现插件问题
 - 用 debug 构建的插件做手工回归
 - 采集 `Hyprland` 和 `hyprscroller` 的日志
-- 对 `layout` 切换、`overview`、跨 workspace/monitor 行为做压测
+- 对 `layout` 切换、`overview`、跨 workspace/monitor 行为做定点回归
 
 ## 目标
 
@@ -32,7 +32,27 @@ make debug
 ./Debug/hyprscroller.so
 ```
 
-## 2. 启动嵌套 Hyprland 测试实例
+## 2. 快速复现 overview
+
+如果你要复现“指定 monitor 上的浮动嵌套 Hyprland + 创建窗口 + 打开
+overview”这条固定链路，优先直接用仓库里的脚本：
+
+```bash
+./scripts/repro-overview.sh --outer-monitor HDMI-A-1
+```
+
+脚本会完成这些事情：
+
+- 生成一份最小 nested `Hyprland` 配置并加载 `./Debug/hyprscroller.so`
+- 把嵌套 Hyprland 作为一个浮动窗口放到指定 outer monitor
+- 在 nested 实例里创建一个图片预览窗口和四个终端窗口
+- 自动执行 `scroller:toggleoverview`
+- 输出 nested 实例 id、日志路径和退出命令
+
+如果不传 `--outer-monitor`，脚本会优先选择第一块竖屏 monitor，
+否则退回当前 focused monitor。
+
+## 3. 手工启动嵌套 Hyprland 测试实例
 
 先写一份最小测试配置，例如 `/tmp/hyprscroller-test.conf`：
 
@@ -81,7 +101,7 @@ Hyprland -c /tmp/hyprscroller-test.conf
 - 它适合做插件 debug
 - 不建议拿它替代日常登录会话
 
-## 3. 找到测试实例
+## 4. 找到测试实例
 
 启动后，用下面的命令列出所有实例：
 
@@ -107,7 +127,7 @@ hyprctl -i <instance-signature> ...
 
 不要默认发给当前主会话。
 
-## 4. 在测试实例里创建窗口
+## 5. 在测试实例里创建窗口
 
 例如在测试实例里启动两个 `kitty`：
 
@@ -128,7 +148,7 @@ hyprctl -i <instance-signature> clients -j
 hyprctl -i <instance-signature> activeworkspace -j
 ```
 
-## 5. 手工测试 layout 切换
+## 6. 手工测试 layout 切换
 
 测试 `general:layout` 切换时，不要改主配置文件，直接对测试实例下发：
 
@@ -146,16 +166,7 @@ hyprctl -i <instance-signature> keyword general:layout scroller
 - 多 workspace 下切换后再回到隐藏 workspace
 - 有 `fullscreen` / `overview` 状态时再切 layout
 
-如果你要做循环压测，可以直接用 shell：
-
-```bash
-for i in $(seq 1 100); do
-    hyprctl -i <instance-signature> keyword general:layout master >/dev/null || break
-    hyprctl -i <instance-signature> keyword general:layout scroller >/dev/null || break
-done
-```
-
-## 6. 手工测试 overview
+## 7. 手工测试 overview
 
 打开 overview：
 
@@ -186,7 +197,7 @@ hyprctl -i <instance-signature> dispatch scroller:canceloverview
 - 打开/关闭 overview 时是否有卡片残留
 - overview 期间真实 focus 是否被错误改变
 
-## 7. 手工测试 scroller dispatchers
+## 8. 手工测试 scroller dispatchers
 
 常用命令：
 
@@ -207,7 +218,7 @@ hyprctl -i <instance-signature> dispatch scroller:focuslane r
 - 跨 lane / 跨 monitor 的 `movefocus`
 - 空 workspace / 空 lane 下的 fallback 行为
 
-## 8. 日志采集
+## 9. 日志采集
 
 ### 8.1 Hyprland 日志
 
@@ -247,7 +258,7 @@ tail -n 200 ~/.hyprland/plugins/hyprscroller/hyprscroller.log
 
 如果要只看本次测试新增的内容，推荐先记住文件大小，再在测试后截取新增部分。
 
-## 9. 截图和录屏
+## 10. 截图和录屏
 
 如果你想确认 overview 或布局渲染结果，可以在嵌套实例上截图。
 
@@ -259,7 +270,7 @@ WAYLAND_DISPLAY=wayland-2 grim /tmp/hyprscroller-test.png
 
 这样可以在不影响主会话的情况下抓到测试实例的画面。
 
-## 10. 清理测试实例
+## 11. 清理测试实例
 
 测试结束后，直接让测试实例退出：
 
@@ -269,22 +280,23 @@ hyprctl -i <instance-signature> dispatch exit
 
 不要直接对主实例下发这个命令。
 
-## 11. 推荐测试流程
+## 12. 推荐测试流程
 
 推荐顺序：
 
 1. `make debug`
-2. 启动嵌套 `Hyprland -c /tmp/hyprscroller-test.conf`
-3. 用 `hyprctl instances -j` 找到测试实例
-4. 在测试实例里创建 `kitty`
-5. 跑目标场景
-6. 失败时同时保存：
+2. 优先运行 `./scripts/repro-overview.sh --outer-monitor <monitor>`
+3. 如果脚本不适用，再手工启动嵌套 `Hyprland -c /tmp/hyprscroller-test.conf`
+4. 用 `hyprctl instances -j` 找到测试实例
+5. 在测试实例里创建目标窗口
+6. 跑目标场景
+7. 失败时同时保存：
    - `Hyprland` 终端日志
    - `~/.hyprland/plugins/hyprscroller/hyprscroller.log`
    - 必要时的截图
-7. 用 `hyprctl -i <instance-signature> dispatch exit` 退出测试实例
+8. 用 `hyprctl -i <instance-signature> dispatch exit` 退出测试实例
 
-## 12. 建议记录的复现信息
+## 13. 建议记录的复现信息
 
 如果某个问题需要继续排查，建议至少记录这些信息：
 
@@ -299,7 +311,7 @@ hyprctl -i <instance-signature> dispatch exit
   - `special workspace`
   - 跨 monitor handoff
 
-## 13. 关联文档
+## 14. 关联文档
 
 - 手工回归清单见 [smoke-test-checklist.md](./smoke-test-checklist.md)
 - 提交规范见 [commit-convention.md](./commit-convention.md)

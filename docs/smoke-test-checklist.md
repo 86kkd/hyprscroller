@@ -26,14 +26,13 @@ Use this checklist after changing `src/layout/canvas/*`, `src/layout/lane/*`, or
 13. Repeat cross-monitor `movewindow` while the target or crossed neighbor is scroller-fullscreen and confirm there is no half-monitor blank region.
 14. Open a special workspace containing scroller windows, toggle it visible/hidden, and confirm relayout still uses the correct monitor.
 15. On an empty or newly created workspace, run `scroller:movefocus` or `scroller:movewindow` once and confirm builtin fallback behavior does not crash or wedge focus.
-16. Open `scroller:toggleoverview` on a workspace with tiled windows on both monitors and confirm every visible monitor shows overview cards without live window geometry jumping.
+16. Prefer `./scripts/repro-overview.sh --outer-monitor <portrait-monitor>` for overview regressions, then confirm every visible monitor shows overview cards without live window geometry jumping.
 17. While overview is open, run `scroller:movefocus` across windows, empty workspaces, and between monitors, then confirm the real focused window does not change until accept.
 18. Close overview with `scroller:toggleoverview accept` and `scroller:canceloverview`, confirming accept jumps to the selected target while cancel restores the original workspace/window.
 19. Open overview on a monitor with no tiled workspaces and confirm the monitor still renders a stable empty-state card instead of crashing or drawing stale previews.
-20. Rapidly open and close overview several times in a row and confirm the open/close animation completes without leaving a stuck overlay or forcing a compositor reload.
 
 ## Notes
 
 - If any step fails, capture the exact dispatcher, workspace, monitor orientation, and whether the active lane was empty/fullscreen/special.
 - Re-run steps 10-15 after any change touching cross-monitor handoff, dispatcher helpers, or focus suppression.
-- Re-run steps 16-20 after any change touching `src/overview/*`, renderer integration, or overview accept/cancel flow.
+- Re-run steps 16-19 after any change touching `src/overview/*`, renderer integration, or overview accept/cancel flow.
