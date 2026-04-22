@@ -21,7 +21,7 @@
 
 #include "../../core/owner_index.h"
 #include "../../core/types.h"
-#include "../../list.h"
+#include "core/intrusive_list.h"
 #include "handoff_state.h"
 
 class Lane;
@@ -62,7 +62,7 @@ struct CanvasOverviewSnapshot {
  * - then read `src/layout/canvas/core.cpp` for lifecycle and relayout flow
  * - then `src/layout/canvas/focus.cpp` for directional navigation and handoff
  * - then `src/layout/lane/lane.h` and `src/layout/lane/core.cpp`
- * - finally `src/model/stack.h` plus the stack implementation files
+ * - finally `src/model/stack/stack.h` plus the stack implementation files
  */
 class CanvasLayout : public Layout::ITiledAlgorithm {
 public:

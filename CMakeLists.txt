@@ -24,12 +24,12 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-gnu-unique")
 endif()
 add_library(hyprscroller SHARED
-            src/main.cpp
-            src/dispatchers.h
-            src/dispatchers_internal.h
-            src/dispatchers.cpp
-            src/dispatchers_layout.cpp
-            src/dispatchers_overview_marks.cpp
+            src/plugin/entry.cpp
+            src/plugin/dispatch/registration.h
+            src/plugin/dispatch/shared.h
+            src/plugin/dispatch/registration.cpp
+            src/plugin/dispatch/layout_commands.cpp
+            src/plugin/dispatch/overview_mark_commands.cpp
             src/core/core.cpp
             src/core/direction.cpp
             src/core/layout_math.cpp
@@ -37,46 +37,46 @@ add_library(hyprscroller SHARED
             src/core/monitor_geometry_runtime.cpp
             src/core/layout_profile.cpp
             src/core/workspace_selector.h
-            src/list.h
-            src/overview/logic.h
-            src/overview/logic.cpp
-            src/overview/orientation_math.h
-            src/overview/orientation_math.cpp
-            src/overview/geometry_utils.h
-            src/overview/animation.h
-            src/overview/style.h
-            src/overview/workspace_grid.h
-            src/overview/workspace_grid.cpp
-            src/overview/model.h
-            src/overview/model.cpp
-            src/overview/model_layout.h
-            src/overview/model_layout.cpp
-            src/overview/scene.h
-            src/overview/scene.cpp
-            src/overview/scene_layout.h
-            src/overview/scene_layout.cpp
-            src/overview/session.h
-            src/overview/session.cpp
-            src/overview/session_effects.h
-            src/overview/session_effects.cpp
-            src/overview/session_effects_runtime.h
-            src/overview/session_effects_logic.cpp
-            src/overview/session_selection.h
-            src/overview/session_selection.cpp
-            src/overview/render.h
-            src/overview/render.cpp
-            src/overview/render_state.h
-            src/overview/render_state.cpp
-            src/overview/render_draw.h
-            src/overview/render_draw.cpp
-            src/overview/render_hooks.h
-            src/overview/render_hooks.cpp
-            src/overview/pass_element.h
-            src/overview/pass_element.cpp
-            src/model/window.cpp
-            src/model/stack_core.cpp
-            src/model/stack_membership.cpp
-            src/model/stack_geometry.cpp
+            src/core/intrusive_list.h
+            src/overview/navigation/logic.h
+            src/overview/navigation/logic.cpp
+            src/overview/scene/orientation.h
+            src/overview/scene/orientation.cpp
+            src/overview/scene/geometry_utils.h
+            src/overview/render/animation.h
+            src/overview/render/style.h
+            src/overview/model/workspace_grid.h
+            src/overview/model/workspace_grid.cpp
+            src/overview/model/model.h
+            src/overview/model/model.cpp
+            src/overview/model/layout.h
+            src/overview/model/layout.cpp
+            src/overview/scene/scene.h
+            src/overview/scene/scene.cpp
+            src/overview/scene/layout.h
+            src/overview/scene/layout.cpp
+            src/overview/session/session.h
+            src/overview/session/session.cpp
+            src/overview/session/effects.h
+            src/overview/session/effects.cpp
+            src/overview/session/effects_runtime.h
+            src/overview/session/effects_logic.cpp
+            src/overview/navigation/selection.h
+            src/overview/navigation/selection.cpp
+            src/overview/render/render.h
+            src/overview/render/render.cpp
+            src/overview/render/state.h
+            src/overview/render/state.cpp
+            src/overview/render/draw.h
+            src/overview/render/draw.cpp
+            src/overview/render/hooks.h
+            src/overview/render/hooks.cpp
+            src/overview/render/pass_element.h
+            src/overview/render/pass_element.cpp
+            src/model/stack/window.cpp
+            src/model/stack/core.cpp
+            src/model/stack/membership.cpp
+            src/model/stack/geometry.cpp
             src/layout/canvas/core.cpp
             src/layout/canvas/overview.cpp
             src/layout/canvas/dispatch.cpp
@@ -106,7 +106,9 @@ endif()
 
 add_compile_definitions(WLR_USE_UNSTABLE)
 
-target_include_directories(hyprscroller PRIVATE ${DEPS_INCLUDE_DIRS} 
+target_include_directories(hyprscroller PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/src
+            ${DEPS_INCLUDE_DIRS}
             /usr/include/hyprland/wlroots-hyprland/hyprland 
             /usr/include/hyprland/src
 )
@@ -127,12 +129,12 @@ if(BUILD_TESTING)
                    src/core/layout_math.cpp
                    src/core/monitor_geometry.cpp
                    src/core/layout_profile.cpp
-                   src/overview/logic.cpp
-                   src/overview/orientation_math.cpp
-                   src/overview/workspace_grid.cpp
-                   src/overview/scene_layout.cpp
-                   src/overview/session_effects_logic.cpp
-                   src/overview/session_selection.cpp
+                   src/overview/navigation/logic.cpp
+                   src/overview/scene/orientation.cpp
+                   src/overview/model/workspace_grid.cpp
+                   src/overview/scene/layout.cpp
+                   src/overview/session/effects_logic.cpp
+                   src/overview/navigation/selection.cpp
                    src/layout/canvas/dispatch_logic.cpp
                    src/layout/canvas/dispatch_runtime_logic.cpp
                    src/layout/canvas/route_logic.cpp)

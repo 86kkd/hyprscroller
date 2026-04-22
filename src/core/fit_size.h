@@ -2,7 +2,7 @@
 
 #include <utility>
 
-#include "../list.h"
+#include "core/intrusive_list.h"
 #include "types.h"
 
 namespace ScrollerCore {

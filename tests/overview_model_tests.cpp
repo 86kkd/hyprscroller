@@ -1,4 +1,4 @@
-#include "overview/workspace_grid.h"
+#include "overview/model/workspace_grid.h"
 
 #include "test_suite.h"
 #include "test_support.h"

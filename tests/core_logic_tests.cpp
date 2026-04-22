@@ -12,8 +12,8 @@
 #include "core/layout_profile.h"
 #include "core/monitor_geometry.h"
 #include "core/owner_index.h"
-#include "list.h"
-#include "model/stack_logic.h"
+#include "core/intrusive_list.h"
+#include "model/stack/logic.h"
 
 #include "test_suite.h"
 #include "test_support.h"

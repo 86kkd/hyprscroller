@@ -1,9 +1,9 @@
 #include <vector>
 
 #include "core/layout_math.h"
-#include "overview/logic.h"
-#include "overview/orientation_math.h"
-#include "overview/scene_layout.h"
+#include "overview/navigation/logic.h"
+#include "overview/scene/orientation.h"
+#include "overview/scene/layout.h"
 
 #include "test_suite.h"
 #include "test_support.h"

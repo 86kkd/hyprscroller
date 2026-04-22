@@ -14,7 +14,7 @@
 
 #include "../../core/owner_index.h"
 #include "../../core/types.h"
-#include "../../model/stack.h"
+#include "model/stack/stack.h"
 
 /**
  * @brief Transfer object used when moving an active window between lanes.

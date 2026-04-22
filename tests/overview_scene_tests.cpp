@@ -1,6 +1,6 @@
 #include <vector>
 
-#include "overview/scene_layout.h"
+#include "overview/scene/layout.h"
 
 #include "test_suite.h"
 #include "test_support.h"

@@ -62,7 +62,7 @@ the newcomer-oriented [architecture guide](./docs/architecture.md).
 
 The shortest useful reading path is:
 
-1. [`src/main.cpp`](./src/main.cpp)
+1. [`src/plugin/entry.cpp`](./src/plugin/entry.cpp)
 2. [`src/dispatchers.cpp`](./src/dispatchers.cpp)
 3. [`src/layout/canvas/layout.h`](./src/layout/canvas/layout.h)
 4. [`src/layout/canvas/core.cpp`](./src/layout/canvas/core.cpp)

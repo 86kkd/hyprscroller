@@ -3,7 +3,7 @@
 #include <utility>
 #include <vector>
 
-#include "overview/session_effects_runtime.h"
+#include "overview/session/effects_runtime.h"
 
 #include "test_suite.h"
 #include "test_support.h"

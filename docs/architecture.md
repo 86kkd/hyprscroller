@@ -11,7 +11,7 @@ hyprscroller?
 Most of the project can be understood as one pipeline:
 
 1. Hyprland loads the plugin through `PLUGIN_INIT` in
-   [`src/main.cpp`](../src/main.cpp).
+   [`src/plugin/entry.cpp`](../src/plugin/entry.cpp).
 2. `PLUGIN_INIT` registers:
    - config values
    - custom dispatchers such as `scroller:movefocus`
@@ -28,7 +28,7 @@ Most of the project can be understood as one pipeline:
 If you only want the shortest reading path through the project, follow files in
 this order:
 
-1. [`src/main.cpp`](../src/main.cpp)
+1. [`src/plugin/entry.cpp`](../src/plugin/entry.cpp)
 2. [`src/dispatchers.cpp`](../src/dispatchers.cpp)
 3. [`src/layout/canvas/layout.h`](../src/layout/canvas/layout.h)
 4. [`src/layout/canvas/core.cpp`](../src/layout/canvas/core.cpp)
@@ -48,7 +48,7 @@ There are four main runtime objects.
 ### Plugin
 
 The plugin is the Hyprland-facing shell around the project. It lives mostly in
-[`src/main.cpp`](../src/main.cpp).
+[`src/plugin/entry.cpp`](../src/plugin/entry.cpp).
 
 Its job is to:
 
@@ -114,7 +114,7 @@ truth for the real client.
 
 ### Startup
 
-Startup begins in [`src/main.cpp`](../src/main.cpp).
+Startup begins in [`src/plugin/entry.cpp`](../src/plugin/entry.cpp).
 
 Read `PLUGIN_INIT` first. It does three important things in order:
 
@@ -193,7 +193,7 @@ or stack geometry while it is open. It navigates a logical snapshot.
 
 ## How The Source Tree Is Split
 
-### `src/main.cpp`
+### `src/plugin/entry.cpp`
 
 Plugin ABI entrypoints and one-time registration.
 
@@ -252,7 +252,7 @@ repro scripts or staged debug work, also follow the
 If you are new to the project, use this order:
 
 1. Read this file once without opening code.
-2. Open [`src/main.cpp`](../src/main.cpp) and find `PLUGIN_INIT`.
+2. Open [`src/plugin/entry.cpp`](../src/plugin/entry.cpp) and find `PLUGIN_INIT`.
 3. Open [`src/dispatchers.cpp`](../src/dispatchers.cpp) and trace one command,
    such as `dispatch_movefocus`.
 4. Open [`src/layout/canvas/layout.h`](../src/layout/canvas/layout.h) and read

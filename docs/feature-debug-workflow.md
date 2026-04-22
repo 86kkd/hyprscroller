@@ -145,7 +145,7 @@
 
 - 把坐标统一到单一来源
 - 把评分规则写成纯 helper
-- 把会变的运行态操作留在 `session_effects.cpp` / dispatcher 层
+- 把会变的运行态操作留在 `effects.cpp` / dispatcher 层
 
 避免：
 
@@ -241,7 +241,7 @@ ctest --test-dir Debug --output-on-failure
 
 ### 最终修复点
 
-修复主要落在 [`src/overview/render_draw.cpp`](../src/overview/render_draw.cpp)：
+修复主要落在 [`src/overview/render/draw.cpp`](../src/overview/render/draw.cpp)：
 
 - 对完全在 monitor 内的窗口，优先走 snapshot 路径
 - 对离开 monitor 的窗口，回退到 live `wl_surface` 树
@@ -250,9 +250,9 @@ ctest --test-dir Debug --output-on-failure
 
 对应代码位置：
 
-- [`preview_surface_source_box`](../src/overview/render_draw.cpp)
-- [`draw_window_snapshot`](../src/overview/render_draw.cpp)
-- [`draw_window_surface_tree`](../src/overview/render_draw.cpp)
+- [`preview_surface_source_box`](../src/overview/render/draw.cpp)
+- [`draw_window_snapshot`](../src/overview/render/draw.cpp)
+- [`draw_window_surface_tree`](../src/overview/render/draw.cpp)
 
 ### 这次案例沉淀出的规则
 
@@ -310,7 +310,7 @@ ctest --test-dir Debug --output-on-failure
   在 workspace grid 布局完成后，把 target box 重写成最终 preview 几何
 - [`src/overview/scene.cpp`](../src/overview/scene.cpp)
   直接复用 model 里的 preview box，不再重新投影一遍
-- [`src/overview/scene_layout.cpp`](../src/overview/scene_layout.cpp)
+- [`src/overview/scene/layout.cpp`](../src/overview/scene/layout.cpp)
   提供共享的 workspace content box 和 global projection helper
 
 第二步是修正导航评分：

@@ -1,4 +1,4 @@
-#include "overview/session_selection.h"
+#include "overview/navigation/selection.h"
 
 #include "test_suite.h"
 #include "test_support.h"
