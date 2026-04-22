@@ -7,6 +7,15 @@
 
 namespace {
 
+void test_localize_global_box_keeps_monitor_local_axes() {
+    const auto localized = Overview::localizeGlobalBox({410.0, 260.0, 120.0, 90.0}, 400.0, 200.0);
+
+    expect_near(localized.x, 10.0, 1e-9, "scene localization subtracts the monitor x origin");
+    expect_near(localized.y, 60.0, 1e-9, "scene localization subtracts the monitor y origin");
+    expect_near(localized.w, 120.0, 1e-9, "scene localization preserves width");
+    expect_near(localized.h, 90.0, 1e-9, "scene localization preserves height");
+}
+
 void test_project_boxes_to_content_preserves_order_and_fits_bounds() {
     const std::vector<ScrollerCore::Box> source = {
         {0.0, 0.0, 100.0, 80.0},
@@ -53,6 +62,7 @@ void test_workspace_content_box_reserves_header_band() {
 } // namespace
 
 void run_overview_scene_tests() {
+    test_localize_global_box_keeps_monitor_local_axes();
     test_project_boxes_to_content_preserves_order_and_fits_bounds();
     test_project_global_boxes_to_content_tracks_workspace_card_position();
     test_empty_workspace_preview_box_is_inset();

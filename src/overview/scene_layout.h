@@ -11,6 +11,7 @@
 
 namespace Overview {
 
+ScrollerCore::Box              localizeGlobalBox(const ScrollerCore::Box& box, double originX, double originY);
 ScrollerCore::Box              buildWorkspaceContentBox(const ScrollerCore::Box& workspaceBox);
 std::vector<ScrollerCore::Box> projectBoxesToContent(std::span<const ScrollerCore::Box> sourceBoxes,
                                                      const ScrollerCore::Box& contentBox);

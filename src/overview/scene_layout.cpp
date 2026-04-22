@@ -52,6 +52,10 @@ ScrollerCore::Box applyProjection(const ScrollerCore::Box& source,
 
 } // namespace
 
+ScrollerCore::Box localizeGlobalBox(const ScrollerCore::Box& box, double originX, double originY) {
+    return translateBox(box, -originX, -originY);
+}
+
 ScrollerCore::Box buildWorkspaceContentBox(const ScrollerCore::Box& workspaceBox) {
     auto contentBox = insetBox(workspaceBox,
                                kWorkspaceContentInset,
