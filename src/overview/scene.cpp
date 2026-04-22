@@ -18,6 +18,7 @@
 #include <hyprland/src/desktop/Workspace.hpp>
 
 #include "geometry_utils.h"
+#include "orientation_math.h"
 #include "scene_layout.h"
 #include "style.h"
 
@@ -32,12 +33,16 @@ Box localize_box(PHLMONITOR monitor, const Box& box) {
     if (!monitor)
         return box;
 
-    return {
+    const auto localBox = Box{
         box.x - monitor->m_position.x,
         box.y - monitor->m_position.y,
         box.w,
         box.h,
     };
+    return transform_box_to_render_space(localBox,
+                                         static_cast<wl_output_transform>(monitor->m_transform),
+                                         monitor->m_size.x,
+                                         monitor->m_size.y);
 }
 
 // Scene objects do not hold `TargetRef`s. Recompute the same identity test in

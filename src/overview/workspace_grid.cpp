@@ -9,6 +9,21 @@
 
 namespace Overview {
 
+namespace {
+
+double fit_gap_to_region(double preferredGap, double regionSpan, std::size_t cellCount, double preferredMinCellSpan) {
+    if (cellCount <= 1)
+        return 0.0;
+
+    const auto remainingAfterPreferredCells = regionSpan - preferredMinCellSpan * static_cast<double>(cellCount);
+    if (remainingAfterPreferredCells <= 0.0)
+        return 0.0;
+
+    return std::min(preferredGap, remainingAfterPreferredCells / static_cast<double>(cellCount - 1));
+}
+
+}
+
 WorkspaceGridShape chooseWorkspaceGridShape(const ScrollerCore::Box& regionBox, std::size_t count) {
     if (count <= 1)
         return {};
@@ -54,12 +69,14 @@ std::vector<WorkspaceGridCell> layoutWorkspaceGridCells(const ScrollerCore::Box&
     const auto grid = chooseWorkspaceGridShape(regionBox, workspaceIds.size());
     // Gaps scale gently with monitor size but are clamped so small monitors
     // still breathe and large monitors do not waste too much space.
-    const auto horizontalGap = std::min(32.0, std::max(12.0, regionBox.w * 0.02));
-    const auto verticalGap = std::min(32.0, std::max(12.0, regionBox.h * 0.03));
+    const auto preferredHorizontalGap = std::min(32.0, std::max(12.0, regionBox.w * 0.02));
+    const auto preferredVerticalGap = std::min(32.0, std::max(12.0, regionBox.h * 0.03));
+    const auto horizontalGap = fit_gap_to_region(preferredHorizontalGap, regionBox.w, grid.columns, 120.0);
+    const auto verticalGap = fit_gap_to_region(preferredVerticalGap, regionBox.h, grid.rows, 96.0);
     const auto totalHorizontalGap = horizontalGap * static_cast<double>(grid.columns - 1);
     const auto totalVerticalGap = verticalGap * static_cast<double>(grid.rows - 1);
-    const auto cellWidth = std::max(120.0, (regionBox.w - totalHorizontalGap) / static_cast<double>(grid.columns));
-    const auto cellHeight = std::max(96.0, (regionBox.h - totalVerticalGap) / static_cast<double>(grid.rows));
+    const auto cellWidth = std::max(1.0, (regionBox.w - totalHorizontalGap) / static_cast<double>(grid.columns));
+    const auto cellHeight = std::max(1.0, (regionBox.h - totalVerticalGap) / static_cast<double>(grid.rows));
 
     // Cells are emitted row-major so neighboring workspace ids stay spatially
     // close when the sorted id list increases by one.

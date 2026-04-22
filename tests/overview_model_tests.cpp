@@ -19,9 +19,24 @@ void test_layout_workspace_grid_cells_sorts_and_assigns_boxes() {
     expect_true(cells[1].box.x > cells[0].box.x, "grid layout places later workspaces in later horizontal cells");
 }
 
+void test_layout_workspace_grid_cells_stay_inside_small_regions() {
+    const ScrollerCore::Box region{0.0, 0.0, 320.0, 180.0};
+    const auto cells = Overview::layoutWorkspaceGridCells(region, {8, 6, 4, 2, 7, 5, 3, 1});
+    expect_eq(cells.size(), static_cast<size_t>(8), "small-region grid keeps every workspace");
+    for (const auto& cell : cells) {
+        expect_true(cell.box.x >= region.x && cell.box.y >= region.y,
+                    "small-region grid cells keep their origin inside the monitor region");
+        expect_true(cell.box.x + cell.box.w <= region.x + region.w + 1e-9,
+                    "small-region grid cells stay within region width");
+        expect_true(cell.box.y + cell.box.h <= region.y + region.h + 1e-9,
+                    "small-region grid cells stay within region height");
+    }
+}
+
 } // namespace
 
 void run_overview_model_tests() {
     test_choose_workspace_grid_shape_prefers_wide_columns();
     test_layout_workspace_grid_cells_sorts_and_assigns_boxes();
+    test_layout_workspace_grid_cells_stay_inside_small_regions();
 }

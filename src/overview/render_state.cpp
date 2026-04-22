@@ -14,6 +14,7 @@ void RenderState::clearSessionState() {
     liveScenes_.clear();
     backdropLayers_.clear();
     selectionPulses_.clear();
+    textCache_.clear();
 }
 
 void RenderState::clearAll() {
