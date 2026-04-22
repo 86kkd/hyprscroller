@@ -81,6 +81,22 @@ void focus_workspace_target(PHLWORKSPACE workspace, WORKSPACEID workspaceId, int
     execute_accept_plan(acceptPlan, workspace, context);
 }
 
+void sync_canvas_target_window(PHLWORKSPACE workspace, PHLWINDOW window, int monitorId) {
+    if (!workspace || !window)
+        return;
+
+    auto* layout = CanvasLayoutInternal::get_canvas_for_workspace(workspace->m_id);
+    if (!layout)
+        return;
+
+    // Overview selection is purely logical while the overlay is open. Before we
+    // hand real focus back to Hyprland, mirror that selection into the target
+    // canvas so its active lane/window and paged geometry match the window that
+    // is about to be focused.
+    layout->onWindowFocusChange(window);
+    layout->recalculateMonitor(monitorId);
+}
+
 } // namespace
 
 OriginState captureOrigin() {
@@ -168,6 +184,7 @@ void acceptTarget(const Target& selection) {
     // 1. move focus to the correct workspace/monitor
     // 2. then focus the exact target window inside that workspace
     focus_workspace_target(workspace, workspace->m_id, monitorId, "overview_accept_window");
+    sync_canvas_target_window(workspace, selection.window, monitorId);
     CanvasLayoutInternal::switch_to_window(selection.window, true);
     spdlog::info("overview_accept_window: workspace={} window={} special={}",
                  selection.workspaceId,
@@ -183,6 +200,7 @@ void restoreOrigin(const OriginState& origin) {
     // restore both workspace and exact window focus.
     if (origin.window && origin.window->m_isMapped && workspace) {
         focus_workspace_target(workspace, workspace->m_id, monitorId, "overview_restore_origin_window");
+        sync_canvas_target_window(workspace, origin.window, monitorId);
         CanvasLayoutInternal::switch_to_window(origin.window, false);
         spdlog::info("overview_restore_origin_window: workspace={} monitor={} window={}",
                      workspace->m_id,

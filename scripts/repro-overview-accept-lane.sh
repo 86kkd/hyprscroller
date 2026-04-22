@@ -1,0 +1,347 @@
+#!/usr/bin/env bash
+
+# Launch a nested Hyprland session and reproduce the overview accept bug where
+# moving the logical selection across lanes, then accepting overview, focused a
+# real window that stayed off-screen instead of paging that lane into view.
+
+set -euo pipefail
+
+die() {
+    printf 'error: %s\n' "$*" >&2
+    exit 1
+}
+
+usage() {
+    cat <<'EOF'
+Usage: scripts/repro-overview-accept-lane.sh [options]
+
+Options:
+  --outer-monitor NAME   Place the floating nested Hyprland window on NAME.
+  --window-size WxH      Outer floating window size. Default: 1400x1800.
+  --plugin PATH          Plugin .so to load. Default: ./Debug/hyprscroller.so.
+  --keep-open            Leave the nested Hyprland instance running after setup.
+  --hold-seconds N       Delay after opening overview before navigation. Default: 1.
+  -h, --help             Show this help text.
+
+The script exits non-zero when overview accept lands on the expected target
+window but leaves that focused window outside the visible monitor bounds.
+EOF
+}
+
+require_cmd() {
+    command -v "$1" >/dev/null 2>&1 || die "missing required command: $1"
+}
+
+quote_command() {
+    local quoted
+    printf -v quoted '%q ' "$@"
+    printf '%s' "${quoted% }"
+}
+
+detect_outer_monitor() {
+    hyprctl monitors -j | jq -r '
+        (map(select((.transform % 2) == 1)) | .[0].name) //
+        (map(select(.focused)) | .[0].name) //
+        empty
+    '
+}
+
+pick_terminal_kind() {
+    if command -v kitty >/dev/null 2>&1; then
+        TERMINAL_KIND="kitty"
+        return
+    fi
+
+    if command -v alacritty >/dev/null 2>&1; then
+        TERMINAL_KIND="alacritty"
+        return
+    fi
+
+    die "need one of: kitty, alacritty"
+}
+
+launch_nested_exec() {
+    local command
+    command=$(quote_command "$@")
+    hyprctl -i "$NESTED_INSTANCE" dispatch exec "$command" >/dev/null
+}
+
+nested_client_count() {
+    hyprctl -i "$NESTED_INSTANCE" clients -j | jq 'length'
+}
+
+wait_for_nested_client_count() {
+    local minimum="$1"
+
+    for ((attempt = 0; attempt < 60; ++attempt)); do
+        if (( "$(nested_client_count)" >= minimum )); then
+            return 0
+        fi
+
+        sleep 0.25
+    done
+
+    return 1
+}
+
+instance_exists() {
+    hyprctl instances -j | jq -e --arg instance "$NESTED_INSTANCE" '
+        any(.[]; .instance == $instance)
+    ' >/dev/null
+}
+
+wait_for_instance_exit() {
+    for ((attempt = 0; attempt < 80; ++attempt)); do
+        if ! instance_exists; then
+            return 0
+        fi
+
+        sleep 0.25
+    done
+
+    return 1
+}
+
+launch_terminal_window() {
+    local index="$1"
+    local class="hs-ov-accept-${index}"
+    local title="lane-${index}"
+    local body="printf 'overview accept lane %s\\n' '$index'; exec bash"
+
+    case "$TERMINAL_KIND" in
+        kitty)
+            launch_nested_exec kitty --class "$class" --title "$title" bash -lc "$body"
+            ;;
+        alacritty)
+            launch_nested_exec alacritty --class "$class" --title "$title" -e bash -lc "$body"
+            ;;
+        *)
+            die "unsupported terminal kind: $TERMINAL_KIND"
+            ;;
+    esac
+}
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PLUGIN_PATH="$REPO_ROOT/Debug/hyprscroller.so"
+WINDOW_WIDTH=1400
+WINDOW_HEIGHT=1800
+KEEP_OPEN=0
+OVERVIEW_HOLD_SECONDS=1
+OUTER_MONITOR=""
+NESTED_INSTANCE=""
+EXPECTED_CLASS="hs-ov-accept-5"
+
+cleanup() {
+    if [[ "${KEEP_OPEN:-0}" -eq 1 ]]; then
+        return
+    fi
+
+    if [[ -n "${NESTED_INSTANCE:-}" ]]; then
+        hyprctl -i "$NESTED_INSTANCE" dispatch exit >/dev/null 2>&1 || true
+    fi
+}
+
+trap cleanup EXIT INT TERM
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --outer-monitor)
+            [[ $# -ge 2 ]] || die "--outer-monitor requires a value"
+            OUTER_MONITOR="$2"
+            shift 2
+            ;;
+        --window-size)
+            [[ $# -ge 2 ]] || die "--window-size requires a value like 1400x1800"
+            WINDOW_WIDTH="${2%x*}"
+            WINDOW_HEIGHT="${2#*x}"
+            [[ "$WINDOW_WIDTH" =~ ^[0-9]+$ && "$WINDOW_HEIGHT" =~ ^[0-9]+$ ]] || die "invalid --window-size: $2"
+            shift 2
+            ;;
+        --plugin)
+            [[ $# -ge 2 ]] || die "--plugin requires a path"
+            PLUGIN_PATH="$2"
+            shift 2
+            ;;
+        --keep-open)
+            KEEP_OPEN=1
+            shift
+            ;;
+        --hold-seconds)
+            [[ $# -ge 2 ]] || die "--hold-seconds requires an integer value"
+            OVERVIEW_HOLD_SECONDS="$2"
+            [[ "$OVERVIEW_HOLD_SECONDS" =~ ^[0-9]+$ ]] || die "invalid --hold-seconds: $2"
+            shift 2
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            die "unknown argument: $1"
+            ;;
+    esac
+done
+
+require_cmd hyprctl
+require_cmd jq
+require_cmd Hyprland
+
+[[ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]] || die "run this inside an existing Hyprland session"
+[[ -f "$PLUGIN_PATH" ]] || die "plugin not found: $PLUGIN_PATH (run 'make debug' first)"
+
+pick_terminal_kind
+
+if [[ -z "$OUTER_MONITOR" ]]; then
+    OUTER_MONITOR="$(detect_outer_monitor)"
+    [[ -n "$OUTER_MONITOR" ]] || die "could not auto-detect an outer monitor"
+fi
+
+RUN_DIR="$(mktemp -d /tmp/hyprscroller-overview-accept-lane.XXXXXX)"
+CONFIG_PATH="$RUN_DIR/hyprland.conf"
+LOG_PATH="$RUN_DIR/hyprland.log"
+LAUNCHER_PATH="$RUN_DIR/launch-nested.sh"
+RESULT_PATH="$RUN_DIR/result.json"
+
+cat >"$CONFIG_PATH" <<EOF
+monitor = , preferred, auto, 1
+
+plugin = $PLUGIN_PATH
+
+env = XCURSOR_SIZE,24
+
+general {
+    layout = scroller
+    gaps_in = 4
+    gaps_out = 8
+    border_size = 2
+}
+
+decoration {
+    rounding = 6
+}
+
+misc {
+    disable_hyprland_logo = true
+    disable_splash_rendering = true
+    force_default_wallpaper = 0
+}
+
+input {
+    kb_layout = us
+}
+
+debug {
+    disable_logs = false
+}
+EOF
+
+cat >"$LAUNCHER_PATH" <<EOF
+#!/usr/bin/env bash
+exec Hyprland -c "$CONFIG_PATH" >"$LOG_PATH" 2>&1
+EOF
+chmod +x "$LAUNCHER_PATH"
+
+BEFORE_MAX_TIME="$(hyprctl instances -j | jq '[.[].time] | max // 0')"
+LAUNCH_RULES="[monitor $OUTER_MONITOR; float; size $WINDOW_WIDTH $WINDOW_HEIGHT; center]"
+hyprctl dispatch exec "$LAUNCH_RULES $LAUNCHER_PATH" >/dev/null
+
+for ((attempt = 0; attempt < 80; ++attempt)); do
+    NESTED_INSTANCE="$(hyprctl instances -j | jq -r --argjson before "$BEFORE_MAX_TIME" '
+        (map(select(.time > $before))) as $instances
+        | if ($instances | length) == 0 then
+            empty
+          else
+            ($instances | max_by(.time).instance)
+          end
+    ')"
+
+    if [[ -n "$NESTED_INSTANCE" ]]; then
+        break
+    fi
+
+    sleep 0.25
+done
+
+[[ -n "$NESTED_INSTANCE" ]] || die "timed out waiting for nested Hyprland instance"
+
+NESTED_SOCKET="$(hyprctl instances -j | jq -r --arg instance "$NESTED_INSTANCE" '
+    map(select(.instance == $instance)) | .[0].wl_socket // empty
+')"
+[[ -n "$NESTED_SOCKET" ]] || die "could not resolve nested Wayland socket"
+
+hyprctl -i "$NESTED_INSTANCE" dispatch workspace 1 >/dev/null
+sleep 0.5
+
+for index in 1 2 3 4 5; do
+    launch_terminal_window "$index"
+    sleep 0.8
+done
+
+wait_for_nested_client_count 5 || die "timed out waiting for five nested terminals"
+
+sleep 1
+hyprctl -i "$NESTED_INSTANCE" dispatch scroller:setmode row >/dev/null
+sleep 0.3
+hyprctl -i "$NESTED_INSTANCE" dispatch scroller:createlane r >/dev/null
+sleep 0.3
+hyprctl -i "$NESTED_INSTANCE" dispatch scroller:movefocus l >/dev/null
+sleep 0.3
+hyprctl -i "$NESTED_INSTANCE" dispatch scroller:toggleoverview >/dev/null
+sleep "$OVERVIEW_HOLD_SECONDS"
+hyprctl -i "$NESTED_INSTANCE" dispatch scroller:movefocus d >/dev/null
+sleep 0.3
+hyprctl -i "$NESTED_INSTANCE" dispatch scroller:toggleoverview accept >/dev/null
+sleep 0.5
+
+jq -n \
+  --argjson monitor "$(hyprctl -i "$NESTED_INSTANCE" monitors -j | jq '.[0]')" \
+  --argjson activeWindow "$(hyprctl -i "$NESTED_INSTANCE" activewindow -j)" \
+  --argjson activeWorkspace "$(hyprctl -i "$NESTED_INSTANCE" activeworkspace -j)" \
+  --argjson clients "$(hyprctl -i "$NESTED_INSTANCE" clients -j)" \
+  '{monitor: $monitor, activeWindow: $activeWindow, activeWorkspace: $activeWorkspace, clients: $clients}' >"$RESULT_PATH"
+
+if [[ "$KEEP_OPEN" -eq 1 ]]; then
+    :
+else
+    hyprctl -i "$NESTED_INSTANCE" dispatch exit >/dev/null 2>&1 || true
+    wait_for_instance_exit || die "timed out waiting for nested Hyprland to exit"
+fi
+
+[[ -f "$RESULT_PATH" ]] || die "nested scenario did not write a result file"
+
+ACTIVE_CLASS="$(jq -r '.activeWindow.class // empty' "$RESULT_PATH")"
+ACTIVE_X="$(jq -r '.activeWindow.at[0] // 0' "$RESULT_PATH")"
+ACTIVE_Y="$(jq -r '.activeWindow.at[1] // 0' "$RESULT_PATH")"
+ACTIVE_W="$(jq -r '.activeWindow.size[0] // 0' "$RESULT_PATH")"
+ACTIVE_H="$(jq -r '.activeWindow.size[1] // 0' "$RESULT_PATH")"
+MONITOR_W="$(jq -r '.monitor.width // 0' "$RESULT_PATH")"
+MONITOR_H="$(jq -r '.monitor.height // 0' "$RESULT_PATH")"
+
+VISIBLE=0
+if (( ACTIVE_X < MONITOR_W && ACTIVE_X + ACTIVE_W > 0 && ACTIVE_Y < MONITOR_H && ACTIVE_Y + ACTIVE_H > 0 )); then
+    VISIBLE=1
+fi
+
+printf 'nested instance:  %s\n' "$NESTED_INSTANCE"
+printf 'nested socket:    %s\n' "$NESTED_SOCKET"
+printf 'outer monitor:    %s\n' "$OUTER_MONITOR"
+printf 'terminal app:     %s\n' "$TERMINAL_KIND"
+printf 'run dir:          %s\n' "$RUN_DIR"
+printf 'config:           %s\n' "$CONFIG_PATH"
+printf 'log:              %s\n' "$LOG_PATH"
+printf 'result file:      %s\n' "$RESULT_PATH"
+printf 'accepted class:   %s\n' "${ACTIVE_CLASS:-unknown}"
+printf 'active geometry:  %sx%s @ %s,%s\n' "$ACTIVE_W" "$ACTIVE_H" "$ACTIVE_X" "$ACTIVE_Y"
+printf 'monitor geometry: %sx%s\n' "$MONITOR_W" "$MONITOR_H"
+
+if [[ "$ACTIVE_CLASS" != "$EXPECTED_CLASS" ]]; then
+    printf 'result:           accepted unexpected window (expected %s)\n' "$EXPECTED_CLASS" >&2
+    exit 1
+fi
+
+if [[ "$VISIBLE" -ne 1 ]]; then
+    printf 'result:           focused window stayed off-screen after overview accept (bug reproduced)\n' >&2
+    exit 1
+fi
+
+printf 'result:           overview accept focused the selected lane and kept it visible\n'
