@@ -63,7 +63,7 @@ bool Lane::remove_window(PHLWINDOW window) {
         return true;
     }
 
-    col->recalculate_stack_geometry(calculate_gap_x(c), gap);
+    col->recalculate_stack_geometry(calculate_gap_x(c), gap, max);
     debugVerifyStackCache();
     return true;
 }
@@ -262,7 +262,7 @@ void Lane::align_stack(Direction dir) {
     case Direction::Center:
         if (mode == Mode::Column) {
             active->data()->align_window(Direction::Center, gap);
-            active->data()->recalculate_stack_geometry(calculate_gap_x(active), gap);
+            active->data()->recalculate_stack_geometry(calculate_gap_x(active), gap, max);
         } else {
             center_active_stack();
         }
@@ -272,7 +272,7 @@ void Lane::align_stack(Direction dir) {
     case Direction::Up:
     case Direction::Down:
         active->data()->align_window(dir, gap);
-        active->data()->recalculate_stack_geometry(calculate_gap_x(active), gap);
+        active->data()->recalculate_stack_geometry(calculate_gap_x(active), gap, max);
         break;
     default:
         return;
@@ -354,7 +354,7 @@ void Lane::move_active_window_to_adjacent_stack(Direction dir) {
 
     reorder = Reorder::Auto;
     if (targetWindowCountBefore == 1)
-        active->data()->fit_size(FitSize::All, calculate_gap_x(active), gap);
+        active->data()->fit_size(FitSize::All, calculate_gap_x(active), gap, max);
     recalculate_lane_geometry();
     debugVerifyStackCache();
 }
@@ -425,7 +425,7 @@ void Lane::admit_window_left() {
 
     reorder = Reorder::Auto;
     if (windowCountBefore == 1)
-        active->data()->fit_size(FitSize::All, calculate_gap_x(active), gap);
+        active->data()->fit_size(FitSize::All, calculate_gap_x(active), gap, max);
     recalculate_lane_geometry();
     debugVerifyStackCache();
 }

@@ -29,6 +29,7 @@ class Lane;
 
 struct CanvasOverviewSnapshotWindow {
     PHLWINDOW         window = nullptr;
+    // Full logical layout box, not the safety-clipped compositor geometry.
     ScrollerCore::Box box;
 };
 

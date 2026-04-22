@@ -133,6 +133,14 @@ struct PreviewShape {
     float roundingPower = 2.0F;
 };
 
+Box scaled_target_box(const Box& box, double overlayAlpha) {
+    return centerScaleBox(box, Style::kTargetScaleBase + Style::kTargetScaleRange * overlayAlpha);
+}
+
+Box animated_window_draw_box(const RenderState& state, int monitorId, const SceneTarget& target, double overlayAlpha) {
+    return scaled_target_box(state.animatedPreviewBox(monitorId, target.window, target.box), overlayAlpha);
+}
+
 struct ScopedRenderDataState {
     Vector2D uvTopLeft;
     Vector2D uvBottomRight;
@@ -407,6 +415,9 @@ bool draw_window_surface_tree(const SceneTarget& target, const Box& box, const B
                 std::max(1.0, surface->m_current.size.x * scale),
                 std::max(1.0, surface->m_current.size.y * scale),
             };
+            const auto clippedDrawBox = intersectBox({drawBox.x, drawBox.y, drawBox.width, drawBox.height}, bounds);
+            if (!clippedDrawBox)
+                return;
 
             const auto surfaceUVTL = surface_uv_top_left(surface);
             const auto surfaceUVBR = surface_uv_bottom_right(surface);
@@ -418,26 +429,27 @@ bool draw_window_surface_tree(const SceneTarget& target, const Box& box, const B
             subsurfaceData.a = 1.0F;
             subsurfaceData.allowCustomUV = surfaceUVTL.x >= 0.0 && surfaceUVBR.x >= 0.0;
             subsurfaceData.blockBlurOptimization = true;
-            g_pHyprOpenGL->renderTexture(subsurfaceTexture, drawBox, subsurfaceData);
+            g_pHyprOpenGL->renderTexture(subsurfaceTexture, to_cbox(*clippedDrawBox), subsurfaceData);
         },
         nullptr);
 
     return true;
 }
 
-void draw_window_preview(RenderState& state, const SceneTarget& target, const Box& bounds, double overlayAlpha) {
+void draw_window_preview(RenderState& state, const SceneTarget& target, const Box& drawBox, const Box& bounds, double overlayAlpha) {
     // The preview draw order is:
     // 1. shadow
     // 2. live snapshot, then live surface fallback, then matte fallback
     // 3. outline
     // 4. title backdrop + text
-    const auto drawBox = centerScaleBox(target.box, Style::kTargetScaleBase + Style::kTargetScaleRange * overlayAlpha);
     const auto previewBox = insetBox(drawBox, Style::kPreviewInset, Style::kPreviewInset);
     const auto previewShape = preview_shape_for_window(target, previewBox);
     const auto border = Style::previewBorder(target.selected, static_cast<float>(0.92 * overlayAlpha));
     const auto shadowAlpha = target.selected ? 0.22F : 0.14F;
-    g_pHyprOpenGL->renderRoundedShadow(to_cbox(previewBox), previewShape.round, previewShape.roundingPower, 18,
-                                       Style::previewShadow(shadowAlpha * overlayAlpha), 1.0F);
+    if (const auto shadowBox = intersectBox(previewBox, bounds); shadowBox && shadowBox->w > 4.0 && shadowBox->h > 4.0) {
+        g_pHyprOpenGL->renderRoundedShadow(to_cbox(*shadowBox), previewShape.round, previewShape.roundingPower, 18,
+                                           Style::previewShadow(shadowAlpha * overlayAlpha), 1.0F);
+    }
 
     if (!draw_window_snapshot(target, previewBox, bounds) && !draw_window_surface_tree(target, previewBox, bounds)) {
         draw_rect(previewBox,
@@ -476,7 +488,7 @@ void draw_window_preview(RenderState& state, const SceneTarget& target, const Bo
 void draw_empty_target(const SceneTarget& target, const Box& bounds, double overlayAlpha) {
     // Empty targets are intentionally minimal: they only need an outline to
     // show "there is navigable blank space here".
-    const auto drawBox = centerScaleBox(target.box, Style::kTargetScaleBase + Style::kTargetScaleRange * overlayAlpha);
+    const auto drawBox = scaled_target_box(target.box, overlayAlpha);
     const auto border = Style::previewBorder(target.selected, static_cast<float>((target.selected ? 0.92 : 0.86) * overlayAlpha));
     draw_outline_panel(drawBox, bounds, border, Style::kEmptyTargetRound, 2.0F);
 }
@@ -555,25 +567,39 @@ void drawSceneMonitor(const SceneMonitor& scene, steady_tp now, RenderState& sta
     if (progress <= 0.0)
         return;
 
+    std::optional<Box> selectionBox;
+
     // Draw in increasing specificity:
     // - workspace targets
     // - synthetic empty target, if any
     // - one monitor-local selection outline on top
     for (const auto& workspace : scene.workspaces) {
         for (const auto& target : workspace.targets) {
-            if (target.type == TargetType::Window)
-                draw_window_preview(state, target, scene.box, progress);
-            else
+            if (target.type == TargetType::Window) {
+                const auto drawBox = animated_window_draw_box(state, scene.monitorId, target, progress);
+                draw_window_preview(state, target, drawBox, scene.box, progress);
+                if (target.selected)
+                    selectionBox = drawBox;
+            } else {
                 draw_empty_target(target, scene.box, progress);
+                if (target.selected)
+                    selectionBox = scaled_target_box(target.box, progress);
+            }
         }
     }
 
-    if (scene.syntheticTarget)
+    if (scene.syntheticTarget) {
         draw_empty_target(*scene.syntheticTarget, scene.box, progress);
+        if (scene.syntheticTarget->selected)
+            selectionBox = scaled_target_box(scene.syntheticTarget->box, progress);
+    }
 
-    if (scene.selectionBox) {
-        const auto selectionBox = state.animatedSelectionBox(*scene.selectionBox, scene.monitorId, now);
-        draw_outline_panel(centerScaleBox(selectionBox, Style::kSelectionOutlineScale),
+    if (!selectionBox && scene.selectionBox)
+        selectionBox = scaled_target_box(*scene.selectionBox, progress);
+
+    if (selectionBox) {
+        const auto animatedSelectionBox = state.animatedSelectionBox(*selectionBox, scene.monitorId, now);
+        draw_outline_panel(centerScaleBox(animatedSelectionBox, Style::kSelectionOutlineScale),
                            scene.box,
                            Style::selectionOutline(static_cast<float>(0.96 * progress)),
                            18,

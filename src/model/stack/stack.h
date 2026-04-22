@@ -17,6 +17,7 @@
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include <hyprutils/math/Vector2D.hpp>
 
@@ -26,6 +27,11 @@
 #include "core/core.h"
 
 namespace ScrollerModel {
+
+struct WindowGeometryEntry {
+    PHLWINDOW         window = nullptr;
+    ScrollerCore::Box box;
+};
 
 enum class StackWidth {
     // Predefined proportional width presets used when creating or cycling stacks.
@@ -166,6 +172,8 @@ public:
         for (auto win = windows.first(); win != nullptr; win = win->next())
             std::forward<Fn>(fn)(win->data());
     }
+    // Export each window's full logical compositor box before safety clipping.
+    std::vector<WindowGeometryEntry> capture_window_boxes(const Vector2D &gap_x, double gap) const;
     // Remove a window and keep active pointer coherent.
     void remove_window(PHLWINDOW window);
     // Move active pointer to the matching model window.
@@ -205,7 +213,7 @@ public:
     void set_geom_pos(double x, double y);
 
     // Recompute active-window geometry and propagate updates to siblings.
-    void recalculate_stack_geometry(const Vector2D &gap_x, double gap);
+    void recalculate_stack_geometry(const Vector2D &gap_x, double gap, const ScrollerCore::Box &visibleBox);
     // Return currently active compositor window.
     PHLWINDOW get_active_window();
     // Return whether the active model window is already at a stack edge.
@@ -237,7 +245,7 @@ public:
     // Update stack width from a predefined mode and current monitor bounds.
     void update_width(StackWidth cwidth, double maxw, double maxh);
     // Resize a window range (all/visible/active/to ends) to fill available height.
-    void fit_size(FitSize fitsize, const Vector2D &gap_x, double gap);
+    void fit_size(FitSize fitsize, const Vector2D &gap_x, double gap, const ScrollerCore::Box &visibleBox);
     // Resize width and optional active height if height delta is valid.
     void resize_active_window(const ScrollerCore::Box &bounds, const Vector2D &gap_x, double gap, const Vector2D &delta);
     // Append a window model without applying insert heuristics. Used only when rebuilding snapshots.
@@ -253,7 +261,7 @@ private:
     // Find the list node that owns a given compositor window.
     ListNode<Window *> *findWindowNode(PHLWINDOW window) const;
     // Shift a window range so the active window stays visible inside the stack viewport.
-    void adjust_windows(ListNode<Window *> *win, const Vector2D &gap_x, double gap);
+    void adjust_windows(ListNode<Window *> *win, const Vector2D &gap_x, double gap, const ScrollerCore::Box &visibleBox);
 
     // Restore point for stack-level geometry transforms.
     struct Memory {

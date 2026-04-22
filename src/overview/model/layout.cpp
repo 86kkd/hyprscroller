@@ -41,6 +41,7 @@ Target makeEmptyTarget(WORKSPACEID workspaceId, int monitorId, const ScrollerCor
     target.monitorId = monitorId;
     target.window = nullptr;
     target.box = inset_box(workspaceBox, synthetic ? 0.16 : 0.20);
+    target.sourceBox = target.box;
     target.synthetic = synthetic;
     return target;
 }

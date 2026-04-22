@@ -32,6 +32,11 @@ void damage_monitor_if_animating(PHLMONITOR monitor, steady_tp now) {
         return;
 
     auto& state = renderState();
+    if (state.previewAnimationActive(monitor->m_id)) {
+        g_pHyprRenderer->damageMonitor(monitor);
+        return;
+    }
+
     if (state.openingAnimationActive(monitor->m_id, now, session().active())) {
         g_pHyprRenderer->damageMonitor(monitor);
         return;
@@ -52,6 +57,7 @@ void handle_session_transition(steady_tp now) {
         state.clearSessionState();
         snapshotWindowTargets(overview.model());
         snapshotBackdropLayers(overview.model(), state);
+        state.rebuildPreviewAnimations(overview.model());
         for (const auto& region : overview.model().monitors()) {
             state.markOpened(region.monitorId, now);
             if (region.monitor)

@@ -47,15 +47,14 @@ CanvasOverviewSnapshot CanvasLayout::buildOverviewSnapshot() const {
         if (!lane)
             continue;
 
-        lane->for_each_window([&](PHLWINDOW window) {
-            if (!window)
-                return;
-
+        for (const auto& entry : lane->capture_window_boxes()) {
+            if (!entry.window)
+                continue;
             snapshot.windows.push_back({
-                .window = window,
-                .box = {window->m_position.x, window->m_position.y, window->m_size.x, window->m_size.y},
+                .window = entry.window,
+                .box = entry.box,
             });
-        });
+        }
     }
 
     return snapshot;

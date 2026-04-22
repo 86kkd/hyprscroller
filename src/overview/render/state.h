@@ -4,11 +4,13 @@
  */
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 #include <hyprland/src/desktop/view/LayerSurface.hpp>
+#include <hyprland/src/helpers/AnimatedVariable.hpp>
 #include <hyprland/src/render/OpenGL.hpp>
 
 #include "overview/render/animation.h"
@@ -19,6 +21,13 @@ namespace Overview {
 struct SelectionPulse {
     ScrollerCore::Box box;
     steady_tp         startedAt;
+};
+
+struct PreviewAnimation {
+    int                 monitorId = INVALID_MONITOR_ID;
+    PHLWINDOWREF        window;
+    PHLANIMVAR<Vector2D> position;
+    PHLANIMVAR<Vector2D> size;
 };
 
 class RenderState {
@@ -47,6 +56,10 @@ class RenderState {
     bool selectionAnimationActive(int monitorId, steady_tp now) const;
     ScrollerCore::Box animatedSelectionBox(const ScrollerCore::Box& selectionBox, int monitorId, steady_tp now) const;
 
+    void rebuildPreviewAnimations(const Model& model);
+    bool previewAnimationActive(int monitorId) const;
+    ScrollerCore::Box animatedPreviewBox(int monitorId, PHLWINDOW window, const ScrollerCore::Box& fallbackBox) const;
+
     SP<CTexture> findTextTexture(const std::string& key) const;
     void         storeTextTexture(std::string key, SP<CTexture> texture);
     void         clearTextCache();
@@ -56,6 +69,7 @@ class RenderState {
     std::unordered_map<int, SceneMonitor>           liveScenes_;
     std::unordered_map<int, std::vector<PHLLSREF>>  backdropLayers_;
     std::unordered_map<int, SelectionPulse>         selectionPulses_;
+    std::unordered_map<std::uintptr_t, PreviewAnimation> previewAnimations_;
     std::unordered_map<std::string, SP<CTexture>>   textCache_;
     bool                                            lastOverviewActive_ = false;
 };

@@ -4,16 +4,80 @@
  */
 #include "overview/render/state.h"
 
+#include <array>
+
+#include <hyprland/src/Compositor.hpp>
+#include <hyprland/src/config/ConfigManager.hpp>
+#include <hyprland/src/managers/animation/AnimationManager.hpp>
+#include <hyprland/src/render/Renderer.hpp>
+
+#include "core/window_key.h"
 #include "overview/render/animation.h"
 #include "overview/scene/geometry_utils.h"
+#include "overview/scene/layout.h"
 
 namespace Overview {
+namespace {
+
+using ScrollerCore::window_key;
+
+Vector2D box_position(const ScrollerCore::Box& box) {
+    return Vector2D(box.x, box.y);
+}
+
+Vector2D box_size(const ScrollerCore::Box& box) {
+    return Vector2D(std::max(1.0, box.w), std::max(1.0, box.h));
+}
+
+bool valid_preview_box(const ScrollerCore::Box& box) {
+    return finiteBox(box) && box.w > 1.0 && box.h > 1.0;
+}
+
+SP<Hyprutils::Animation::SAnimationPropertyConfig> preview_animation_config() {
+    if (!g_pConfigManager)
+        return nullptr;
+
+    static constexpr std::array kCandidates = {
+        "windows",
+        "windowsMove",
+        "fade",
+        "global",
+    };
+
+    for (const auto* name : kCandidates) {
+        if (auto config = g_pConfigManager->getAnimationPropertyConfig(name))
+            return config;
+    }
+
+    for (const auto& [name, config] : g_pConfigManager->getAnimationConfig()) {
+        if (!config)
+            continue;
+
+        if (name.find("window") != std::string::npos || name.find("fade") != std::string::npos)
+            return config;
+    }
+
+    return nullptr;
+}
+
+void attach_preview_damage_callback(PHLANIMVAR<Vector2D>& animation, int monitorId) {
+    if (!animation)
+        return;
+
+    animation->setUpdateCallback([monitorId](auto) {
+        if (const auto monitor = g_pCompositor->getMonitorFromID(monitorId))
+            g_pHyprRenderer->damageMonitor(monitor);
+    });
+}
+
+} // namespace
 
 void RenderState::clearSessionState() {
     openedAt_.clear();
     liveScenes_.clear();
     backdropLayers_.clear();
     selectionPulses_.clear();
+    previewAnimations_.clear();
     textCache_.clear();
 }
 
@@ -118,6 +182,81 @@ ScrollerCore::Box RenderState::animatedSelectionBox(const ScrollerCore::Box& sel
     const auto t = clamp01(elapsed / std::chrono::duration<double>(kSelectionDuration).count());
     const auto pulse = 1.0 + 0.05 * (1.0 - easeOutCubic(t));
     return centerScaleBox(selectionBox, pulse);
+}
+
+void RenderState::rebuildPreviewAnimations(const Model& model) {
+    previewAnimations_.clear();
+
+    if (!g_pAnimationManager)
+        return;
+
+    const auto config = preview_animation_config();
+    if (!config)
+        return;
+
+    for (const auto& region : model.monitors()) {
+        auto monitor = region.monitor;
+        if (!monitor)
+            continue;
+
+        for (const auto& workspace : region.workspaces) {
+            for (const auto& target : workspace.targets) {
+                if (target.type != TargetType::Window || !target.window)
+                    continue;
+
+                const auto startBox = localizeGlobalBox(target.sourceBox, monitor->m_position.x, monitor->m_position.y);
+                const auto goalBox = localizeGlobalBox(target.box, monitor->m_position.x, monitor->m_position.y);
+                if (!valid_preview_box(startBox) || !valid_preview_box(goalBox))
+                    continue;
+
+                PreviewAnimation animation;
+                animation.monitorId = monitor->m_id;
+                animation.window = target.window;
+
+                g_pAnimationManager->createAnimation(box_position(startBox), animation.position, config, AVARDAMAGE_NONE);
+                g_pAnimationManager->createAnimation(box_size(startBox), animation.size, config, AVARDAMAGE_NONE);
+                attach_preview_damage_callback(animation.position, monitor->m_id);
+                attach_preview_damage_callback(animation.size, monitor->m_id);
+
+                *animation.position = box_position(goalBox);
+                *animation.size = box_size(goalBox);
+                previewAnimations_[window_key(target.window)] = std::move(animation);
+            }
+        }
+    }
+}
+
+bool RenderState::previewAnimationActive(int monitorId) const {
+    for (const auto& [_, animation] : previewAnimations_) {
+        if (animation.monitorId != monitorId)
+            continue;
+
+        if ((animation.position && animation.position->isBeingAnimated()) || (animation.size && animation.size->isBeingAnimated()))
+            return true;
+    }
+
+    return false;
+}
+
+ScrollerCore::Box RenderState::animatedPreviewBox(int monitorId, PHLWINDOW window, const ScrollerCore::Box& fallbackBox) const {
+    const auto it = previewAnimations_.find(window_key(window));
+    if (it == previewAnimations_.end() || it->second.monitorId != monitorId)
+        return fallbackBox;
+
+    auto box = fallbackBox;
+    if (it->second.position) {
+        const auto value = it->second.position->value();
+        box.x = value.x;
+        box.y = value.y;
+    }
+
+    if (it->second.size) {
+        const auto value = it->second.size->value();
+        box.w = std::max(1.0, value.x);
+        box.h = std::max(1.0, value.y);
+    }
+
+    return valid_preview_box(box) ? box : fallbackBox;
 }
 
 SP<CTexture> RenderState::findTextTexture(const std::string& key) const {

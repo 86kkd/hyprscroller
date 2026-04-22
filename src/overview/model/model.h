@@ -29,6 +29,7 @@ struct Target {
     int               monitorId = INVALID_MONITOR_ID;
     PHLWINDOW         window = nullptr;
     ScrollerCore::Box box;
+    ScrollerCore::Box sourceBox;
     bool              synthetic = false;
 };
 

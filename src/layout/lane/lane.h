@@ -86,6 +86,8 @@ public:
         for (auto col = stacks.first(); col != nullptr; col = col->next())
             std::forward<Fn>(fn)(col->data());
     }
+    // Export every window's full logical box before compositor safety clipping.
+    std::vector<ScrollerModel::WindowGeometryEntry> capture_window_boxes() const;
     PHLWINDOW get_active_window() const;
     bool is_active(PHLWINDOW window) const;
     size_t stack_count() const;

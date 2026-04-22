@@ -222,7 +222,7 @@ void Lane::set_fullscreen_active_window() {
         return;
 
     active->data()->set_fullscreen(full);
-    active->data()->recalculate_stack_geometry(calculate_gap_x(active), gap);
+    active->data()->recalculate_stack_geometry(calculate_gap_x(active), gap, max);
 }
 
 // Toggle scroller-managed fullscreen on the active stack and relayout.
@@ -255,7 +255,7 @@ void Lane::recalculate_lane_geometry() {
     // Hyprland-native fullscreen bypasses the normal overview/scroller viewport
     // rules. In that mode we only refresh the active stack's child-window layout.
     if (const auto activeWindow = active->data()->get_active_window(); activeWindow && activeWindow->isFullscreen()) {
-        active->data()->recalculate_stack_geometry(calculate_gap_x(active), gap);
+        active->data()->recalculate_stack_geometry(calculate_gap_x(active), gap, max);
         return;
     }
 #ifdef COLORS_IPC
@@ -278,8 +278,8 @@ void Lane::recalculate_lane_geometry() {
         stack->set_geom_pos(max.x, max.y);
         stack->set_geom_w(max.w);
         stack->set_geom_h(max.h);
-        stack->fit_size(FitSize::All, calculate_gap_x(active), gap);
-        stack->recalculate_stack_geometry(calculate_gap_x(active), gap);
+        stack->fit_size(FitSize::All, calculate_gap_x(active), gap, max);
+        stack->recalculate_stack_geometry(calculate_gap_x(active), gap, max);
         spdlog::debug("lane_recalc_single: active_window={} stacks={}",
                       logging::active_window_ptr(stack),
                       logging::summarize_stacks(stacks, mode));
@@ -421,6 +421,6 @@ void Lane::adjust_stacks(ListNode<Stack *> *stack) {
     for (auto col = stacks.first(); col != nullptr; col = col->next()) {
         auto gap0 = col == stacks.first() ? 0.0 : gap;
         auto gap1 = col == stacks.last() ? 0.0 : gap;
-        col->data()->recalculate_stack_geometry(Vector2D(gap0, gap1), gap);
+        col->data()->recalculate_stack_geometry(Vector2D(gap0, gap1), gap, max);
     }
 }

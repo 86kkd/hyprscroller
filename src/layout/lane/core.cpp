@@ -180,6 +180,15 @@ bool Lane::has_window(PHLWINDOW window) const {
     return getStackForWindow(window) != nullptr;
 }
 
+std::vector<ScrollerModel::WindowGeometryEntry> Lane::capture_window_boxes() const {
+    std::vector<ScrollerModel::WindowGeometryEntry> boxes;
+    for (auto stackNode = stacks.first(); stackNode != nullptr; stackNode = stackNode->next()) {
+        const auto stackBoxes = stackNode->data()->capture_window_boxes(calculate_gap_x(stackNode), gap);
+        boxes.insert(boxes.end(), stackBoxes.begin(), stackBoxes.end());
+    }
+    return boxes;
+}
+
 PHLWINDOW Lane::get_active_window() const {
     if (!active)
         return nullptr;
@@ -269,7 +278,7 @@ ActiveWindowPayload Lane::extract_active_window_payload() {
         return payload;
     }
 
-    stack->fit_size(FitSize::All, calculate_gap_x(active), gap);
+    stack->fit_size(FitSize::All, calculate_gap_x(active), gap, max);
     debugVerifyStackCache();
     return payload;
 }

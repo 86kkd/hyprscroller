@@ -21,6 +21,82 @@
 #include "core/monitor_geometry_runtime.h"
 
 namespace ScrollerModel {
+namespace {
+
+using ScrollerCore::Box;
+
+Box logical_window_box(const Box &stackGeom, Mode mode, double border, const Vector2D &gap_x,
+                       double localPos, double localSize, double gap0, double gap1) {
+    const auto position = StackInternal::compose_window_position(stackGeom, mode, border, gap_x, localPos, gap0);
+    const auto size = StackInternal::compose_window_size(stackGeom, mode, border, gap_x, localSize, gap0, gap1);
+    return {
+        position.x,
+        position.y,
+        size.x,
+        size.y,
+    };
+}
+
+Box safe_committed_box(const Box &logicalBox, const Box &visibleBox, double minSpan) {
+    auto safeBox = logicalBox;
+    safeBox.w = std::max(safeBox.w, minSpan);
+    safeBox.h = std::max(safeBox.h, minSpan);
+
+    const auto visibleRight = visibleBox.x + visibleBox.w;
+    const auto visibleBottom = visibleBox.y + visibleBox.h;
+    const auto boxRight = logicalBox.x + logicalBox.w;
+    const auto boxBottom = logicalBox.y + logicalBox.h;
+    const bool intersectsVisible =
+        boxRight > visibleBox.x &&
+        logicalBox.x < visibleRight &&
+        boxBottom > visibleBox.y &&
+        logicalBox.y < visibleBottom;
+
+    if (intersectsVisible)
+        return safeBox;
+
+    if (boxRight <= visibleBox.x) {
+        safeBox.x = visibleBox.x - safeBox.w;
+        return safeBox;
+    }
+
+    if (logicalBox.x >= visibleRight) {
+        safeBox.x = visibleRight;
+        return safeBox;
+    }
+
+    if (boxBottom <= visibleBox.y) {
+        safeBox.y = visibleBox.y - safeBox.h;
+        return safeBox;
+    }
+
+    if (logicalBox.y >= visibleBottom) {
+        safeBox.y = visibleBottom;
+        return safeBox;
+    }
+
+    return safeBox;
+}
+
+} // namespace
+
+std::vector<WindowGeometryEntry> Stack::capture_window_boxes(const Vector2D &gap_x, double gap) const {
+    std::vector<WindowGeometryEntry> boxes;
+    for (auto win = windows.first(); win != nullptr; win = win->next()) {
+        const auto window = win->data()->ptr().lock();
+        if (!window)
+            continue;
+
+        const auto gap0 = win == windows.first() ? 0.0 : gap;
+        const auto gap1 = win == windows.last() ? 0.0 : gap;
+        const auto border = window->getRealBorderSize();
+        boxes.push_back({
+            .window = window,
+            .box = logical_window_box(geom, mode, border, gap_x, win->data()->get_geom_y(), win->data()->get_geom_h(), gap0, gap1),
+        });
+    }
+    return boxes;
+}
 
 void Stack::scale(const Vector2D &bmin, const Vector2D &start, double scale, double gap) {
     for (auto win = windows.first(); win != nullptr; win = win->next()) {
@@ -117,7 +193,7 @@ void Stack::toggle_maximized(double maxw, double maxh) {
     }
 }
 
-void Stack::recalculate_stack_geometry(const Vector2D &gap_x, double gap) {
+void Stack::recalculate_stack_geometry(const Vector2D &gap_x, double gap, const ScrollerCore::Box &visibleBox) {
     if (!active)
         return;
 
@@ -158,18 +234,18 @@ void Stack::recalculate_stack_geometry(const Vector2D &gap_x, double gap) {
     // This catches direct resizes or moves before any reordering heuristics run.
     if (a0 < viewportStart) {
         wactive->set_geom_y(viewportStart);
-        adjust_windows(active, gap_x, gap);
+        adjust_windows(active, gap_x, gap, visibleBox);
         return;
     }
     if (a1 > viewportEnd) {
         wactive->set_geom_y(clampEnd);
-        adjust_windows(active, gap_x, gap);
+        adjust_windows(active, gap_x, gap, visibleBox);
         return;
     }
     // Lazy reorder means the caller deliberately positioned the active window;
     // we only need to propagate that anchor to neighbors.
     if (reorder != Reorder::Auto) {
-        adjust_windows(active, gap_x, gap);
+        adjust_windows(active, gap_x, gap, visibleBox);
         return;
     }
 
@@ -180,7 +256,7 @@ void Stack::recalculate_stack_geometry(const Vector2D &gap_x, double gap) {
     // When at least one neighbor is still fully visible, keeping the current
     // anchor avoids unnecessary jumps while navigating within a stack.
     if (prevVisible || nextVisible) {
-        adjust_windows(active, gap_x, gap);
+        adjust_windows(active, gap_x, gap, visibleBox);
         return;
     }
 
@@ -194,7 +270,7 @@ void Stack::recalculate_stack_geometry(const Vector2D &gap_x, double gap) {
             ? ScrollerCore::choose_anchor_x(next != nullptr, prev != nullptr, activeSize, nextSize, prevSize, wactive->get_geom_y(), geom)
             : ScrollerCore::choose_anchor_y(next != nullptr, prev != nullptr, activeSize, nextSize, prevSize, geom);
     wactive->set_geom_y(newPos);
-    adjust_windows(active, gap_x, gap);
+    adjust_windows(active, gap_x, gap, visibleBox);
     spdlog::debug("stack_recalc_auto: active_window={} prev_visible={} next_visible={} new_pos={}",
                   static_cast<const void*>(win ? win.get() : nullptr),
                   prevVisible,
@@ -202,7 +278,7 @@ void Stack::recalculate_stack_geometry(const Vector2D &gap_x, double gap) {
                   newPos);
 }
 
-void Stack::fit_size(FitSize fitsize, const Vector2D &gap_x, double gap) {
+void Stack::fit_size(FitSize fitsize, const Vector2D &gap_x, double gap, const ScrollerCore::Box &visibleBox) {
     reorder = Reorder::Auto;
     // Fit-size acts on a contiguous range of windows. The helpers decide which
     // range should be scaled (all / visible / before / after active), then
@@ -230,10 +306,10 @@ void Stack::fit_size(FitSize fitsize, const Vector2D &gap_x, double gap) {
         return;
 
     from->data()->set_geom_y(StackInternal::stack_local_origin(geom, mode));
-    adjust_windows(from, gap_x, gap);
+    adjust_windows(from, gap_x, gap, visibleBox);
 }
 
-void Stack::adjust_windows(ListNode<Window *> *win, const Vector2D &gap_x, double gap) {
+void Stack::adjust_windows(ListNode<Window *> *win, const Vector2D &gap_x, double gap, const ScrollerCore::Box &visibleBox) {
     if (!win)
         return;
 
@@ -305,8 +381,11 @@ void Stack::adjust_windows(ListNode<Window *> *win, const Vector2D &gap_x, doubl
         auto gap1 = w == windows.last() ? 0.0 : gap;
         auto border = window->getRealBorderSize();
         const auto localSize = w->data()->get_geom_h();
-        window->m_position = StackInternal::compose_window_position(geom, mode, border, gap_x, w->data()->get_geom_y(), gap0);
-        window->m_size = StackInternal::compose_window_size(geom, mode, border, gap_x, localSize, gap0, gap1);
+        const auto logicalBox = logical_window_box(geom, mode, border, gap_x, w->data()->get_geom_y(), localSize, gap0, gap1);
+        const auto minCommittedSpan = std::max(1.0, 2.0 * border + 1.0);
+        const auto committedBox = safe_committed_box(logicalBox, visibleBox, minCommittedSpan);
+        window->m_position = Vector2D(committedBox.x, committedBox.y);
+        window->m_size = Vector2D(committedBox.w, committedBox.h);
         StackInternal::sync_window_target_geometry(window);
     }
 }

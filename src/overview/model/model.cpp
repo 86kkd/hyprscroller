@@ -92,6 +92,7 @@ WorkspaceNode build_workspace_node(const CanvasOverviewSnapshot& snapshot, int m
             .monitorId = monitorId,
             .window = snapshotWindow.window,
             .box = snapshotWindow.box,
+            .sourceBox = snapshotWindow.box,
             .synthetic = false,
         });
     }
@@ -109,16 +110,17 @@ void project_workspace_targets(PHLMONITOR monitor, WorkspaceNode& workspace) {
     windowIndexes.reserve(workspace.targets.size());
     sourceBoxes.reserve(workspace.targets.size());
 
-    // The overview model keeps one geometry per target. Rewriting those boxes
-    // into final preview positions makes navigation, synthetic target creation,
-    // and rendering all speak the same coordinate system.
+    // Keep the original logical window box alongside the projected preview box.
+    // Overview rendering/animation needs both:
+    // - `sourceBox` for "where the real layout says this window is"
+    // - `box` for "where the preview card should end up"
     for (size_t index = 0; index < workspace.targets.size(); ++index) {
         const auto& target = workspace.targets[index];
         if (target.type != TargetType::Window || !target.window)
             continue;
 
         windowIndexes.push_back(index);
-        sourceBoxes.push_back(target.box);
+        sourceBoxes.push_back(target.sourceBox);
     }
 
     if (windowIndexes.empty()) {
