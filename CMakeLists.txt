@@ -26,7 +26,10 @@ endif()
 add_library(hyprscroller SHARED
             src/main.cpp
             src/dispatchers.h
+            src/dispatchers_internal.h
             src/dispatchers.cpp
+            src/dispatchers_layout.cpp
+            src/dispatchers_overview_marks.cpp
             src/core/core.cpp
             src/core/direction.cpp
             src/core/layout_math.cpp
