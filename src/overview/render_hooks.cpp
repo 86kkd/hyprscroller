@@ -123,10 +123,11 @@ bool initializeRendererHooksImpl(HANDLE handle) {
         g_keyboardKeyListener = Event::bus()->m_events.input.keyboard.key.listen([](IKeyboard::SKeyEvent event, Event::SCallbackInfo& info) {
             (void)info;
             auto& overview = session();
-            const auto handledByOverview = overview.consumeInputHandled();
+            const auto released = event.state == WL_KEYBOARD_KEY_STATE_RELEASED;
+            const auto handledByOverview = overview.consumeInputHandled(released);
 
             if (shouldDismissOnKeyRelease(overview.active(),
-                                          event.state == WL_KEYBOARD_KEY_STATE_RELEASED,
+                                          released,
                                           event.updateMods,
                                           handledByOverview))
                 overview.dismiss();

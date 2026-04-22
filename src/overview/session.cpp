@@ -107,18 +107,16 @@ Session& session() {
 
 void Session::clear() {
     active_ = false;
-    inputHandled_ = false;
+    inputHandling_.reset();
     model_.clear();
 }
 
 void Session::markInputHandled() {
-    inputHandled_ = true;
+    inputHandling_.markHandled();
 }
 
-bool Session::consumeInputHandled() {
-    const auto handled = inputHandled_;
-    inputHandled_ = false;
-    return handled;
+bool Session::consumeInputHandled(bool released) {
+    return inputHandling_.consume(released);
 }
 
 bool Session::selectInitialTarget() {

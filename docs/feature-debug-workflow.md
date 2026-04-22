@@ -284,7 +284,7 @@ ctest --test-dir Debug --output-on-failure
 - `workspace 2`：三个 `column` 模式窗口
 - 从 `workspace 1` 的下方窗口打开 overview
 - 执行一次 `movefocus u`
-- 接受当前 overview 选择并输出最终落点
+- 再执行一次无参 `toggleoverview`，接受当前 overview 选择并输出最终落点
 
 旧 bug 下，它会跳到 `workspace 2 / ws2-middle`。
 

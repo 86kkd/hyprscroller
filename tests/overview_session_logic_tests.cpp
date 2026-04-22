@@ -44,6 +44,18 @@ void test_overview_dismiss_requires_unhandled_release() {
                 "key press does not dismiss overview");
 }
 
+void test_input_handling_state_survives_until_release() {
+    Overview::InputHandlingState state;
+    state.markHandled();
+
+    expect_true(state.consume(false),
+                "handled press is visible to the first key event");
+    expect_true(state.consume(true),
+                "handled press also suppresses the matching key release");
+    expect_true(!state.consume(true),
+                "release suppression is consumed exactly once");
+}
+
 } // namespace
 
 void run_overview_session_logic_tests() {
@@ -54,4 +66,5 @@ void run_overview_session_logic_tests() {
     test_initial_selection_reports_none_without_candidates();
     test_overview_dismiss_ignores_modifier_release();
     test_overview_dismiss_requires_unhandled_release();
+    test_input_handling_state_survives_until_release();
 }

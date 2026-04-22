@@ -14,6 +14,17 @@ enum class InitialSelectionChoice {
     InitialEmpty,
 };
 
+class InputHandlingState {
+  public:
+    void markHandled();
+    bool consume(bool released);
+    void reset();
+
+  private:
+    bool handled_ = false;
+    bool pendingRelease_ = false;
+};
+
 InitialSelectionChoice chooseInitialSelectionChoice(bool hasTargets,
                                                     bool hasOriginWindowTarget,
                                                     bool hasOriginWorkspaceTarget,

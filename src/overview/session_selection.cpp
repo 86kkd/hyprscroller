@@ -6,6 +6,26 @@
 
 namespace Overview {
 
+void InputHandlingState::markHandled() {
+    handled_ = true;
+    pendingRelease_ = true;
+}
+
+bool InputHandlingState::consume(bool released) {
+    const auto handled = handled_ || (released && pendingRelease_);
+    handled_ = false;
+
+    if (released)
+        pendingRelease_ = false;
+
+    return handled;
+}
+
+void InputHandlingState::reset() {
+    handled_ = false;
+    pendingRelease_ = false;
+}
+
 InitialSelectionChoice chooseInitialSelectionChoice(bool hasTargets,
                                                     bool hasOriginWindowTarget,
                                                     bool hasOriginWorkspaceTarget,

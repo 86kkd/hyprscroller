@@ -11,6 +11,7 @@
 
 #include "../core/direction.h"
 #include "model.h"
+#include "session_selection.h"
 
 namespace Overview {
 
@@ -22,7 +23,7 @@ class Session {
     void dismiss();
     bool moveSelection(Direction direction);
     void markInputHandled();
-    bool consumeInputHandled();
+    bool consumeInputHandled(bool released);
     const Model& model() const;
     void damageMonitors() const;
 
@@ -35,7 +36,7 @@ class Session {
     void clear();
 
     bool                  active_ = false;
-    bool                  inputHandled_ = false;
+    InputHandlingState    inputHandling_;
     Model                 model_;
 };
 

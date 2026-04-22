@@ -5,7 +5,8 @@
 # - workspace 1 with two stacked terminals
 # - workspace 2 with three stacked terminals
 # Then it returns to workspace 1, opens overview from the lower terminal, moves
-# selection upward once, accepts, and verifies that focus stays in workspace 1.
+# selection upward once, accepts via the same toggleoverview dispatcher, and
+# verifies that focus stays in workspace 1.
 
 set -euo pipefail
 
@@ -304,7 +305,7 @@ hyprctl -i "$NESTED_INSTANCE" dispatch scroller:toggleoverview >/dev/null
 sleep "$OVERVIEW_HOLD_SECONDS"
 hyprctl -i "$NESTED_INSTANCE" dispatch scroller:movefocus u >/dev/null
 sleep 0.3
-hyprctl -i "$NESTED_INSTANCE" dispatch scroller:toggleoverview accept >/dev/null
+hyprctl -i "$NESTED_INSTANCE" dispatch scroller:toggleoverview >/dev/null
 sleep 0.5
 
 jq -n \
