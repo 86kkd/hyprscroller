@@ -69,6 +69,17 @@ overview”这条固定链路，优先直接用仓库里的脚本：
 它会在 nested 会话里构造两个 `column` 模式 workspace，自动执行
 `toggleoverview -> movefocus u -> accept`，并把最终落点写到 result 文件里。
 
+如果你要复现“overview 跨 monitor accept 没有真正切到目标窗口”的问题，
+优先用这条脚本：
+
+```bash
+./scripts/repro-overview-accept-cross-monitor.sh --outer-monitor HDMI-A-1
+```
+
+它会在 nested 会话里创建第二块虚拟输出，在第一块 monitor 打开 overview，
+将逻辑选中项移动到第二块 monitor 的目标窗口，再执行 accept，并验证
+最终 focus 是否真的落到那个目标窗口上。
+
 ## 3. 手工启动嵌套 Hyprland 测试实例
 
 先写一份最小测试配置，例如 `/tmp/hyprscroller-test.conf`：
