@@ -133,6 +133,42 @@ struct PreviewShape {
     float roundingPower = 2.0F;
 };
 
+struct ScopedRenderDataState {
+    Vector2D uvTopLeft;
+    Vector2D uvBottomRight;
+    PHLWINDOWREF currentWindow;
+
+    ScopedRenderDataState()
+        : uvTopLeft(g_pHyprOpenGL->m_renderData.primarySurfaceUVTopLeft)
+        , uvBottomRight(g_pHyprOpenGL->m_renderData.primarySurfaceUVBottomRight)
+        , currentWindow(g_pHyprOpenGL->m_renderData.currentWindow) {
+    }
+
+    ~ScopedRenderDataState() {
+        g_pHyprOpenGL->m_renderData.primarySurfaceUVTopLeft = uvTopLeft;
+        g_pHyprOpenGL->m_renderData.primarySurfaceUVBottomRight = uvBottomRight;
+        g_pHyprOpenGL->m_renderData.currentWindow = currentWindow;
+    }
+};
+
+struct ScopedTextureTransform {
+    using TextureTransform = decltype(std::declval<CTexture>().m_transform);
+
+    SP<CTexture> texture;
+    TextureTransform transform{};
+
+    explicit ScopedTextureTransform(SP<CTexture> tex)
+        : texture(std::move(tex)) {
+        if (texture)
+            transform = texture->m_transform;
+    }
+
+    ~ScopedTextureTransform() {
+        if (texture)
+            texture->m_transform = transform;
+    }
+};
+
 // Snapshot previews try to mimic the live window's rounded-corner style after
 // the preview has been scaled down into overview space.
 PreviewShape preview_shape_for_window(const SceneTarget& target, const Box& box) {
@@ -267,10 +303,8 @@ bool draw_window_snapshot(const SceneTarget& target, const Box& box, const Box& 
 
     // Save every mutable render-state field we touch so overview drawing leaves
     // the surrounding render pass exactly as it found it.
-    const auto lastUVTL = g_pHyprOpenGL->m_renderData.primarySurfaceUVTopLeft;
-    const auto lastUVBR = g_pHyprOpenGL->m_renderData.primarySurfaceUVBottomRight;
-    const auto lastWindow = g_pHyprOpenGL->m_renderData.currentWindow;
-    const auto lastTransform = texture->m_transform;
+    const ScopedRenderDataState renderStateGuard;
+    const ScopedTextureTransform textureTransformGuard(texture);
     auto uvTopLeft = Vector2D(uvBox.x, uvBox.y);
     auto uvBottomRight = Vector2D(uvBox.x + uvBox.width, uvBox.y + uvBox.height);
     if (sourceMonitor->m_transform % 2 == 1) {
@@ -290,11 +324,6 @@ bool draw_window_snapshot(const SceneTarget& target, const Box& box, const Box& 
     data.allowCustomUV = true;
     data.blockBlurOptimization = true;
     g_pHyprOpenGL->renderTexture(texture, centeredTarget, data);
-
-    g_pHyprOpenGL->m_renderData.primarySurfaceUVTopLeft = lastUVTL;
-    g_pHyprOpenGL->m_renderData.primarySurfaceUVBottomRight = lastUVBR;
-    g_pHyprOpenGL->m_renderData.currentWindow = lastWindow;
-    texture->m_transform = lastTransform;
     return true;
 }
 
@@ -344,9 +373,7 @@ bool draw_window_surface_tree(const SceneTarget& target, const Box& box, const B
 
     // Save every mutable render-state field we touch so the fallback path is as
     // self-contained as the snapshot path above.
-    const auto lastUVTL = g_pHyprOpenGL->m_renderData.primarySurfaceUVTopLeft;
-    const auto lastUVBR = g_pHyprOpenGL->m_renderData.primarySurfaceUVBottomRight;
-    const auto lastWindow = g_pHyprOpenGL->m_renderData.currentWindow;
+    const ScopedRenderDataState renderStateGuard;
 
     // Hyprland's UV helper expects the surface's on-monitor size, not the
     // shrunken overview preview size. If we pass `centeredTarget` here it
@@ -395,9 +422,6 @@ bool draw_window_surface_tree(const SceneTarget& target, const Box& box, const B
         },
         nullptr);
 
-    g_pHyprOpenGL->m_renderData.primarySurfaceUVTopLeft = lastUVTL;
-    g_pHyprOpenGL->m_renderData.primarySurfaceUVBottomRight = lastUVBR;
-    g_pHyprOpenGL->m_renderData.currentWindow = lastWindow;
     return true;
 }
 
