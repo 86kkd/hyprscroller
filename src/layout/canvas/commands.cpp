@@ -108,8 +108,7 @@ bool CanvasLayout::handoffMoveWindowAcrossMonitor(int workspace, Direction direc
         relayoutVisibleCanvas(sourceMonitor);
 
     targetLayout->relayoutVisibleCanvas(targetMonitor);
-    targetLayout->requestWorkspaceFocusSyncSuppression();
-    CanvasLayoutInternal::switch_to_window(currentWindow, true);
+    targetLayout->focusManagedWindow(currentWindow, true, "move_window_cross_monitor", true);
     debugVerifyLaneCache();
     targetLayout->debugVerifyLaneCache();
     return true;
@@ -168,7 +167,7 @@ void CanvasLayout::handleMoveWindowWithinLane(int workspace, Direction direction
     const bool movesBetweenStacks = direction == backward || direction == forward;
     if (!movesBetweenStacks) {
         lane->move_active_stack(direction);
-        CanvasLayoutInternal::switch_to_window(lane->get_active_window());
+        focusManagedWindow(lane->get_active_window(), false, "move_window_stack");
         return;
     }
 
@@ -178,13 +177,13 @@ void CanvasLayout::handleMoveWindowWithinLane(int workspace, Direction direction
         // Splitting a multi-window stack stays local even at the lane edge.
         // Cross-monitor handoff is reserved for single-window edge stacks.
         lane->move_active_window_to_new_stack(direction);
-        CanvasLayoutInternal::switch_to_window(lane->get_active_window());
+        focusManagedWindow(lane->get_active_window(), false, "move_window_split_stack");
         return;
     }
 
     if (!lane->active_item_at_edge(direction)) {
         lane->move_active_window_to_adjacent_stack(direction);
-        CanvasLayoutInternal::switch_to_window(lane->get_active_window());
+        focusManagedWindow(lane->get_active_window(), false, "move_window_adjacent_stack");
         return;
     }
 
@@ -357,5 +356,5 @@ void CanvasLayout::focus_lane(int workspace, Direction direction) {
 
     activeLane = target;
     if (const auto window = activeLane->data()->get_active_window())
-        CanvasLayoutInternal::switch_to_window(window, true);
+        focusManagedWindow(window, true, "focus_lane");
 }

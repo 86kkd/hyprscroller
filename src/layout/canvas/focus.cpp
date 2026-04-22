@@ -335,8 +335,7 @@ void CanvasLayout::handoffFocusAcrossMonitor(int workspace, Direction direction,
                  ScrollerCore::direction_name(direction),
                  static_cast<const void*>(crossMonitorTarget.get()),
                  "cross_monitor");
-    requestWorkspaceFocusSyncSuppression();
-    CanvasLayoutInternal::switch_to_window(crossMonitorTarget, true);
+    focusManagedWindow(crossMonitorTarget, true, "move_focus_cross_monitor", true);
 }
 
 // Compatibility entrypoint used by older target-based move-window callbacks.
@@ -387,8 +386,7 @@ void CanvasLayout::focusAdjacentLane(int workspace, Direction direction, ListNod
                  true,
                  static_cast<const void*>(targetWindow ? targetWindow.get() : nullptr));
     if (targetWindow) {
-        requestWorkspaceFocusSyncSuppression();
-        CanvasLayoutInternal::switch_to_window(targetWindow, true);
+        focusManagedWindow(targetWindow, true, "move_focus_adjacent_lane", true);
     }
 }
 
@@ -425,8 +423,7 @@ void CanvasLayout::finalizeLocalFocusMove(int workspace, Direction direction, La
     // to Hyprland. Command code assumes the model already points at the same
     // lane/window Hyprland is about to focus.
     setActiveLane(lane);
-    requestWorkspaceFocusSyncSuppression();
-    CanvasLayoutInternal::switch_to_window(after, true);
+    focusManagedWindow(after, true, "move_focus_local", true);
 }
 
 // Execute directional focus movement, including lane handoff, monitor handoff,

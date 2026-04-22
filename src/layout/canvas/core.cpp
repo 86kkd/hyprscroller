@@ -299,6 +299,30 @@ void CanvasLayout::resetHandoffState() {
     handoffState.reset();
 }
 
+bool CanvasLayout::focusManagedWindow(PHLWINDOW window, bool warpCursor, const char *context, bool suppressWorkspaceSync) {
+    if (!window)
+        return false;
+
+    if (suppressWorkspaceSync)
+        requestWorkspaceFocusSyncSuppression();
+
+    if (CanvasLayoutInternal::switch_to_window(window, warpCursor))
+        return true;
+
+    if (suppressWorkspaceSync)
+        (void)consumeActiveLaneSyncPolicy();
+
+    const auto *ctx = context ? context : "focusManagedWindow";
+    spdlog::warn("{}: failed to focus managed window canvas_ws={} window={} target_workspace={} target_monitor={}",
+                 ctx,
+                 CanvasLayoutInternal::get_workspace_id(),
+                 static_cast<const void*>(window.get()),
+                 window->workspaceID(),
+                 window->monitorID());
+    syncActiveStateFromWorkspaceFocus();
+    return false;
+}
+
 void CanvasLayout::finishLaneTransfer(ListNode<Lane *> *sourceLaneNode, PHLMONITOR sourceMonitor, bool ephemeralOnly, bool warpCursor) {
     // Payload transfer helpers in focus/move-window paths call this as the last
     // phase: prune an empty source lane if needed, relayout the visible canvas,
@@ -308,7 +332,7 @@ void CanvasLayout::finishLaneTransfer(ListNode<Lane *> *sourceLaneNode, PHLMONIT
 
     if (const auto lane = getActiveLane()) {
         if (const auto window = lane->get_active_window())
-            CanvasLayoutInternal::switch_to_window(window, warpCursor);
+            focusManagedWindow(window, warpCursor, "finishLaneTransfer");
     }
 }
 
@@ -500,7 +524,7 @@ void CanvasLayout::newTarget(SP<Layout::ITarget> target) {
 
     spdlog::info("newTarget: window={} workspace={}", static_cast<const void*>(window.get()), window->workspaceID());
     onWindowCreatedTiling(window, Math::DIRECTION_DEFAULT);
-    CanvasLayoutInternal::switch_to_window(window);
+    focusManagedWindow(window, false, "newTarget");
 }
 
 // Hyprland callback: target re-entered tiling flow and should be owned again.
@@ -833,7 +857,7 @@ void CanvasLayout::marks_delete(const std::string &name) {
 void CanvasLayout::marks_visit(const std::string &name) {
     PHLWINDOW window = marks.visit(name);
     if (window != nullptr)
-        CanvasLayoutInternal::switch_to_window(window);
+        focusManagedWindow(window, false, "marks_visit");
 }
 
 void CanvasLayout::marks_reset() {

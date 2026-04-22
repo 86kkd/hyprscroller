@@ -4,8 +4,8 @@
 #include <string_view>
 
 #include "../lane/lane.h"
+#include "dispatch_runtime.h"
 #include "layout.h"
-#include "dispatch_logic.h"
 
 namespace CanvasLayoutInternal {
 /**
@@ -32,14 +32,6 @@ PHLMONITOR                      visible_monitor_for_workspace(PHLWORKSPACE works
 CanvasLayout*                   get_canvas_for_workspace(WORKSPACEID workspace_id);
 // Translate plugin direction to Hyprland monitor direction when possible.
 std::optional<Math::eDirection> direction_to_math(Direction direction);
-// Runtime seam around dispatcher and focus-related global state.
-struct DispatcherRuntime : DispatcherRegistryRuntime {
-    virtual PHLMONITOR getMonitorFromID(int monitorId) const = 0;
-    virtual PHLMONITOR getMonitorFromCursor() const = 0;
-    virtual bool isWindowActive(PHLWINDOW window) const = 0;
-};
-// Replace the dispatcher runtime for in-process tests.
-void                            set_dispatcher_runtime_for_tests(DispatcherRuntime* runtime);
 // Pick the best target window on another monitor when crossing focus.
 PHLWINDOW                       pick_cross_monitor_target_window(PHLMONITOR monitor, WORKSPACEID workspace_id, Direction direction, PHLWINDOW source_window);
 // Return true when a dispatcher call is well-formed and the target dispatcher exists.
@@ -55,7 +47,7 @@ bool                            focus_monitor_workspace(PHLMONITOR monitor, PHLW
 // Focus the monitor hosting a target window before focusing the window itself.
 void                            focus_window_monitor(PHLWINDOW window);
 // Focus a target window and optionally warp the cursor to it.
-void                            switch_to_window(PHLWINDOW window, bool warp_cursor = false);
+bool                            switch_to_window(PHLWINDOW window, bool warp_cursor = false);
 // Return the workspace id associated with the current canvas command context.
 int                             get_workspace_id();
 }

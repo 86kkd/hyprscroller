@@ -57,6 +57,67 @@ public:
     bool isWindowActive(PHLWINDOW window) const override {
         return g_pCompositor && window && g_pCompositor->isWindowActive(window);
     }
+
+    std::string monitorName(PHLMONITOR monitor) const override {
+        return monitor ? monitor->m_name : std::string();
+    }
+
+    WORKSPACEID workspaceID(PHLWORKSPACE workspace) const override {
+        return workspace ? workspace->m_id : WORKSPACE_INVALID;
+    }
+
+    bool isWorkspaceSpecial(PHLWORKSPACE workspace) const override {
+        return workspace && workspace->m_isSpecialWorkspace;
+    }
+
+    std::string workspaceSelector(PHLWORKSPACE workspace) const override {
+        return ScrollerCore::workspace_selector(workspace);
+    }
+
+    bool activateMonitorWorkspaceDirectly(PHLMONITOR monitor, PHLWORKSPACE workspace, WORKSPACEID fallbackWorkspaceId) const override {
+        if (!monitor)
+            return false;
+
+        if (workspace) {
+            if (workspace->m_isSpecialWorkspace)
+                monitor->changeWorkspace(workspace->m_id, false, false, false);
+            else
+                monitor->changeWorkspace(workspace, false, false, false);
+        } else if (fallbackWorkspaceId != WORKSPACE_INVALID) {
+            monitor->changeWorkspace(fallbackWorkspaceId, false, false, false);
+        }
+
+        return isWorkspaceActiveOnMonitor(monitor, workspace, fallbackWorkspaceId);
+    }
+
+    bool isWorkspaceActiveOnMonitor(PHLMONITOR monitor, PHLWORKSPACE workspace, WORKSPACEID fallbackWorkspaceId) const override {
+        if (!monitor)
+            return false;
+
+        if (workspace) {
+            return workspace->m_isSpecialWorkspace
+                ? monitor->activeSpecialWorkspaceID() == workspace->m_id
+                : monitor->activeWorkspaceID() == workspace->m_id;
+        }
+
+        if (fallbackWorkspaceId != WORKSPACE_INVALID)
+            return monitor->activeWorkspaceID() == fallbackWorkspaceId;
+
+        return true;
+    }
+
+    MONITORID windowMonitorID(PHLWINDOW window) const override {
+        return window ? window->monitorID() : MONITOR_INVALID;
+    }
+
+    WORKSPACEID windowWorkspaceID(PHLWINDOW window) const override {
+        return window ? window->workspaceID() : WORKSPACE_INVALID;
+    }
+
+    void warpCursorToWindow(PHLWINDOW window) const override {
+        if (window)
+            window->warpCursor(true);
+    }
 };
 
 CanvasLayoutInternal::DispatcherRuntime *g_dispatcherRuntimeOverride = nullptr;
@@ -66,32 +127,6 @@ CanvasLayoutInternal::DispatcherRuntime &dispatcher_runtime() {
     return g_dispatcherRuntimeOverride ? *g_dispatcherRuntimeOverride : runtime;
 }
 
-std::string monitor_name(PHLMONITOR monitor) {
-    return monitor ? monitor->m_name : "unknown";
-}
-
-bool is_cursor_monitor(PHLMONITOR monitor) {
-    if (!monitor || !g_pCompositor)
-        return false;
-
-    return g_pCompositor->getMonitorFromCursor() == monitor;
-}
-
-bool is_workspace_active_on_monitor(PHLMONITOR monitor, PHLWORKSPACE workspace, WORKSPACEID fallbackWorkspaceId) {
-    if (!monitor)
-        return false;
-
-    if (workspace) {
-        return workspace->m_isSpecialWorkspace
-            ? monitor->activeSpecialWorkspaceID() == workspace->m_id
-            : monitor->activeWorkspaceID() == workspace->m_id;
-    }
-
-    if (fallbackWorkspaceId != WORKSPACE_INVALID)
-        return monitor->activeWorkspaceID() == fallbackWorkspaceId;
-
-    return true;
-}
 } // namespace
 
 namespace CanvasLayoutInternal {
@@ -128,155 +163,18 @@ void dispatch_builtin_movefocus(Direction direction) {
 
 // Focus a monitor even when no concrete target window exists yet.
 bool focus_monitor_workspace(PHLMONITOR monitor, PHLWORKSPACE workspace, WORKSPACEID fallback_workspace_id, const char* context) {
-    const auto *ctx = context ? context : "focus_monitor_workspace";
-    if (!monitor)
-        return false;
-
-    if (monitor->m_name.empty()) {
-        spdlog::warn("{}: monitor name missing for workspace focus workspace={}",
-                     ctx,
-                     workspace ? workspace->m_id : fallback_workspace_id);
-        return false;
-    }
-
-    const auto targetWorkspaceId = workspace ? workspace->m_id : fallback_workspace_id;
-    const auto selector = ScrollerCore::workspace_selector(workspace);
-    const auto fallbackSelector = (!workspace && targetWorkspaceId != WORKSPACE_INVALID)
-                                    ? std::to_string(targetWorkspaceId)
-                                    : std::string();
-    const auto priorMonitor = g_pCompositor ? g_pCompositor->getMonitorFromCursor() : nullptr;
-    const auto priorMonitorName = monitor_name(priorMonitor);
-    const auto targetMonitorName = monitor->m_name;
-
-    spdlog::debug("{}: focusing monitor={} workspace={} prior_monitor={}",
-                  ctx,
-                  targetMonitorName,
-                  targetWorkspaceId,
-                  priorMonitorName);
-
-    // Prefer direct monitor APIs first because they avoid dispatcher parsing and
-    // can switch special workspaces explicitly. Dispatcher calls still follow as
-    // verification/normalization because some compositor state only settles once
-    // the public dispatch path runs.
-    bool switched = false;
-    if (workspace) {
-        if (workspace->m_isSpecialWorkspace)
-            monitor->changeWorkspace(workspace->m_id, false, false, false);
-        else
-            monitor->changeWorkspace(workspace, false, false, false);
-        switched = workspace->m_isSpecialWorkspace
-            ? monitor->activeSpecialWorkspaceID() == workspace->m_id
-            : monitor->activeWorkspaceID() == workspace->m_id;
-    } else if (targetWorkspaceId != WORKSPACE_INVALID) {
-        monitor->changeWorkspace(targetWorkspaceId, false, false, false);
-        switched = monitor->activeWorkspaceID() == targetWorkspaceId;
-    }
-
-    if (switched) {
-        spdlog::debug("{}: monitor {} switched to workspace {} via direct API",
-                      ctx,
-                      targetMonitorName,
-                      targetWorkspaceId);
-    }
-
-    // First public pass: make sure cursor focus and active workspace line up
-    // with the direct API result.
-    if (!is_cursor_monitor(monitor))
-        (void)invoke_dispatcher("focusmonitor", monitor->m_name, ctx);
-
-    if (workspace && !workspace->m_isSpecialWorkspace && !selector.empty())
-        (void)invoke_dispatcher("workspace", selector, ctx);
-    else if (!workspace && !fallbackSelector.empty())
-        (void)invoke_dispatcher("workspace", fallbackSelector, ctx);
-
-    // Retry once when cursor focus still did not move. This is defensive code
-    // for compositor timing edges around monitor focus/workspace activation.
-    if (!is_cursor_monitor(monitor)) {
-        const auto retryContext = std::string(ctx).append("_retry");
-        (void)invoke_dispatcher("focusmonitor", monitor->m_name, retryContext.c_str());
-        if (workspace && !workspace->m_isSpecialWorkspace && !selector.empty())
-            (void)invoke_dispatcher("workspace", selector, retryContext.c_str());
-        else if (!workspace && !fallbackSelector.empty())
-            (void)invoke_dispatcher("workspace", fallbackSelector, retryContext.c_str());
-    }
-
-    const auto focusedMonitor = g_pCompositor ? g_pCompositor->getMonitorFromCursor() : nullptr;
-    spdlog::debug("{}: monitor {} focus result prior={} post={} switched={} final_target_active={}",
-                  ctx,
-                  targetMonitorName,
-                  priorMonitorName,
-                  monitor_name(focusedMonitor),
-                  switched,
-                  is_cursor_monitor(monitor));
-
-    const auto monitorFocused = focusedMonitor == monitor;
-    const auto workspaceActive = is_workspace_active_on_monitor(monitor, workspace, fallback_workspace_id);
-    if (monitorFocused && workspaceActive)
-        return true;
-
-    // Final verify pass with explicit log context so failures are easy to spot
-    // in logs when cross-monitor focus regresses.
-    if (workspace && !workspace->m_isSpecialWorkspace && !selector.empty()) {
-        spdlog::warn("{}: monitor {} still not focused after attempts workspace={} target={}",
-                     ctx,
-                     targetMonitorName,
-                     targetWorkspaceId,
-                     monitor_name(focusedMonitor));
-        (void)invoke_dispatcher("focusmonitor", monitor->m_name, "focus_monitor_workspace_verify");
-        (void)invoke_dispatcher("workspace", selector, "focus_monitor_workspace_verify");
-    } else if (!workspace && !fallbackSelector.empty()) {
-        spdlog::warn("{}: monitor {} still not focused after attempts fallback_workspace={} target={}",
-                     ctx,
-                     targetMonitorName,
-                     targetWorkspaceId,
-                     monitor_name(focusedMonitor));
-        (void)invoke_dispatcher("focusmonitor", monitor->m_name, "focus_monitor_workspace_verify");
-        (void)invoke_dispatcher("workspace", fallbackSelector, "focus_monitor_workspace_verify");
-    }
-
-    const auto finalFocusedMonitor = g_pCompositor ? g_pCompositor->getMonitorFromCursor() : nullptr;
-    return finalFocusedMonitor == monitor
-        && is_workspace_active_on_monitor(monitor, workspace, fallback_workspace_id);
+    return focus_monitor_workspace(dispatcher_runtime(), monitor, workspace, fallback_workspace_id, context);
 }
 
 // Focus the monitor hosting a target window before focusing the window itself.
 void focus_window_monitor(PHLWINDOW window) {
-    if (!window)
-        return;
-
-    const auto targetMonitor = dispatcher_runtime().getMonitorFromID(window->monitorID());
-    const auto currentMonitor = dispatcher_runtime().getMonitorFromCursor();
-    if (!targetMonitor || !currentMonitor || targetMonitor == currentMonitor || targetMonitor->m_name.empty())
-        return;
-
-    spdlog::debug("switch_to_window: focusing monitor={} before window={} workspace={}",
-                  targetMonitor->m_name,
-                  static_cast<const void*>(window.get()),
-                  window->workspaceID());
-    (void)invoke_dispatcher("focusmonitor", targetMonitor->m_name, "focus_window_monitor");
+    focus_window_monitor(dispatcher_runtime(), window);
 }
 
 // Focus a target window and optionally warp the cursor to it.
-void switch_to_window(PHLWINDOW window, bool warp_cursor)
+bool switch_to_window(PHLWINDOW window, bool warp_cursor)
 {
-    if (!window)
-        return;
-
-    // Window focus is split into two steps because Hyprland may reject focusing
-    // a window on an unfocused monitor unless that monitor is focused first.
-    focus_window_monitor(window);
-
-    if (!dispatcher_runtime().isWindowActive(window)) {
-        spdlog::debug("switch_to_window: focusing window={} workspace={}",
-                      static_cast<const void*>(window.get()), window->workspaceID());
-        char selector[64];
-        std::snprintf(selector, sizeof(selector), "address:0x%lx",
-                      reinterpret_cast<unsigned long>(window.get()));
-        (void)invoke_dispatcher("focuswindow", selector, "switch_to_window");
-    }
-
-    if (warp_cursor)
-        window->warpCursor(true);
+    return switch_to_window(dispatcher_runtime(), window, warp_cursor);
 }
 
 } // namespace CanvasLayoutInternal

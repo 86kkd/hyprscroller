@@ -201,6 +201,8 @@ private:
     void createEphemeralLaneForFocus(int workspace, Direction direction, PHLMONITOR sourceMonitor, Mode mode, ListNode<Lane *> *anchor);
     // Finish a successful local focus movement by logging and switching focus.
     void finalizeLocalFocusMove(int workspace, Direction direction, Lane *lane, const char *moveResultName);
+    // Switch Hyprland focus to a window and resync canvas state if the switch fails.
+    bool focusManagedWindow(PHLWINDOW window, bool warpCursor = false, const char *context = nullptr, bool suppressWorkspaceSync = false);
     // Drop an empty lane and resolve a valid replacement active lane.
     bool dropEmptyLane(ListNode<Lane *> *laneNode, Lane *preferredLane = nullptr, PHLMONITOR fallbackMonitor = nullptr, bool ephemeralOnly = false);
     // Compatibility wrapper used by older ephemeral-lane call sites.

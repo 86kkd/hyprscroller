@@ -74,6 +74,7 @@ add_library(hyprscroller SHARED
             src/layout/canvas/core.cpp
             src/layout/canvas/overview.cpp
             src/layout/canvas/dispatch.cpp
+            src/layout/canvas/dispatch_runtime_logic.cpp
             src/layout/canvas/dispatch_logic.cpp
             src/layout/canvas/route.cpp
             src/layout/canvas/route_logic.cpp
@@ -125,6 +126,7 @@ if(BUILD_TESTING)
                    src/overview/scene_layout.cpp
                    src/overview/session_selection.cpp
                    src/layout/canvas/dispatch_logic.cpp
+                   src/layout/canvas/dispatch_runtime_logic.cpp
                    src/layout/canvas/route_logic.cpp)
     target_include_directories(hyprscroller_logic_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src

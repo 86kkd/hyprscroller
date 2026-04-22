@@ -130,8 +130,7 @@ bool focus_window_target(PHLWORKSPACE workspace, PHLWINDOW window, int monitorId
         return false;
 
     sync_canvas_target_window(workspace, window, monitorId);
-    CanvasLayoutInternal::switch_to_window(window, warpCursor);
-    return g_pCompositor && g_pCompositor->isWindowActive(window);
+    return CanvasLayoutInternal::switch_to_window(window, warpCursor);
 }
 
 bool acceptTarget(const Target& selection) {
