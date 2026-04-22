@@ -80,6 +80,21 @@ overview”这条固定链路，优先直接用仓库里的脚本：
 将逻辑选中项移动到第二块 monitor 的目标窗口，再执行 accept，并验证
 最终 focus 是否真的落到那个目标窗口上。
 
+如果你要验证“layout 切换 / plugin reload 之后 scroller 是否恢复原布局”，
+优先用这条脚本：
+
+```bash
+./scripts/repro-layout-persistence.sh
+```
+
+它会在 nested 会话里构造一个多 lane、多窗口的 scroller 布局，然后依次验证：
+
+- `master -> scroller`
+- `dwindle -> scroller`
+- `plugin unload/load -> scroller`
+
+脚本会输出 nested instance、log 路径、run dir，以及每一步的几何对比结论。
+
 ## 3. 手工启动嵌套 Hyprland 测试实例
 
 先写一份最小测试配置，例如 `/tmp/hyprscroller-test.conf`：

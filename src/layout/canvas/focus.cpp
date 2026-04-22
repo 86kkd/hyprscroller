@@ -97,6 +97,7 @@ void CanvasLayout::onWindowFocusChange(PHLWINDOW window)
                  static_cast<const void*>(afterLane),
                  laneIndexOf(afterLane),
                  static_cast<const void*>(afterWindow ? afterWindow.get() : nullptr));
+    persistSnapshot();
 }
 
 bool CanvasLayout::syncSpecialWorkspaceVisibilityState(PHLMONITOR visibleMonitor)
@@ -293,6 +294,7 @@ void CanvasLayout::handoffFocusAcrossMonitor(int workspace, Direction direction,
         spdlog::info("move_focus: dropped empty lane after leaving workspace={} direction={}",
                      workspace, ScrollerCore::direction_name(direction));
     }
+    persistSnapshot();
 
     // Phase 3: either focus an empty target workspace or activate the chosen
     // destination window and let Hyprland follow that focus.
@@ -388,6 +390,8 @@ void CanvasLayout::focusAdjacentLane(int workspace, Direction direction, ListNod
                  static_cast<const void*>(targetWindow ? targetWindow.get() : nullptr));
     if (targetWindow) {
         focusManagedWindow(targetWindow, true, "move_focus_adjacent_lane", true);
+    } else {
+        persistSnapshot();
     }
 }
 
@@ -406,6 +410,7 @@ void CanvasLayout::createEphemeralLaneForFocus(int workspace, Direction directio
                  workspace,
                  ScrollerCore::direction_name(direction),
                  static_cast<const void*>(newLane));
+    persistSnapshot();
 }
 
 void CanvasLayout::finalizeLocalFocusMove(int workspace, Direction direction, Lane *lane,

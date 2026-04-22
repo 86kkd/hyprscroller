@@ -32,6 +32,7 @@ add_library(hyprscroller SHARED
             src/plugin/dispatch/overview_mark_commands.cpp
             src/core/core.cpp
             src/core/direction.cpp
+            src/core/layout_snapshot.cpp
             src/core/layout_math.cpp
             src/core/monitor_geometry.cpp
             src/core/monitor_geometry_runtime.cpp
@@ -84,6 +85,7 @@ add_library(hyprscroller SHARED
             src/layout/canvas/dispatch_logic.cpp
             src/layout/canvas/route.cpp
             src/layout/canvas/route_logic.cpp
+            src/layout/canvas/layout_repository.cpp
             src/layout/canvas/workspace.cpp
             src/layout/canvas/focus.cpp
             src/layout/canvas/commands.cpp
@@ -119,6 +121,7 @@ if(BUILD_TESTING)
     add_executable(hyprscroller_logic_tests
                    tests/test_main.cpp
                    tests/core_logic_tests.cpp
+                   tests/layout_snapshot_tests.cpp
                    tests/layout_logic_tests.cpp
                    tests/overview_logic_tests.cpp
                    tests/overview_model_tests.cpp
@@ -126,6 +129,7 @@ if(BUILD_TESTING)
                    tests/overview_session_logic_tests.cpp
                    tests/overview_session_effects_tests.cpp
                    src/core/direction.cpp
+                   src/core/layout_snapshot.cpp
                    src/core/layout_math.cpp
                    src/core/monitor_geometry.cpp
                    src/core/layout_profile.cpp

@@ -15,6 +15,7 @@
  * details.
  */
 #include <hyprland/src/config/ConfigManager.hpp>
+#include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/plugins/PluginAPI.hpp>
 #include <cerrno>
 #include <cstring>
@@ -30,7 +31,9 @@
 
 #include "plugin/dispatch/registration.h"
 #include "hyprlang.hpp"
+#include "layout/canvas/internal.h"
 #include "layout/canvas/layout.h"
+#include "layout/canvas/layout_repository.h"
 #include "overview/render/render.h"
 
 // Hyprland plugin handle used by config lookups and dispatcher registration.
@@ -122,6 +125,7 @@ APICALL EXPORT std::string PLUGIN_API_VERSION() {
 APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     PHANDLE = handle;
     init_logging();
+    CanvasLayoutState::repository().initialize();
     spdlog::info("pluginInit handle={}", static_cast<const void*>(handle));
 
 #ifdef COLORS_IPC
@@ -153,6 +157,14 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 
 // Plugin shutdown hook used for final logging only.
 APICALL EXPORT void PLUGIN_EXIT() {
+    for (const auto &workspaceRef : g_pCompositor->getWorkspaces()) {
+        const auto workspace = workspaceRef.lock();
+        if (!workspace)
+            continue;
+        if (auto *layout = CanvasLayoutInternal::get_canvas_for_workspace(workspace->m_id))
+            layout->persistCurrentSnapshot();
+    }
+    CanvasLayoutState::repository().flush();
     Overview::shutdownRendererHooks(PHANDLE);
     spdlog::info("pluginExit");
 }

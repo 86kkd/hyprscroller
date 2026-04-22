@@ -50,6 +50,14 @@ void Window::pop_geom() {
     box_y = mem.box_y;
 }
 
+double Window::get_saved_geom_y() const {
+    return mem.box_y;
+}
+
+double Window::get_saved_geom_h() const {
+    return mem.box_h;
+}
+
 WindowHeight Window::get_height() const {
     return height;
 }
@@ -76,6 +84,25 @@ void Window::update_height(WindowHeight h, double max) {
 
 void Window::set_height_free() {
     height = WindowHeight::Free;
+}
+
+void Window::restore_state(WindowHeight h, double geom_y, double geom_h, double mem_y, double mem_h) {
+    height = h;
+    box_y = geom_y;
+    box_h = geom_h;
+    mem.box_y = mem_y;
+    mem.box_h = mem_h;
+}
+
+ScrollerSnapshot::WindowSnapshot Window::capture_snapshot() const {
+    return {
+        .key = window ? reinterpret_cast<uintptr_t>(window.get()) : 0,
+        .heightMode = static_cast<int>(height),
+        .geomY = box_y,
+        .geomH = box_h,
+        .memY = mem.box_y,
+        .memH = mem.box_h,
+    };
 }
 
 } // namespace ScrollerModel

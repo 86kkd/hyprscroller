@@ -19,6 +19,7 @@
  */
 #include <algorithm>
 #include <cassert>
+#include <unordered_map>
 
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/config/ConfigManager.hpp>
@@ -30,12 +31,14 @@
 #include <spdlog/spdlog.h>
 
 #include "../../core/core.h"
+#include "../../core/layout_snapshot.h"
 #include "../../core/layout_profile.h"
 #include "../../core/monitor_geometry_runtime.h"
 #include "../../core/window_key.h"
 #include "../lane/lane.h"
 #include "layout.h"
 #include "internal.h"
+#include "layout_repository.h"
 #include "route.h"
 
 using namespace ScrollerCore;
@@ -51,7 +54,66 @@ void clear_lanes(List<Lane*>& lanes) {
     lanes.clear();
 }
 
-// Return true when any lane is a temporary page-like lane.
+Mode restored_mode_or_default(int value, Mode fallback) {
+    switch (static_cast<Mode>(value)) {
+    case Mode::Row:
+    case Mode::Column:
+        return static_cast<Mode>(value);
+    default:
+        return fallback;
+    }
+}
+
+ScrollerModel::StackWidth restored_width_or_default(int value) {
+    switch (static_cast<ScrollerModel::StackWidth>(value)) {
+    case ScrollerModel::StackWidth::OneThird:
+    case ScrollerModel::StackWidth::OneHalf:
+    case ScrollerModel::StackWidth::TwoThirds:
+    case ScrollerModel::StackWidth::Free:
+        return static_cast<ScrollerModel::StackWidth>(value);
+    default:
+        return ScrollerModel::StackWidth::OneHalf;
+    }
+}
+
+ScrollerModel::WindowHeight restored_height_or_default(int value) {
+    switch (static_cast<ScrollerModel::WindowHeight>(value)) {
+    case ScrollerModel::WindowHeight::OneThird:
+    case ScrollerModel::WindowHeight::OneHalf:
+    case ScrollerModel::WindowHeight::TwoThirds:
+    case ScrollerModel::WindowHeight::One:
+    case ScrollerModel::WindowHeight::Free:
+    case ScrollerModel::WindowHeight::Auto:
+        return static_cast<ScrollerModel::WindowHeight>(value);
+    default:
+        return ScrollerModel::WindowHeight::One;
+    }
+}
+
+ScrollerModel::Reorder restored_reorder_or_default(int value) {
+    switch (static_cast<ScrollerModel::Reorder>(value)) {
+    case ScrollerModel::Reorder::Auto:
+    case ScrollerModel::Reorder::Lazy:
+        return static_cast<ScrollerModel::Reorder>(value);
+    default:
+        return ScrollerModel::Reorder::Auto;
+    }
+}
+
+std::vector<PHLWINDOW> live_tiled_workspace_windows(PHLWORKSPACE workspace) {
+    std::vector<PHLWINDOW> windows;
+    if (!workspace)
+        return windows;
+
+    windows.reserve(g_pCompositor->m_windows.size());
+    for (const auto &window : g_pCompositor->m_windows) {
+        if (!window || window->workspaceID() != workspace->m_id || window->m_isFloating || !window->m_isMapped || window->isHidden())
+            continue;
+        windows.push_back(window);
+    }
+    return windows;
+}
+
 } // namespace
 
 CanvasLayout::CanvasLayout() {
@@ -71,6 +133,9 @@ void CanvasLayout::resetRuntimeState() {
     // Drop every workspace-bound runtime seam. This is the "canvas instance is
     // no longer attached to a live workspace" cleanup path, so it must clear
     // both listeners and all cached ownership/handoff state.
+    if (!restoringSnapshot)
+        persistSnapshot();
+
     m_focusCallback = nullptr;
     m_workspaceActiveCallback = nullptr;
     workspaceRuntimeId = WORKSPACE_INVALID;
@@ -79,6 +144,8 @@ void CanvasLayout::resetRuntimeState() {
     laneByWindow.clear();
     resetHandoffState();
     specialEphemeralLaneRestorePending = false;
+    restoringSnapshot = false;
+    snapshotRestoreAttempted = false;
 }
 
 void CanvasLayout::ensureWorkspaceRuntime() {
@@ -101,6 +168,7 @@ void CanvasLayout::ensureWorkspaceRuntime() {
     if (workspaceRuntimeId == workspace->m_id && m_workspaceActiveCallback)
         return;
 
+    snapshotRestoreAttempted = false;
     workspaceRuntimeId = workspace->m_id;
     m_workspaceActiveCallback = workspace->m_events.activeChanged.listen([this] {
         // Special workspaces can disappear without their hidden canvas ticking.
@@ -334,6 +402,8 @@ void CanvasLayout::finishLaneTransfer(ListNode<Lane *> *sourceLaneNode, PHLMONIT
         if (const auto window = lane->get_active_window())
             focusManagedWindow(window, warpCursor, "finishLaneTransfer");
     }
+
+    persistSnapshot();
 }
 
 Lane *CanvasLayout::getLaneForWindow(PHLWINDOW window) {
@@ -378,6 +448,211 @@ void CanvasLayout::prepareForActionContext() {
     const auto monitor = getVisibleCanvasMonitor();
     if (syncSpecialWorkspaceVisibilityState(monitor) && workspace && monitor)
         relayoutCanvas(monitor, !workspace->m_isSpecialWorkspace);
+}
+
+std::optional<ScrollerSnapshot::CanvasSnapshot> CanvasLayout::captureSnapshot() const {
+    const auto workspace = getCanvasWorkspace();
+    if (!workspace)
+        return std::nullopt;
+
+    ScrollerSnapshot::CanvasSnapshot snapshot;
+    snapshot.workspaceId = workspace->m_id;
+
+    size_t storedLaneIndex = 0;
+    bool foundActiveLane = false;
+    for (auto laneNode = lanes.first(); laneNode != nullptr; laneNode = laneNode->next()) {
+        auto *lane = laneNode->data();
+        if (!lane || lane->empty())
+            continue;
+
+        if (laneNode == activeLane) {
+            snapshot.activeLaneIndex = storedLaneIndex;
+            foundActiveLane = true;
+        }
+
+        snapshot.lanes.push_back(lane->capture_snapshot());
+        ++storedLaneIndex;
+    }
+
+    if (snapshot.lanes.empty())
+        return std::nullopt;
+
+    if (!foundActiveLane)
+        snapshot.activeLaneIndex = 0;
+    return snapshot;
+}
+
+void CanvasLayout::persistSnapshot() {
+    if (restoringSnapshot)
+        return;
+
+    const auto workspace = getCanvasWorkspace();
+    if (!workspace)
+        return;
+
+    const auto liveWindows = live_tiled_workspace_windows(workspace);
+    if (!liveWindows.empty()) {
+        const auto fullyManaged = std::all_of(liveWindows.begin(), liveWindows.end(), [this](const auto &window) {
+            return getLaneForWindow(window) != nullptr;
+        });
+        if (!fullyManaged) {
+            spdlog::debug("persistSnapshot: preserving last complete snapshot during partial detach workspace={} live_windows={}",
+                          workspace->m_id,
+                          liveWindows.size());
+            return;
+        }
+    }
+
+    if (const auto snapshot = captureSnapshot()) {
+        CanvasLayoutState::repository().upsert(*snapshot);
+        return;
+    }
+
+    clearPersistedSnapshot();
+}
+
+void CanvasLayout::persistCurrentSnapshot() {
+    persistSnapshot();
+}
+
+void CanvasLayout::clearPersistedSnapshot() {
+    const auto workspace = getCanvasWorkspace();
+    if (!workspace)
+        return;
+
+    CanvasLayoutState::repository().erase(workspace->m_id);
+}
+
+bool CanvasLayout::restoreSnapshot(const ScrollerSnapshot::CanvasSnapshot &snapshot) {
+    const auto workspace = getCanvasWorkspace();
+    if (!workspace || snapshot.workspaceId != workspace->m_id)
+        return false;
+
+    const auto liveWindows = live_tiled_workspace_windows(workspace);
+    if (liveWindows.empty())
+        return false;
+
+    std::unordered_map<uintptr_t, PHLWINDOW> windowsByKey;
+    windowsByKey.reserve(liveWindows.size());
+    for (const auto &window : liveWindows)
+        windowsByKey.emplace(ScrollerCore::window_key(window), window);
+
+    const auto visibleMonitor = getVisibleCanvasMonitor();
+    const auto fallbackMonitor = visibleMonitor ? visibleMonitor : g_pCompositor->getMonitorFromID(liveWindows.front()->monitorID());
+    if (!fallbackMonitor)
+        return false;
+
+    const auto bounds = CanvasLayoutInternal::compute_canvas_bounds(fallbackMonitor);
+    restoringSnapshot = true;
+
+    clear_lanes(lanes);
+    activeLane = nullptr;
+    laneByWindow.clear();
+
+    Lane *restoredActiveLane = nullptr;
+    for (size_t laneIndex = 0; laneIndex < snapshot.lanes.size(); ++laneIndex) {
+        const auto &laneSnapshot = snapshot.lanes[laneIndex];
+        auto *lane = new Lane(fallbackMonitor, restored_mode_or_default(laneSnapshot.mode, ScrollerCore::default_mode_for_monitor(fallbackMonitor)));
+        lane->set_ephemeral(laneSnapshot.ephemeral);
+        lane->set_reorder(restored_reorder_or_default(laneSnapshot.reorder));
+
+        for (size_t stackIndex = 0; stackIndex < laneSnapshot.stacks.size(); ++stackIndex) {
+            const auto &stackSnapshot = laneSnapshot.stacks[stackIndex];
+            auto *stack = new ScrollerModel::Stack(bounds.max.w, bounds.max.h, lane->get_mode());
+
+            for (const auto &windowSnapshot : stackSnapshot.windows) {
+                const auto it = windowsByKey.find(windowSnapshot.key);
+                if (it == windowsByKey.end())
+                    continue;
+
+                auto window = std::make_unique<ScrollerModel::Window>(it->second, windowSnapshot.geomH, lane->get_mode());
+                window->restore_state(restored_height_or_default(windowSnapshot.heightMode),
+                                      windowSnapshot.geomY,
+                                      windowSnapshot.geomH,
+                                      windowSnapshot.memY,
+                                      windowSnapshot.memH);
+                stack->append_restored_window(std::move(window));
+                windowsByKey.erase(it);
+            }
+
+            if (stack->size() == 0) {
+                delete stack;
+                continue;
+            }
+
+            stack->restore_state(restored_width_or_default(stackSnapshot.width),
+                                 restored_reorder_or_default(stackSnapshot.reorder),
+                                 stackSnapshot.geom,
+                                 stackSnapshot.memGeom,
+                                 stackSnapshot.fullscreened,
+                                 stackSnapshot.maximized);
+            if (stackSnapshot.activeWindowKey != 0) {
+                const auto activeWindowKey = stackSnapshot.activeWindowKey;
+                stack->for_each_window([&](PHLWINDOW window) {
+                    if (ScrollerCore::window_key(window) == activeWindowKey)
+                        stack->focus_window(window);
+                });
+            }
+            lane->append_restored_stack(stack);
+        }
+
+        if (lane->empty()) {
+            delete lane;
+            continue;
+        }
+
+        lane->set_active_stack_by_index(laneSnapshot.activeStackIndex);
+        auto *laneNode = insertLaneNode(lane, Direction::End);
+        rememberLaneWindows(lane);
+        if (laneIndex == snapshot.activeLaneIndex)
+            restoredActiveLane = lane;
+        if (!activeLane)
+            activeLane = laneNode;
+    }
+
+    if (restoredActiveLane)
+        setActiveLane(restoredActiveLane);
+    else
+        (void)getActiveLane();
+
+    for (const auto &[_, extraWindow] : windowsByKey) {
+        auto *lane = getActiveLane();
+        if (!lane) {
+            lane = new Lane(extraWindow);
+            activeLane = insertLaneNode(lane, Direction::End);
+        }
+        lane->add_active_window(extraWindow);
+        rememberWindowLane(extraWindow, lane);
+    }
+
+    syncActiveStateFromWorkspaceFocus();
+    relayoutCanvas(fallbackMonitor, !workspace->m_isSpecialWorkspace);
+    debugVerifyLaneCache();
+
+    restoringSnapshot = false;
+    persistSnapshot();
+    spdlog::info("restore_snapshot: workspace={} restored_lanes={} live_windows={}",
+                 workspace->m_id,
+                 snapshot.lanes.size(),
+                 liveWindows.size());
+    return true;
+}
+
+bool CanvasLayout::maybeRestoreWorkspaceSnapshot() {
+    if (snapshotRestoreAttempted)
+        return false;
+
+    snapshotRestoreAttempted = true;
+    const auto workspace = getCanvasWorkspace();
+    if (!workspace || !lanes.empty())
+        return false;
+
+    CanvasLayoutState::repository().initialize();
+    const auto snapshot = CanvasLayoutState::repository().find(workspace->m_id);
+    if (!snapshot)
+        return false;
+
+    return restoreSnapshot(*snapshot);
 }
 
 // Relayout the canvas on the monitor currently showing it.
@@ -523,8 +798,8 @@ void CanvasLayout::newTarget(SP<Layout::ITarget> target) {
     }
 
     spdlog::info("newTarget: window={} workspace={}", static_cast<const void*>(window.get()), window->workspaceID());
-    onWindowCreatedTiling(window, Math::DIRECTION_DEFAULT);
-    focusManagedWindow(window, false, "newTarget");
+    if (onWindowCreatedTiling(window, Math::DIRECTION_DEFAULT))
+        focusManagedWindow(window, false, "newTarget");
 }
 
 // Hyprland callback: target re-entered tiling flow and should be owned again.
@@ -546,7 +821,7 @@ void CanvasLayout::movedTarget(SP<Layout::ITarget> target, std::optional<Vector2
         return;
     }
 
-    onWindowCreatedTiling(window, Math::DIRECTION_DEFAULT);
+    (void)onWindowCreatedTiling(window, Math::DIRECTION_DEFAULT);
 }
 
 // Hyprland callback: remove a tiled target from canvas ownership.
@@ -577,6 +852,7 @@ void CanvasLayout::resizeTarget(const Vector2D &delta, SP<Layout::ITarget> targe
 
     lane->focus_window(window);
     lane->resize_active_window(delta);
+    persistSnapshot();
 }
 
 // Hyprland callback: relayout the whole canvas after monitor/workspace changes.
@@ -645,6 +921,7 @@ void CanvasLayout::swapTargets(SP<Layout::ITarget> a, SP<Layout::ITarget> b)
         return;
 
     sa->swapWindows(wa, wb);
+    persistSnapshot();
 }
 
 // Hyprland target-level move entrypoint reused by drag/move style operations.
@@ -706,16 +983,19 @@ void CanvasLayout::switchWindows(PHLWINDOW a, PHLWINDOW b)
 // 2. find or create the active lane for this canvas
 // 3. let the lane decide where the new window goes locally
 // 4. update the window -> lane cache used by later focus/move operations
-void CanvasLayout::onWindowCreatedTiling(PHLWINDOW window, Math::eDirection)
+bool CanvasLayout::onWindowCreatedTiling(PHLWINDOW window, Math::eDirection)
 {
     if (!window)
-        return;
+        return false;
+
+    (void)maybeRestoreWorkspaceSnapshot();
 
     if (getLaneForWindow(window) != nullptr) {
         spdlog::debug("onWindowCreatedTiling: window already managed window={} workspace={}",
                       static_cast<const void*>(window.get()),
                       window->workspaceID());
-        return;
+        recalculateWindow(window);
+        return false;
     }
 
     auto lane = getActiveLane();
@@ -726,6 +1006,8 @@ void CanvasLayout::onWindowCreatedTiling(PHLWINDOW window, Math::eDirection)
     lane->add_active_window(window);
     rememberWindowLane(window, lane);
     debugVerifyLaneCache();
+    persistSnapshot();
+    return true;
 }
 
 // Remove a tiled window and delete the lane if it becomes empty.
@@ -746,6 +1028,7 @@ void CanvasLayout::onWindowRemovedTiling(PHLWINDOW window)
     forgetWindowLane(window);
     if (s->remove_window(window)) {
         debugVerifyLaneCache();
+        persistSnapshot();
         return;
     }
 
@@ -768,6 +1051,7 @@ void CanvasLayout::onWindowRemovedTiling(PHLWINDOW window)
     setActiveLane(nextActiveLane);
     relayoutVisibleCanvas();
     debugVerifyLaneCache();
+    persistSnapshot();
 }
 
 // Return whether this canvas currently manages a given window.
@@ -802,6 +1086,7 @@ void CanvasLayout::resizeActiveWindow(PHLWINDOW window, const Vector2D &delta,
     }
 
     lane->resize_active_window(delta);
+    persistSnapshot();
 }
 
 void CanvasLayout::alterSplitRatio(PHLWINDOW, float, bool)
@@ -836,6 +1121,7 @@ void CanvasLayout::replaceWindowDataWith(PHLWINDOW from, PHLWINDOW to)
     forgetWindowLane(from);
     rememberWindowLane(to, lane);
     debugVerifyLaneCache();
+    persistSnapshot();
 }
 
 void CanvasLayout::marks_add(const std::string &name) {

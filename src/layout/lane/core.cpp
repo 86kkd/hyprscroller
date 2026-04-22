@@ -191,6 +191,14 @@ bool Lane::is_active(PHLWINDOW window) const {
     return get_active_window() == window;
 }
 
+size_t Lane::stack_count() const {
+    return stacks.size();
+}
+
+Reorder Lane::get_reorder() const {
+    return reorder;
+}
+
 ActiveWindowRestorePlan Lane::capture_active_window_restore_plan(Direction direction) const {
     ActiveWindowRestorePlan plan;
     plan.direction = direction;
@@ -431,4 +439,43 @@ void Lane::set_canvas_geometry(const Box &full_box, const Box &max_box, int gap_
     full = full_box;
     max = max_box;
     gap = gap_size;
+}
+
+void Lane::append_restored_stack(Stack *stack) {
+    if (!stack)
+        return;
+
+    stacks.push_back(stack);
+    rememberStackWindows(stack);
+    if (!active)
+        active = stacks.first();
+    debugVerifyStackCache();
+}
+
+void Lane::set_active_stack_by_index(size_t index) {
+    auto *node = stacks.first();
+    for (size_t i = 0; node != nullptr && i < index; ++i)
+        node = node->next();
+
+    active = node ? node : stacks.first();
+}
+
+void Lane::set_reorder(Reorder value) {
+    reorder = value;
+}
+
+ScrollerSnapshot::LaneSnapshot Lane::capture_snapshot() const {
+    ScrollerSnapshot::LaneSnapshot snapshot;
+    snapshot.mode = static_cast<int>(mode);
+    snapshot.reorder = static_cast<int>(reorder);
+    snapshot.ephemeral = ephemeral;
+
+    size_t index = 0;
+    for (auto node = stacks.first(); node != nullptr; node = node->next(), ++index) {
+        if (node == active)
+            snapshot.activeStackIndex = index;
+        snapshot.stacks.push_back(node->data()->capture_snapshot());
+    }
+
+    return snapshot;
 }

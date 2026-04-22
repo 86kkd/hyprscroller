@@ -108,6 +108,8 @@ bool CanvasLayout::handoffMoveWindowAcrossMonitor(int workspace, Direction direc
         relayoutVisibleCanvas(sourceMonitor);
 
     targetLayout->relayoutVisibleCanvas(targetMonitor);
+    persistSnapshot();
+    targetLayout->persistCurrentSnapshot();
     targetLayout->focusManagedWindow(currentWindow, true, "move_window_cross_monitor", true);
     debugVerifyLaneCache();
     targetLayout->debugVerifyLaneCache();
@@ -231,6 +233,7 @@ void CanvasLayout::cycle_window_size(int workspace, int step)
     withActiveLane(ActiveLaneSyncPolicy::WorkspaceFocus, [step](Lane *lane) {
         lane->resize_active_stack(step);
     });
+    persistSnapshot();
 }
 
 // Move the focused window or stack according to lane/mode routing rules.
@@ -252,6 +255,7 @@ void CanvasLayout::move_window(int workspace, Direction direction) {
 
         handleMoveWindowWithinLane(workspace, direction, lane, currentWindow, sourceMonitor);
     });
+    persistSnapshot();
 }
 
 // Align the active stack/window inside the current lane viewport.
@@ -260,6 +264,7 @@ void CanvasLayout::align_window(int workspace, Direction direction) {
     withActiveLane(ActiveLaneSyncPolicy::WorkspaceFocus, [direction](Lane *lane) {
         lane->align_stack(direction);
     });
+    persistSnapshot();
 }
 
 // Move the active window into the previous stack.
@@ -268,6 +273,7 @@ void CanvasLayout::admit_window_left(int workspace) {
     withActiveLane(ActiveLaneSyncPolicy::WorkspaceFocus, [](Lane *lane) {
         lane->admit_window_left();
     });
+    persistSnapshot();
 }
 
 // Split the active window into a new stack to the right.
@@ -276,6 +282,7 @@ void CanvasLayout::expel_window_right(int workspace) {
     withActiveLane(ActiveLaneSyncPolicy::WorkspaceFocus, [](Lane *lane) {
         lane->expel_window_right();
     });
+    persistSnapshot();
 }
 
 // Change the active lane traversal mode.
@@ -284,6 +291,7 @@ void CanvasLayout::set_mode(int workspace, Mode mode) {
     withActiveLane(ActiveLaneSyncPolicy::WorkspaceFocus, [mode](Lane *lane) {
         lane->set_mode(mode);
     });
+    persistSnapshot();
 }
 
 // Resize the requested visible range so it fills the current lane viewport.
@@ -292,6 +300,7 @@ void CanvasLayout::fit_size(int workspace, FitSize fitsize) {
     withActiveLane(ActiveLaneSyncPolicy::WorkspaceFocus, [fitsize](Lane *lane) {
         lane->fit_size(fitsize);
     });
+    persistSnapshot();
 }
 
 // Toggle scroller-managed fullscreen/expanded behavior.
@@ -301,6 +310,7 @@ void CanvasLayout::toggle_fullscreen(int workspace) {
     withActiveLane(syncPolicy, [](Lane *lane) {
         lane->toggle_fullscreen_active_window();
     });
+    persistSnapshot();
 }
 
 // Move the active stack into a new persistent neighboring lane.
@@ -323,6 +333,7 @@ void CanvasLayout::create_lane(int workspace, Direction direction) {
         finishLaneTransfer(currentLaneNode, nullptr, false, true);
         debugVerifyLaneCache();
     });
+    persistSnapshot();
 }
 
 // Change the active lane without moving any window data.
@@ -357,4 +368,6 @@ void CanvasLayout::focus_lane(int workspace, Direction direction) {
     activeLane = target;
     if (const auto window = activeLane->data()->get_active_window())
         focusManagedWindow(window, true, "focus_lane");
+    else
+        persistSnapshot();
 }

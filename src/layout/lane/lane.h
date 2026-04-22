@@ -12,6 +12,7 @@
 #include <memory>
 #include <utility>
 
+#include "../../core/layout_snapshot.h"
 #include "../../core/owner_index.h"
 #include "../../core/types.h"
 #include "model/stack/stack.h"
@@ -80,8 +81,15 @@ public:
         for (auto col = stacks.first(); col != nullptr; col = col->next())
             col->data()->for_each_window(std::forward<Fn>(fn));
     }
+    template <typename Fn>
+    void for_each_stack(Fn&& fn) const {
+        for (auto col = stacks.first(); col != nullptr; col = col->next())
+            std::forward<Fn>(fn)(col->data());
+    }
     PHLWINDOW get_active_window() const;
     bool is_active(PHLWINDOW window) const;
+    size_t stack_count() const;
+    ScrollerModel::Reorder get_reorder() const;
 
     // Window/stack membership changes.
     void add_active_window(PHLWINDOW window);
@@ -122,6 +130,10 @@ public:
     void toggle_maximize_active_stack();
     void fit_size(FitSize fitsize);
     void recalculate_lane_geometry();
+    void append_restored_stack(ScrollerModel::Stack *stack);
+    void set_active_stack_by_index(size_t index);
+    void set_reorder(ScrollerModel::Reorder value);
+    ScrollerSnapshot::LaneSnapshot capture_snapshot() const;
 
 private:
     ScrollerModel::Stack *getStackForWindow(PHLWINDOW window) const;

@@ -169,6 +169,11 @@ Stack::Stack(PHLWINDOW cwindow, double maxw, double maxh, Mode mode)
     active = windows.first();
 }
 
+Stack::Stack(double maxw, double maxh, Mode mode)
+    : width(StackWidth::OneHalf), mode(mode), height(WindowHeight::One), reorder(Reorder::Auto), initialized(true), maxdim(false) {
+    update_width(width, maxw, maxh);
+}
+
 Stack::Stack(std::unique_ptr<Window> window, StackWidth width, double maxw, double maxh, Mode mode)
     : width(width), mode(mode), height(WindowHeight::One), reorder(Reorder::Auto), initialized(true), maxdim(false) {
     // This constructor is used when a window model is already detached from a
@@ -292,6 +297,14 @@ StackWidth Stack::get_width() const {
     return width;
 }
 
+Reorder Stack::get_reorder() const {
+    return reorder;
+}
+
+const ScrollerCore::Box &Stack::get_saved_geom() const {
+    return mem.geom;
+}
+
 void Stack::set_width_free() {
     width = StackWidth::Free;
 }
@@ -335,6 +348,45 @@ void Stack::update_width(StackWidth cwidth, double maxw, double maxh) {
         geom.h = maxh;
     }
     width = cwidth;
+}
+
+void Stack::append_restored_window(std::unique_ptr<Window> window) {
+    if (!window)
+        return;
+
+    windows.push_back(window.release());
+    if (!active)
+        active = windows.first();
+}
+
+void Stack::restore_state(StackWidth restoredWidth, Reorder restoredReorder,
+                          const ScrollerCore::Box &restoredGeom, const ScrollerCore::Box &restoredMemGeom,
+                          bool restoredFullscreened, bool restoredMaximized) {
+    width = restoredWidth;
+    reorder = restoredReorder;
+    geom = restoredGeom;
+    mem.geom = restoredMemGeom;
+    fullscreened = restoredFullscreened;
+    maxdim = restoredMaximized;
+    initialized = true;
+}
+
+ScrollerSnapshot::StackSnapshot Stack::capture_snapshot() const {
+    ScrollerSnapshot::StackSnapshot snapshot;
+    snapshot.width = static_cast<int>(width);
+    snapshot.reorder = static_cast<int>(reorder);
+    snapshot.fullscreened = fullscreened;
+    snapshot.maximized = maxdim;
+    snapshot.geom = geom;
+    snapshot.memGeom = mem.geom;
+    snapshot.activeWindowKey = active && active->data()->ptr().lock()
+        ? reinterpret_cast<uintptr_t>(active->data()->ptr().lock().get())
+        : 0;
+    for_each_window_model([&](const Window *window) {
+        if (window)
+            snapshot.windows.push_back(window->capture_snapshot());
+    });
+    return snapshot;
 }
 
 } // namespace ScrollerModel

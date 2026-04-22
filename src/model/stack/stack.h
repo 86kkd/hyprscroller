@@ -20,6 +20,7 @@
 
 #include <hyprutils/math/Vector2D.hpp>
 
+#include "core/layout_snapshot.h"
 #include "core/intrusive_list.h"
 #include "core/types.h"
 #include "core/core.h"
@@ -87,18 +88,25 @@ public:
     void push_geom();
     // Restore geometry values from the undo buffer.
     void pop_geom();
+    // Inspect the last saved logical geometry.
+    double get_saved_geom_y() const;
+    double get_saved_geom_h() const;
     // Current height mode used for cycle logic.
     WindowHeight get_height() const;
     // Change height mode and sync the logical height for this mode.
     void update_height(WindowHeight h, double max);
     // Switch to free (custom) height mode.
     void set_height_free();
+    // Restore all persisted logical window state in one step.
+    void restore_state(WindowHeight h, double geom_y, double geom_h, double mem_y, double mem_h);
+    // Export this window's persisted logical state.
+    ScrollerSnapshot::WindowSnapshot capture_snapshot() const;
 
 private:
     // Minimal restore point used by fullscreen/overview style transforms.
     struct Memory {
-        double box_y;
-        double box_h;
+        double box_y = 0.0;
+        double box_h = 0.0;
     };
 
     // Weak reference to the backend Hyprland window.
@@ -130,6 +138,8 @@ class Stack {
 public:
     // Build a new stack from a compositor window with configuration defaults.
     Stack(PHLWINDOW cwindow, double maxw, double maxh, Mode mode);
+    // Build an empty stack that will be populated from a persisted snapshot.
+    Stack(double maxw, double maxh, Mode mode);
     // Build a new stack from an existing model window when splitting.
     Stack(std::unique_ptr<Window> window, StackWidth width, double maxw, double maxh, Mode mode);
     // Destroy all windows in this stack.
@@ -150,6 +160,11 @@ public:
             if (auto window = win->data()->ptr().lock())
                 std::forward<Fn>(fn)(window);
         }
+    }
+    template <typename Fn>
+    void for_each_window_model(Fn&& fn) const {
+        for (auto win = windows.first(); win != nullptr; win = win->next())
+            std::forward<Fn>(fn)(win->data());
     }
     // Remove a window and keep active pointer coherent.
     void remove_window(PHLWINDOW window);
@@ -211,6 +226,8 @@ public:
 
     // Width and height mode inspection + mutation.
     StackWidth get_width() const;
+    Reorder get_reorder() const;
+    const ScrollerCore::Box &get_saved_geom() const;
     void set_width_free();
 #ifdef COLORS_IPC
     std::string get_width_name() const;
@@ -223,6 +240,14 @@ public:
     void fit_size(FitSize fitsize, const Vector2D &gap_x, double gap);
     // Resize width and optional active height if height delta is valid.
     void resize_active_window(const ScrollerCore::Box &bounds, const Vector2D &gap_x, double gap, const Vector2D &delta);
+    // Append a window model without applying insert heuristics. Used only when rebuilding snapshots.
+    void append_restored_window(std::unique_ptr<Window> window);
+    // Restore stack-wide persisted geometry and behavior flags.
+    void restore_state(StackWidth restoredWidth, Reorder restoredReorder,
+                       const ScrollerCore::Box &restoredGeom, const ScrollerCore::Box &restoredMemGeom,
+                       bool restoredFullscreened, bool restoredMaximized);
+    // Export this stack's persisted state and ordered windows.
+    ScrollerSnapshot::StackSnapshot capture_snapshot() const;
 
 private:
     // Find the list node that owns a given compositor window.

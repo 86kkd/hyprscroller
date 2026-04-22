@@ -20,6 +20,7 @@
 #include <hyprland/src/helpers/signal/Signal.hpp>
 
 #include "../../core/owner_index.h"
+#include "../../core/layout_snapshot.h"
 #include "../../core/types.h"
 #include "core/intrusive_list.h"
 #include "handoff_state.h"
@@ -84,7 +85,7 @@ public:
     // Called when a tiled window is first mapped.
     // This is the main "new tiled window entered scroller" hook after Hyprland
     // has already decided the window belongs to this tiled algorithm.
-    void onWindowCreatedTiling(PHLWINDOW, Math::eDirection = Math::DIRECTION_DEFAULT);
+    bool onWindowCreatedTiling(PHLWINDOW, Math::eDirection = Math::DIRECTION_DEFAULT);
     // Return true if the layout currently manages this window.
     bool isWindowTiled(PHLWINDOW);
     // Called when a tiled window is unmapped.
@@ -133,8 +134,15 @@ public:
     void marks_delete(const std::string &name);
     void marks_visit(const std::string &name);
     void marks_reset();
+    // Persist this canvas into the session layout repository.
+    void persistCurrentSnapshot();
 
 private:
+    std::optional<ScrollerSnapshot::CanvasSnapshot> captureSnapshot() const;
+    void persistSnapshot();
+    void clearPersistedSnapshot();
+    bool maybeRestoreWorkspaceSnapshot();
+    bool restoreSnapshot(const ScrollerSnapshot::CanvasSnapshot &snapshot);
     // Disconnect listeners and drop all per-workspace model state.
     void resetRuntimeState();
     // Ensure workspace-bound listeners are attached for the current canvas workspace.
@@ -254,4 +262,8 @@ private:
     HandoffState handoffState;
     // Remember whether a hidden special workspace needs to restore from a stale empty lane when shown again.
     bool specialEphemeralLaneRestorePending = false;
+    // Prevent save hooks from writing partially rebuilt state during restore.
+    bool restoringSnapshot = false;
+    // Fresh canvas instances should only attempt repository restore once.
+    bool snapshotRestoreAttempted = false;
 };
