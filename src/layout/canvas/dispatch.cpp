@@ -76,6 +76,22 @@ bool is_cursor_monitor(PHLMONITOR monitor) {
 
     return g_pCompositor->getMonitorFromCursor() == monitor;
 }
+
+bool is_workspace_active_on_monitor(PHLMONITOR monitor, PHLWORKSPACE workspace, WORKSPACEID fallbackWorkspaceId) {
+    if (!monitor)
+        return false;
+
+    if (workspace) {
+        return workspace->m_isSpecialWorkspace
+            ? monitor->activeSpecialWorkspaceID() == workspace->m_id
+            : monitor->activeWorkspaceID() == workspace->m_id;
+    }
+
+    if (fallbackWorkspaceId != WORKSPACE_INVALID)
+        return monitor->activeWorkspaceID() == fallbackWorkspaceId;
+
+    return true;
+}
 } // namespace
 
 namespace CanvasLayoutInternal {
@@ -111,16 +127,16 @@ void dispatch_builtin_movefocus(Direction direction) {
 }
 
 // Focus a monitor even when no concrete target window exists yet.
-void focus_monitor_workspace(PHLMONITOR monitor, PHLWORKSPACE workspace, WORKSPACEID fallback_workspace_id, const char* context) {
+bool focus_monitor_workspace(PHLMONITOR monitor, PHLWORKSPACE workspace, WORKSPACEID fallback_workspace_id, const char* context) {
     const auto *ctx = context ? context : "focus_monitor_workspace";
     if (!monitor)
-        return;
+        return false;
 
     if (monitor->m_name.empty()) {
         spdlog::warn("{}: monitor name missing for workspace focus workspace={}",
                      ctx,
                      workspace ? workspace->m_id : fallback_workspace_id);
-        return;
+        return false;
     }
 
     const auto targetWorkspaceId = workspace ? workspace->m_id : fallback_workspace_id;
@@ -193,8 +209,10 @@ void focus_monitor_workspace(PHLMONITOR monitor, PHLWORKSPACE workspace, WORKSPA
                   switched,
                   is_cursor_monitor(monitor));
 
-    if (focusedMonitor == monitor)
-        return;
+    const auto monitorFocused = focusedMonitor == monitor;
+    const auto workspaceActive = is_workspace_active_on_monitor(monitor, workspace, fallback_workspace_id);
+    if (monitorFocused && workspaceActive)
+        return true;
 
     // Final verify pass with explicit log context so failures are easy to spot
     // in logs when cross-monitor focus regresses.
@@ -206,10 +224,7 @@ void focus_monitor_workspace(PHLMONITOR monitor, PHLWORKSPACE workspace, WORKSPA
                      monitor_name(focusedMonitor));
         (void)invoke_dispatcher("focusmonitor", monitor->m_name, "focus_monitor_workspace_verify");
         (void)invoke_dispatcher("workspace", selector, "focus_monitor_workspace_verify");
-        return;
-    }
-
-    if (!workspace && !fallbackSelector.empty()) {
+    } else if (!workspace && !fallbackSelector.empty()) {
         spdlog::warn("{}: monitor {} still not focused after attempts fallback_workspace={} target={}",
                      ctx,
                      targetMonitorName,
@@ -218,6 +233,10 @@ void focus_monitor_workspace(PHLMONITOR monitor, PHLWORKSPACE workspace, WORKSPA
         (void)invoke_dispatcher("focusmonitor", monitor->m_name, "focus_monitor_workspace_verify");
         (void)invoke_dispatcher("workspace", fallbackSelector, "focus_monitor_workspace_verify");
     }
+
+    const auto finalFocusedMonitor = g_pCompositor ? g_pCompositor->getMonitorFromCursor() : nullptr;
+    return finalFocusedMonitor == monitor
+        && is_workspace_active_on_monitor(monitor, workspace, fallback_workspace_id);
 }
 
 // Focus the monitor hosting a target window before focusing the window itself.

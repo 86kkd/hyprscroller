@@ -11,7 +11,7 @@ namespace Overview::SessionEffects {
 OriginState captureOrigin();
 void        prepareSnapshots();
 WORKSPACEID nextWorkspaceId();
-void        acceptTarget(const Target& selection);
-void        restoreOrigin(const OriginState& origin);
+bool        acceptTarget(const Target& selection);
+bool        restoreOrigin(const OriginState& origin);
 
 } // namespace Overview::SessionEffects

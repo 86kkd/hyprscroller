@@ -18,6 +18,7 @@
 #include "render_state.h"
 #include "scene.h"
 #include "session.h"
+#include "session_selection.h"
 
 namespace Overview {
 namespace {
@@ -124,13 +125,11 @@ bool initializeRendererHooksImpl(HANDLE handle) {
             auto& overview = session();
             const auto handledByOverview = overview.consumeInputHandled();
 
-            if (!overview.active() || event.state != WL_KEYBOARD_KEY_STATE_RELEASED)
-                return;
-
-            if (handledByOverview)
-                return;
-
-            overview.dismiss();
+            if (shouldDismissOnKeyRelease(overview.active(),
+                                          event.state == WL_KEYBOARD_KEY_STATE_RELEASED,
+                                          event.updateMods,
+                                          handledByOverview))
+                overview.dismiss();
         });
 
         spdlog::info("overview_renderer_init: using render-pass overlay backend");

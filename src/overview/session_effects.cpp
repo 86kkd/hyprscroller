@@ -9,15 +9,12 @@
 #include "session_effects.h"
 
 #include <algorithm>
-#include <string>
 
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/desktop/Workspace.hpp>
 #include <spdlog/spdlog.h>
 
-#include "../core/workspace_selector.h"
 #include "../layout/canvas/internal.h"
-#include "logic.h"
 
 namespace Overview::SessionEffects {
 namespace {
@@ -43,42 +40,12 @@ int resolved_monitor_id(PHLWORKSPACE workspace, PHLWINDOW window, int fallbackMo
     return fallbackMonitorId;
 }
 
-bool execute_accept_plan(const std::vector<OverviewLogic::AcceptAction>& plan, PHLWORKSPACE workspace, const char* context) {
-    for (const auto& step : plan) {
-        // Plans are already ordered by OverviewLogic. This loop is intentionally
-        // dumb: it only translates each abstract step into the matching Hyprland
-        // dispatcher call and preserves the provided execution order.
-        switch (step.type) {
-            case OverviewLogic::AcceptActionType::FocusMonitor:
-                if (const auto monitor = g_pCompositor->getMonitorFromID(step.monitorId)) {
-                    if (!monitor->m_name.empty())
-                        (void)CanvasLayoutInternal::invoke_dispatcher("focusmonitor", monitor->m_name, context);
-                }
-                break;
-            case OverviewLogic::AcceptActionType::Workspace: {
-                const auto selector = workspace ? ScrollerCore::workspace_selector(workspace) : std::to_string(step.workspaceId);
-                (void)CanvasLayoutInternal::invoke_dispatcher("workspace", selector, context);
-                break;
-            }
-            case OverviewLogic::AcceptActionType::ToggleSpecialWorkspace: {
-                const auto selector = workspace ? ScrollerCore::workspace_selector(workspace) : std::to_string(step.workspaceId);
-                (void)CanvasLayoutInternal::invoke_dispatcher("togglespecialworkspace", selector, context);
-                break;
-            }
-        }
-    }
+bool focus_workspace_target(PHLWORKSPACE workspace, WORKSPACEID workspaceId, int monitorId, const char* context) {
+    const auto monitor = g_pCompositor->getMonitorFromID(monitorId);
+    if (!monitor)
+        return false;
 
-    return true;
-}
-
-void focus_workspace_target(PHLWORKSPACE workspace, WORKSPACEID workspaceId, int monitorId, const char* context) {
-    // Existing workspaces and synthetic empty-workspace targets need slightly
-    // different action sequences, so OverviewLogic builds the right dispatcher
-    // plan for us and this helper simply executes it.
-    const auto acceptPlan = workspace
-        ? OverviewLogic::buildWorkspaceAcceptPlan(monitorId, workspace->m_id, workspace->m_isSpecialWorkspace)
-        : OverviewLogic::buildEmptyAcceptPlan(monitorId, workspaceId);
-    execute_accept_plan(acceptPlan, workspace, context);
+    return CanvasLayoutInternal::focus_monitor_workspace(monitor, workspace, workspaceId, context);
 }
 
 void sync_canvas_target_window(PHLWORKSPACE workspace, PHLWINDOW window, int monitorId) {
@@ -155,19 +122,38 @@ WORKSPACEID nextWorkspaceId() {
     return maxWorkspaceId + 1;
 }
 
-void acceptTarget(const Target& selection) {
+bool focus_window_target(PHLWORKSPACE workspace, PHLWINDOW window, int monitorId, bool warpCursor, const char* context) {
+    if (!workspace || !window)
+        return false;
+
+    if (!focus_workspace_target(workspace, workspace->m_id, monitorId, context))
+        return false;
+
+    sync_canvas_target_window(workspace, window, monitorId);
+    CanvasLayoutInternal::switch_to_window(window, warpCursor);
+    return g_pCompositor && g_pCompositor->isWindowActive(window);
+}
+
+bool acceptTarget(const Target& selection) {
     const auto workspace = g_pCompositor->getWorkspaceByID(selection.workspaceId);
     const auto monitorId = resolved_monitor_id(workspace, selection.window, selection.monitorId);
 
     // Empty-workspace selections stop after focusing/creating the workspace.
     // There is no concrete window to activate afterward.
     if (selection.type == TargetType::EmptyWorkspace) {
-        focus_workspace_target(workspace, selection.workspaceId, monitorId, "overview_accept_empty");
+        const auto focused = focus_workspace_target(workspace, selection.workspaceId, monitorId, "overview_accept_empty");
+        if (!focused) {
+            spdlog::warn("overview_accept_empty: failed workspace={} monitor={} synthetic={}",
+                         selection.workspaceId,
+                         monitorId,
+                         selection.synthetic);
+            return false;
+        }
         spdlog::info("overview_accept_empty: workspace={} monitor={} synthetic={}",
                      selection.workspaceId,
                      monitorId,
                      selection.synthetic);
-        return;
+        return true;
     }
 
     // Window targets require both a resolvable workspace and a live window.
@@ -177,48 +163,64 @@ void acceptTarget(const Target& selection) {
         spdlog::warn("overview_accept_window: invalid target workspace={} window={}",
                      selection.workspaceId,
                      static_cast<const void*>(selection.window ? selection.window.get() : nullptr));
-        return;
+        return false;
     }
 
     // The happy path is a two-step restore:
     // 1. move focus to the correct workspace/monitor
     // 2. then focus the exact target window inside that workspace
-    focus_workspace_target(workspace, workspace->m_id, monitorId, "overview_accept_window");
-    sync_canvas_target_window(workspace, selection.window, monitorId);
-    CanvasLayoutInternal::switch_to_window(selection.window, true);
+    if (!focus_window_target(workspace, selection.window, monitorId, true, "overview_accept_window")) {
+        spdlog::warn("overview_accept_window: focus failed workspace={} window={} special={}",
+                     selection.workspaceId,
+                     static_cast<const void*>(selection.window.get()),
+                     workspace->m_isSpecialWorkspace);
+        return false;
+    }
     spdlog::info("overview_accept_window: workspace={} window={} special={}",
                  selection.workspaceId,
                  static_cast<const void*>(selection.window.get()),
                  workspace->m_isSpecialWorkspace);
+    return true;
 }
 
-void restoreOrigin(const OriginState& origin) {
+bool restoreOrigin(const OriginState& origin) {
     const auto workspace = g_pCompositor->getWorkspaceByID(origin.workspaceId);
     const auto monitorId = resolved_monitor_id(workspace, origin.window, origin.monitorId);
 
     // Best case: the original window still exists and is mapped, so we can
     // restore both workspace and exact window focus.
     if (origin.window && origin.window->m_isMapped && workspace) {
-        focus_workspace_target(workspace, workspace->m_id, monitorId, "overview_restore_origin_window");
-        sync_canvas_target_window(workspace, origin.window, monitorId);
-        CanvasLayoutInternal::switch_to_window(origin.window, false);
+        if (!focus_window_target(workspace, origin.window, monitorId, false, "overview_restore_origin_window")) {
+            spdlog::warn("overview_restore_origin_window: focus failed workspace={} monitor={} window={}",
+                         workspace->m_id,
+                         monitorId,
+                         static_cast<const void*>(origin.window.get()));
+            return false;
+        }
         spdlog::info("overview_restore_origin_window: workspace={} monitor={} window={}",
                      workspace->m_id,
                      monitorId,
                      static_cast<const void*>(origin.window.get()));
-        return;
+        return true;
     }
 
     // Fallback: if the window disappeared, at least return to the original
     // workspace so the user lands in the right context.
     if (!workspace)
-        return;
+        return false;
 
-    focus_workspace_target(workspace, workspace->m_id, monitorId, "overview_restore_origin_workspace");
+    if (!focus_workspace_target(workspace, workspace->m_id, monitorId, "overview_restore_origin_workspace")) {
+        spdlog::warn("overview_restore_origin_workspace: failed workspace={} monitor={} special={}",
+                     workspace->m_id,
+                     monitorId,
+                     workspace->m_isSpecialWorkspace);
+        return false;
+    }
     spdlog::info("overview_restore_origin_workspace: workspace={} monitor={} special={}",
                  workspace->m_id,
                  monitorId,
                  workspace->m_isSpecialWorkspace);
+    return true;
 }
 
 } // namespace Overview::SessionEffects

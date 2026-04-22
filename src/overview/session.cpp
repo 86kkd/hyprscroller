@@ -284,18 +284,18 @@ bool Session::moveSelection(Direction direction) {
     return created;
 }
 
-void Session::acceptSelection() {
+bool Session::acceptSelection() {
     const auto* selection = model_.selection();
     if (!selection)
-        return;
+        return false;
 
     // Real side effects live in `session_effects.cpp`; keeping that split makes
     // this file about control flow rather than compositor mutation details.
-    SessionEffects::acceptTarget(*selection);
+    return SessionEffects::acceptTarget(*selection);
 }
 
-void Session::restoreOrigin() {
-    SessionEffects::restoreOrigin(model_.origin());
+bool Session::restoreOrigin() {
+    return SessionEffects::restoreOrigin(model_.origin());
 }
 
 void Session::close(bool acceptSelectionFlag) {
@@ -305,14 +305,18 @@ void Session::close(bool acceptSelectionFlag) {
     // Overview always resolves exactly once on close: either accept the current
     // selection or restore the remembered origin. Only after that do we clear
     // the logical model and remove the overlay.
-    if (acceptSelectionFlag)
-        acceptSelection();
-    else
-        restoreOrigin();
+    auto resolved = acceptSelectionFlag
+        ? acceptSelection()
+        : restoreOrigin();
+    if (acceptSelectionFlag && !resolved) {
+        spdlog::warn("overview_close: accept failed, restoring origin");
+        resolved = restoreOrigin();
+    }
 
     const auto* selection = model_.selection();
-    spdlog::info("overview_close: accepted={} selection_workspace={} selection_window={}",
+    spdlog::info("overview_close: accepted={} resolved={} selection_workspace={} selection_window={}",
                  acceptSelectionFlag,
+                 resolved,
                  selection ? selection->workspaceId : WORKSPACE_INVALID,
                  static_cast<const void*>(selection && selection->window ? selection->window.get() : nullptr));
     damageMonitors();

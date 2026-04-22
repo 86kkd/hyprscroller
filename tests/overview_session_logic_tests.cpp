@@ -30,6 +30,20 @@ void test_initial_selection_reports_none_without_candidates() {
     expect_eq(choice, Overview::InitialSelectionChoice::None, "no candidates yields no initial selection");
 }
 
+void test_overview_dismiss_ignores_modifier_release() {
+    expect_true(!Overview::shouldDismissOnKeyRelease(true, true, true, false),
+                "modifier-only key releases do not dismiss overview");
+}
+
+void test_overview_dismiss_requires_unhandled_release() {
+    expect_true(Overview::shouldDismissOnKeyRelease(true, true, false, false),
+                "unhandled key release dismisses overview");
+    expect_true(!Overview::shouldDismissOnKeyRelease(true, true, false, true),
+                "handled key release keeps overview active");
+    expect_true(!Overview::shouldDismissOnKeyRelease(true, false, false, false),
+                "key press does not dismiss overview");
+}
+
 } // namespace
 
 void run_overview_session_logic_tests() {
@@ -38,4 +52,6 @@ void run_overview_session_logic_tests() {
     test_initial_selection_falls_back_to_origin_workspace();
     test_initial_selection_falls_back_to_first_target();
     test_initial_selection_reports_none_without_candidates();
+    test_overview_dismiss_ignores_modifier_release();
+    test_overview_dismiss_requires_unhandled_release();
 }

@@ -31,4 +31,11 @@ InitialSelectionChoice chooseInitialSelectionChoice(bool hasTargets,
     return InitialSelectionChoice::None;
 }
 
+bool shouldDismissOnKeyRelease(bool overviewActive,
+                               bool released,
+                               bool updateModsOnly,
+                               bool handledByOverview) {
+    return overviewActive && released && !updateModsOnly && !handledByOverview;
+}
+
 } // namespace Overview

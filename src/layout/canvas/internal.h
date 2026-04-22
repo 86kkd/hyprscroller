@@ -51,7 +51,7 @@ void                            dispatch_directional_builtin(const char* dispatc
 // Thin wrapper for builtin movefocus dispatch.
 void                            dispatch_builtin_movefocus(Direction direction);
 // Focus a monitor, and optionally re-activate its visible normal workspace.
-void                            focus_monitor_workspace(PHLMONITOR monitor, PHLWORKSPACE workspace, WORKSPACEID fallback_workspace_id, const char* context = nullptr);
+bool                            focus_monitor_workspace(PHLMONITOR monitor, PHLWORKSPACE workspace, WORKSPACEID fallback_workspace_id, const char* context = nullptr);
 // Focus the monitor hosting a target window before focusing the window itself.
 void                            focus_window_monitor(PHLWINDOW window);
 // Focus a target window and optionally warp the cursor to it.
