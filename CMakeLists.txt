@@ -55,6 +55,8 @@ add_library(hyprscroller SHARED
             src/overview/session.cpp
             src/overview/session_effects.h
             src/overview/session_effects.cpp
+            src/overview/session_effects_runtime.h
+            src/overview/session_effects_logic.cpp
             src/overview/session_selection.h
             src/overview/session_selection.cpp
             src/overview/render.h
@@ -116,6 +118,7 @@ if(BUILD_TESTING)
                    tests/overview_model_tests.cpp
                    tests/overview_scene_tests.cpp
                    tests/overview_session_logic_tests.cpp
+                   tests/overview_session_effects_tests.cpp
                    src/core/direction.cpp
                    src/core/layout_math.cpp
                    src/core/monitor_geometry.cpp
@@ -124,6 +127,7 @@ if(BUILD_TESTING)
                    src/overview/orientation_math.cpp
                    src/overview/workspace_grid.cpp
                    src/overview/scene_layout.cpp
+                   src/overview/session_effects_logic.cpp
                    src/overview/session_selection.cpp
                    src/layout/canvas/dispatch_logic.cpp
                    src/layout/canvas/dispatch_runtime_logic.cpp

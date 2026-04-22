@@ -72,7 +72,7 @@ bool try_select_origin_window(Model& model) {
 // an arbitrary first target.
 bool try_select_origin_workspace(Model& model) {
     const auto originWorkspace = model.origin().workspaceId;
-    if (originWorkspace == WORKSPACE_INVALID)
+    if (originWorkspace == INVALID_WORKSPACE_ID)
         return false;
 
     const auto ref = model.findByWorkspace(originWorkspace);
@@ -178,7 +178,7 @@ void Session::open() {
                  model_.origin().workspaceId,
                  static_cast<const void*>(model_.origin().window ? model_.origin().window.get() : nullptr),
                  model_.monitors().size(),
-                 selection ? selection->workspaceId : WORKSPACE_INVALID,
+                 selection ? selection->workspaceId : INVALID_WORKSPACE_ID,
                  static_cast<const void*>(selection && selection->window ? selection->window.get() : nullptr),
                  selection ? selection->synthetic : false);
 }
@@ -251,8 +251,8 @@ bool Session::createSyntheticEmptyTarget(Direction direction) {
                                                  true));
     const auto* syntheticSelection = model_.selection();
     spdlog::info("overview_create_empty: workspace={} monitor={} box=({}, {}, {}, {})",
-                 syntheticSelection ? syntheticSelection->workspaceId : WORKSPACE_INVALID,
-                 syntheticSelection ? syntheticSelection->monitorId : MONITOR_INVALID,
+                 syntheticSelection ? syntheticSelection->workspaceId : INVALID_WORKSPACE_ID,
+                 syntheticSelection ? syntheticSelection->monitorId : INVALID_MONITOR_ID,
                  syntheticSelection ? syntheticSelection->box.x : 0.0,
                  syntheticSelection ? syntheticSelection->box.y : 0.0,
                  syntheticSelection ? syntheticSelection->box.w : 0.0,
@@ -271,7 +271,7 @@ bool Session::moveSelection(Direction direction) {
         const auto* selection = model_.selection();
         spdlog::info("overview_move: direction={} workspace={} window={} synthetic={}",
                      ScrollerCore::direction_name(direction),
-                     selection ? selection->workspaceId : WORKSPACE_INVALID,
+                     selection ? selection->workspaceId : INVALID_WORKSPACE_ID,
                      static_cast<const void*>(selection && selection->window ? selection->window.get() : nullptr),
                      selection ? selection->synthetic : false);
         damageMonitors();
@@ -317,7 +317,7 @@ void Session::close(bool acceptSelectionFlag) {
     spdlog::info("overview_close: accepted={} resolved={} selection_workspace={} selection_window={}",
                  acceptSelectionFlag,
                  resolved,
-                 selection ? selection->workspaceId : WORKSPACE_INVALID,
+                 selection ? selection->workspaceId : INVALID_WORKSPACE_ID,
                  static_cast<const void*>(selection && selection->window ? selection->window.get() : nullptr));
     damageMonitors();
     clear();
@@ -331,7 +331,7 @@ void Session::dismiss() {
     // without running accept/restore side effects.
     const auto* selection = model_.selection();
     spdlog::info("overview_dismiss: selection_workspace={} selection_window={}",
-                 selection ? selection->workspaceId : WORKSPACE_INVALID,
+                 selection ? selection->workspaceId : INVALID_WORKSPACE_ID,
                  static_cast<const void*>(selection && selection->window ? selection->window.get() : nullptr));
     damageMonitors();
     clear();

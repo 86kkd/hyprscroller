@@ -8,218 +8,138 @@
  */
 #include "session_effects.h"
 
-#include <algorithm>
-
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/desktop/Workspace.hpp>
-#include <spdlog/spdlog.h>
 
 #include "../layout/canvas/internal.h"
+#include "session_effects_runtime.h"
 
 namespace Overview::SessionEffects {
 namespace {
 
-int resolved_monitor_id(PHLWORKSPACE workspace, PHLWINDOW window, int fallbackMonitorId) {
-    // Prefer the monitor that currently owns the concrete window, because that
-    // is the most specific target when a workspace spans monitor transitions.
-    if (window) {
-        if (const auto monitor = g_pCompositor->getMonitorFromID(window->monitorID()))
-            return monitor->m_id;
+constexpr MONITORID INVALID_MONITOR_ID = static_cast<MONITORID>(-1);
+
+class HyprlandSessionEffectsRuntime final : public Runtime {
+  public:
+    WORKSPACEID currentWorkspaceId() const override {
+        return CanvasLayoutInternal::get_workspace_id();
     }
 
-    // Otherwise fall back to the workspace's visible monitor if it has one, and
-    // finally to the workspace's stored monitor id / caller-provided fallback.
-    if (workspace) {
-        if (const auto monitor = CanvasLayoutInternal::visible_monitor_for_workspace(workspace))
-            return monitor->m_id;
-
-        if (const auto workspaceMonitor = g_pCompositor->getMonitorFromID(workspace->monitorID()))
-            return workspaceMonitor->m_id;
+    PHLWORKSPACE getWorkspaceByID(WORKSPACEID workspaceId) const override {
+        return g_pCompositor ? g_pCompositor->getWorkspaceByID(workspaceId) : nullptr;
     }
 
-    return fallbackMonitorId;
-}
+    std::vector<PHLWORKSPACE> getWorkspaces() const override {
+        std::vector<PHLWORKSPACE> workspaces;
+        if (!g_pCompositor)
+            return workspaces;
 
-bool focus_workspace_target(PHLWORKSPACE workspace, WORKSPACEID workspaceId, int monitorId, const char* context) {
-    const auto monitor = g_pCompositor->getMonitorFromID(monitorId);
-    if (!monitor)
-        return false;
+        for (const auto& workspaceRef : g_pCompositor->getWorkspaces()) {
+            const auto workspace = workspaceRef.lock();
+            if (workspace)
+                workspaces.push_back(workspace);
+        }
 
-    return CanvasLayoutInternal::focus_monitor_workspace(monitor, workspace, workspaceId, context);
-}
+        return workspaces;
+    }
 
-void sync_canvas_target_window(PHLWORKSPACE workspace, PHLWINDOW window, int monitorId) {
-    if (!workspace || !window)
-        return;
+    PHLMONITOR getMonitorFromID(MONITORID monitorId) const override {
+        return g_pCompositor ? g_pCompositor->getMonitorFromID(monitorId) : nullptr;
+    }
 
-    auto* layout = CanvasLayoutInternal::get_canvas_for_workspace(workspace->m_id);
-    if (!layout)
-        return;
+    PHLMONITOR getMonitorFromCursor() const override {
+        return g_pCompositor ? g_pCompositor->getMonitorFromCursor() : nullptr;
+    }
 
-    // Overview selection is purely logical while the overlay is open. Before we
-    // hand real focus back to Hyprland, mirror that selection into the target
-    // canvas so its active lane/window and paged geometry match the window that
-    // is about to be focused.
-    layout->onWindowFocusChange(window);
-    layout->recalculateMonitor(monitorId);
+    MONITORID monitorId(PHLMONITOR monitor) const override {
+        return monitor ? monitor->m_id : INVALID_MONITOR_ID;
+    }
+
+    WORKSPACEID workspaceId(PHLWORKSPACE workspace) const override {
+        return workspace ? workspace->m_id : WORKSPACE_INVALID;
+    }
+
+    MONITORID workspaceMonitorId(PHLWORKSPACE workspace) const override {
+        return workspace ? workspace->monitorID() : INVALID_MONITOR_ID;
+    }
+
+    bool isWorkspaceSpecial(PHLWORKSPACE workspace) const override {
+        return workspace && workspace->m_isSpecialWorkspace;
+    }
+
+    PHLWINDOW workspaceLastFocusedWindow(PHLWORKSPACE workspace) const override {
+        return workspace ? workspace->getLastFocusedWindow() : nullptr;
+    }
+
+    MONITORID windowMonitorId(PHLWINDOW window) const override {
+        return window ? window->monitorID() : INVALID_MONITOR_ID;
+    }
+
+    bool isWindowMapped(PHLWINDOW window) const override {
+        return window && window->m_isMapped;
+    }
+
+    PHLMONITOR visibleMonitorForWorkspace(PHLWORKSPACE workspace) const override {
+        return CanvasLayoutInternal::visible_monitor_for_workspace(workspace);
+    }
+
+    void syncCanvasTargetWindow(PHLWORKSPACE workspace, PHLWINDOW window, MONITORID monitorId) const override {
+        if (!workspace || !window)
+            return;
+
+        auto* layout = CanvasLayoutInternal::get_canvas_for_workspace(workspace->m_id);
+        if (!layout)
+            return;
+
+        layout->onWindowFocusChange(window);
+        layout->recalculateMonitor(monitorId);
+    }
+
+    void prepareWorkspaceSnapshot(PHLWORKSPACE workspace) const override {
+        if (!workspace)
+            return;
+
+        auto* layout = CanvasLayoutInternal::get_canvas_for_workspace(workspace->m_id);
+        if (!layout)
+            return;
+
+        layout->prepareForOverviewSnapshot();
+    }
+
+    bool focusMonitorWorkspace(PHLMONITOR monitor, PHLWORKSPACE workspace, WORKSPACEID fallbackWorkspaceId, const char* context) const override {
+        return CanvasLayoutInternal::focus_monitor_workspace(monitor, workspace, fallbackWorkspaceId, context);
+    }
+
+    bool switchToWindow(PHLWINDOW window, bool warpCursor) const override {
+        return CanvasLayoutInternal::switch_to_window(window, warpCursor);
+    }
+};
+
+Runtime& runtime() {
+    static HyprlandSessionEffectsRuntime instance;
+    return instance;
 }
 
 } // namespace
 
 OriginState captureOrigin() {
-    auto originWorkspace = CanvasLayoutInternal::get_workspace_id();
-    auto originWindow = PHLWINDOW{};
-    auto originMonitor = MONITOR_INVALID;
-
-    // Capture enough information to restore the user's pre-overview context even
-    // if a window closes or the workspace later moves to another monitor.
-    if (const auto workspace = g_pCompositor->getWorkspaceByID(originWorkspace)) {
-        originWindow = workspace->getLastFocusedWindow();
-        originMonitor = resolved_monitor_id(workspace, originWindow, workspace->monitorID());
-    }
-
-    if (originMonitor == MONITOR_INVALID) {
-        if (const auto monitor = g_pCompositor->getMonitorFromCursor())
-            originMonitor = monitor->m_id;
-    }
-
-    return {
-        .monitorId = static_cast<int>(originMonitor),
-        .workspaceId = originWorkspace,
-        .window = originWindow,
-    };
+    return captureOrigin(runtime());
 }
 
 void prepareSnapshots() {
-    // Each canvas captures its own render snapshot. Overview only needs to ask
-    // every live canvas to freeze the current workspace state before animating.
-    for (const auto& workspaceRef : g_pCompositor->getWorkspaces()) {
-        const auto workspace = workspaceRef.lock();
-        if (!workspace)
-            continue;
-
-        auto* layout = CanvasLayoutInternal::get_canvas_for_workspace(workspace->m_id);
-        if (!layout)
-            continue;
-
-        layout->prepareForOverviewSnapshot();
-    }
+    prepareSnapshots(runtime());
 }
 
 WORKSPACEID nextWorkspaceId() {
-    WORKSPACEID maxWorkspaceId = 0;
-
-    // Synthetic overview tiles for "new workspace" targets just need an unused
-    // integer id beyond the current maximum.
-    for (const auto& workspaceRef : g_pCompositor->getWorkspaces()) {
-        const auto workspace = workspaceRef.lock();
-        if (!workspace)
-            continue;
-
-        maxWorkspaceId = std::max(maxWorkspaceId, workspace->m_id);
-    }
-
-    return maxWorkspaceId + 1;
-}
-
-bool focus_window_target(PHLWORKSPACE workspace, PHLWINDOW window, int monitorId, bool warpCursor, const char* context) {
-    if (!workspace || !window)
-        return false;
-
-    if (!focus_workspace_target(workspace, workspace->m_id, monitorId, context))
-        return false;
-
-    sync_canvas_target_window(workspace, window, monitorId);
-    return CanvasLayoutInternal::switch_to_window(window, warpCursor);
+    return nextWorkspaceId(runtime());
 }
 
 bool acceptTarget(const Target& selection) {
-    const auto workspace = g_pCompositor->getWorkspaceByID(selection.workspaceId);
-    const auto monitorId = resolved_monitor_id(workspace, selection.window, selection.monitorId);
-
-    // Empty-workspace selections stop after focusing/creating the workspace.
-    // There is no concrete window to activate afterward.
-    if (selection.type == TargetType::EmptyWorkspace) {
-        const auto focused = focus_workspace_target(workspace, selection.workspaceId, monitorId, "overview_accept_empty");
-        if (!focused) {
-            spdlog::warn("overview_accept_empty: failed workspace={} monitor={} synthetic={}",
-                         selection.workspaceId,
-                         monitorId,
-                         selection.synthetic);
-            return false;
-        }
-        spdlog::info("overview_accept_empty: workspace={} monitor={} synthetic={}",
-                     selection.workspaceId,
-                     monitorId,
-                     selection.synthetic);
-        return true;
-    }
-
-    // Window targets require both a resolvable workspace and a live window.
-    // If either disappeared during overview we log and abort instead of trying
-    // to focus dangling compositor objects.
-    if (!workspace || !selection.window) {
-        spdlog::warn("overview_accept_window: invalid target workspace={} window={}",
-                     selection.workspaceId,
-                     static_cast<const void*>(selection.window ? selection.window.get() : nullptr));
-        return false;
-    }
-
-    // The happy path is a two-step restore:
-    // 1. move focus to the correct workspace/monitor
-    // 2. then focus the exact target window inside that workspace
-    if (!focus_window_target(workspace, selection.window, monitorId, true, "overview_accept_window")) {
-        spdlog::warn("overview_accept_window: focus failed workspace={} window={} special={}",
-                     selection.workspaceId,
-                     static_cast<const void*>(selection.window.get()),
-                     workspace->m_isSpecialWorkspace);
-        return false;
-    }
-    spdlog::info("overview_accept_window: workspace={} window={} special={}",
-                 selection.workspaceId,
-                 static_cast<const void*>(selection.window.get()),
-                 workspace->m_isSpecialWorkspace);
-    return true;
+    return acceptTarget(runtime(), selection);
 }
 
 bool restoreOrigin(const OriginState& origin) {
-    const auto workspace = g_pCompositor->getWorkspaceByID(origin.workspaceId);
-    const auto monitorId = resolved_monitor_id(workspace, origin.window, origin.monitorId);
-
-    // Best case: the original window still exists and is mapped, so we can
-    // restore both workspace and exact window focus.
-    if (origin.window && origin.window->m_isMapped && workspace) {
-        if (!focus_window_target(workspace, origin.window, monitorId, false, "overview_restore_origin_window")) {
-            spdlog::warn("overview_restore_origin_window: focus failed workspace={} monitor={} window={}",
-                         workspace->m_id,
-                         monitorId,
-                         static_cast<const void*>(origin.window.get()));
-            return false;
-        }
-        spdlog::info("overview_restore_origin_window: workspace={} monitor={} window={}",
-                     workspace->m_id,
-                     monitorId,
-                     static_cast<const void*>(origin.window.get()));
-        return true;
-    }
-
-    // Fallback: if the window disappeared, at least return to the original
-    // workspace so the user lands in the right context.
-    if (!workspace)
-        return false;
-
-    if (!focus_workspace_target(workspace, workspace->m_id, monitorId, "overview_restore_origin_workspace")) {
-        spdlog::warn("overview_restore_origin_workspace: failed workspace={} monitor={} special={}",
-                     workspace->m_id,
-                     monitorId,
-                     workspace->m_isSpecialWorkspace);
-        return false;
-    }
-    spdlog::info("overview_restore_origin_workspace: workspace={} monitor={} special={}",
-                 workspace->m_id,
-                 monitorId,
-                 workspace->m_isSpecialWorkspace);
-    return true;
+    return restoreOrigin(runtime(), origin);
 }
 
 } // namespace Overview::SessionEffects

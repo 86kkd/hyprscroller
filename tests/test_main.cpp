@@ -11,6 +11,7 @@ int main() {
     run_overview_model_tests();
     run_overview_scene_tests();
     run_overview_session_logic_tests();
+    run_overview_session_effects_tests();
 
     if (failures != 0) {
         std::cerr << failures << " logic test(s) failed\n";

@@ -52,7 +52,7 @@ MonitorRegion make_monitor_region(PHLMONITOR monitor) {
 }
 
 MonitorRegion* find_region_by_monitor_id(std::vector<MonitorRegion>& monitors, int monitorId) {
-    if (monitorId == MONITOR_INVALID)
+    if (monitorId == INVALID_MONITOR_ID)
         return nullptr;
 
     const auto regionIt = std::find_if(monitors.begin(), monitors.end(), [&](const MonitorRegion& region) {

@@ -34,7 +34,7 @@ struct SceneWorkspace {
 };
 
 struct SceneMonitor {
-    int                      monitorId = MONITOR_INVALID;
+    int                      monitorId = INVALID_MONITOR_ID;
     std::string              monitorName;
     ScrollerCore::Box        box;
     std::vector<SceneWorkspace> workspaces;

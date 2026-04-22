@@ -10,11 +10,13 @@
 
 #include <hyprland/src/SharedDefs.hpp>
 #include <hyprland/src/desktop/DesktopTypes.hpp>
-#include <hyprland/src/macros.hpp>
 
 #include "../core/types.h"
 
 namespace Overview {
+
+constexpr WORKSPACEID INVALID_WORKSPACE_ID = static_cast<WORKSPACEID>(-1);
+constexpr int         INVALID_MONITOR_ID = -1;
 
 enum class TargetType {
     Window,
@@ -23,30 +25,30 @@ enum class TargetType {
 
 struct Target {
     TargetType        type = TargetType::Window;
-    WORKSPACEID       workspaceId = WORKSPACE_INVALID;
-    int               monitorId = MONITOR_INVALID;
+    WORKSPACEID       workspaceId = INVALID_WORKSPACE_ID;
+    int               monitorId = INVALID_MONITOR_ID;
     PHLWINDOW         window = nullptr;
     ScrollerCore::Box box;
     bool              synthetic = false;
 };
 
 struct WorkspaceNode {
-    WORKSPACEID        workspaceId = WORKSPACE_INVALID;
-    int                monitorId = MONITOR_INVALID;
+    WORKSPACEID        workspaceId = INVALID_WORKSPACE_ID;
+    int                monitorId = INVALID_MONITOR_ID;
     std::vector<Target> targets;
     ScrollerCore::Box  box;
 };
 
 struct MonitorRegion {
-    int                      monitorId = MONITOR_INVALID;
+    int                      monitorId = INVALID_MONITOR_ID;
     PHLMONITOR               monitor = nullptr;
     ScrollerCore::Box        box;
     std::vector<WorkspaceNode> workspaces;
 };
 
 struct OriginState {
-    int         monitorId = MONITOR_INVALID;
-    WORKSPACEID workspaceId = WORKSPACE_INVALID;
+    int         monitorId = INVALID_MONITOR_ID;
+    WORKSPACEID workspaceId = INVALID_WORKSPACE_ID;
     PHLWINDOW   window = nullptr;
 };
 
@@ -61,8 +63,8 @@ struct TargetRef {
 
 struct TargetGraphNode {
     TargetRef          ref;
-    int                monitorId = MONITOR_INVALID;
-    WORKSPACEID        workspaceId = WORKSPACE_INVALID;
+    int                monitorId = INVALID_MONITOR_ID;
+    WORKSPACEID        workspaceId = INVALID_WORKSPACE_ID;
     ScrollerCore::Box  box;
 };
 
