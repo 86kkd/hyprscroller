@@ -25,6 +25,15 @@ inline bool finiteBox(const ScrollerCore::Box& box) {
     return std::isfinite(box.x) && std::isfinite(box.y) && std::isfinite(box.w) && std::isfinite(box.h);
 }
 
+inline ScrollerCore::Box translateBox(const ScrollerCore::Box& box, double dx, double dy) {
+    return {
+        box.x + dx,
+        box.y + dy,
+        box.w,
+        box.h,
+    };
+}
+
 inline ScrollerCore::Box insetBox(const ScrollerCore::Box& box, double insetX, double insetY, double minimumSize = 1.0) {
     return {
         box.x + insetX,

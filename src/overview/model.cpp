@@ -15,6 +15,7 @@
 
 #include "../layout/canvas/internal.h"
 #include "model_layout.h"
+#include "scene_layout.h"
 
 namespace Overview {
 namespace {
@@ -96,6 +97,43 @@ WorkspaceNode build_workspace_node(const CanvasOverviewSnapshot& snapshot, int m
     }
 
     return node;
+}
+
+void project_workspace_targets(PHLMONITOR monitor, WorkspaceNode& workspace) {
+    if (!monitor || workspace.targets.empty())
+        return;
+
+    const auto contentBox = buildWorkspaceContentBox(workspace.box);
+    std::vector<size_t> windowIndexes;
+    std::vector<ScrollerCore::Box> sourceBoxes;
+    windowIndexes.reserve(workspace.targets.size());
+    sourceBoxes.reserve(workspace.targets.size());
+
+    // The overview model keeps one geometry per target. Rewriting those boxes
+    // into final preview positions makes navigation, synthetic target creation,
+    // and rendering all speak the same coordinate system.
+    for (size_t index = 0; index < workspace.targets.size(); ++index) {
+        const auto& target = workspace.targets[index];
+        if (target.type != TargetType::Window || !target.window)
+            continue;
+
+        windowIndexes.push_back(index);
+        sourceBoxes.push_back(target.box);
+    }
+
+    if (windowIndexes.empty()) {
+        const auto emptyPreviewBox = buildEmptyWorkspacePreviewBox(contentBox);
+        for (auto& target : workspace.targets)
+            target.box = emptyPreviewBox;
+        return;
+    }
+
+    const auto projectedBoxes = projectGlobalBoxesToContent(sourceBoxes,
+                                                            contentBox,
+                                                            monitor->m_position.x,
+                                                            monitor->m_position.y);
+    for (size_t index = 0; index < windowIndexes.size() && index < projectedBoxes.size(); ++index)
+        workspace.targets[windowIndexes[index]].box = projectedBoxes[index];
 }
 
 } // namespace
@@ -272,7 +310,8 @@ void Model::rebuild() {
     // 2. ask every canvas-backed workspace for a read-only snapshot
     // 3. attach each workspace to the correct monitor region
     // 4. lay out workspace tiles inside every region
-    // 5. flatten the result into the navigation graph
+    // 5. project targets into final preview geometry
+    // 6. flatten the result into the navigation graph
     monitors_.clear();
     selectionRef_.reset();
     syntheticSelection_.reset();
@@ -305,9 +344,13 @@ void Model::rebuild() {
     }
 
     // Grid layout fills in workspace boxes and injects empty targets for any
-    // workspace that has no tiled windows.
-    for (auto& region : monitors_)
+    // workspace that has no tiled windows. Afterwards each target box is
+    // rewritten into the exact preview geometry that overview will render.
+    for (auto& region : monitors_) {
         layoutWorkspaceGrid(region);
+        for (auto& workspace : region.workspaces)
+            project_workspace_targets(region.monitor, workspace);
+    }
 
     rebuildTargetGraph();
 }

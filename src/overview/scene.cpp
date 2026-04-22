@@ -80,45 +80,15 @@ std::string window_target_label(PHLWINDOW window) {
     return "window";
 }
 
-SceneTarget build_empty_workspace_target(const Box& contentBox, const Target& target, const Target* selection) {
+SceneTarget build_scene_target(PHLMONITOR monitor, const Target& target, const Target* selection) {
     return {
         .type = target.type,
-        .box = buildEmptyWorkspacePreviewBox(contentBox),
-        .window = nullptr,
+        .box = localize_box(monitor, target.box),
+        .window = target.window,
         .synthetic = target.synthetic,
         .selected = target_matches_selection(target, selection),
-        .label = empty_target_label(target),
+        .label = target.type == TargetType::Window ? window_target_label(target.window) : empty_target_label(target),
     };
-}
-
-std::vector<SceneTarget> build_projected_targets(PHLMONITOR monitor, const WorkspaceNode& workspace,
-                                                 const Box& contentBox, const Target* selection) {
-    // Projection is a two-step process:
-    // 1. localize source boxes into the monitor's render space
-    // 2. map those boxes into the workspace preview area while preserving their
-    //    relative arrangement as much as possible
-    std::vector<Box> sourceBoxes;
-    sourceBoxes.reserve(workspace.targets.size());
-    for (const auto& target : workspace.targets)
-        sourceBoxes.push_back(localize_box(monitor, target.box));
-
-    const auto projectedBoxes = projectBoxesToContent(sourceBoxes, contentBox);
-
-    std::vector<SceneTarget> targets;
-    targets.reserve(workspace.targets.size());
-    for (std::size_t index = 0; index < workspace.targets.size(); ++index) {
-        const auto& target = workspace.targets[index];
-        targets.push_back({
-            .type = target.type,
-            .box = projectedBoxes[index],
-            .window = target.window,
-            .synthetic = target.synthetic,
-            .selected = target_matches_selection(target, selection),
-            .label = target.type == TargetType::Window ? window_target_label(target.window) : empty_target_label(target),
-        });
-    }
-
-    return targets;
 }
 
 } // namespace
@@ -141,25 +111,15 @@ std::optional<SceneMonitor> buildSceneForMonitor(PHLMONITOR monitor, const Model
     for (const auto& workspace : region->workspaces) {
         SceneWorkspace sceneWorkspace;
         sceneWorkspace.box = localize_box(monitor, workspace.box);
-        sceneWorkspace.contentBox = insetBox(sceneWorkspace.box,
-                                             Style::kWorkspaceContentInset,
-                                             Style::kWorkspaceContentInset);
-        sceneWorkspace.contentBox.y += Style::kWorkspaceHeaderHeight;
-        sceneWorkspace.contentBox.h = std::max(36.0, sceneWorkspace.contentBox.h - Style::kWorkspaceHeaderHeight);
+        sceneWorkspace.contentBox = buildWorkspaceContentBox(sceneWorkspace.box);
 
         const auto workspaceRef = g_pCompositor->getWorkspaceByID(workspace.workspaceId);
         sceneWorkspace.special = workspaceRef ? workspaceRef->m_isSpecialWorkspace : false;
         sceneWorkspace.label = workspace_label(workspaceRef, workspace.workspaceId);
 
-        const auto hasWindowTargets = std::any_of(workspace.targets.begin(), workspace.targets.end(), [](const Target& target) {
-            return target.type == TargetType::Window && target.window;
-        });
-
-        if (hasWindowTargets) {
-            sceneWorkspace.targets = build_projected_targets(monitor, workspace, sceneWorkspace.contentBox, selection);
-        } else if (!workspace.targets.empty()) {
-            sceneWorkspace.targets.push_back(build_empty_workspace_target(sceneWorkspace.contentBox, workspace.targets.front(), selection));
-        }
+        sceneWorkspace.targets.reserve(workspace.targets.size());
+        for (const auto& target : workspace.targets)
+            sceneWorkspace.targets.push_back(build_scene_target(monitor, target, selection));
 
         // Track one selection outline box per monitor so render code can draw a
         // single highlighted border without re-walking the logical model.

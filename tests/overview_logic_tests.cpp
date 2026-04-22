@@ -3,6 +3,7 @@
 #include "core/layout_math.h"
 #include "overview/logic.h"
 #include "overview/orientation_math.h"
+#include "overview/scene_layout.h"
 
 #include "test_suite.h"
 #include "test_support.h"
@@ -95,6 +96,34 @@ void test_overview_empty_target_region_selection() {
                 "overview empty target chooses the adjacent monitor region when crossing monitor bounds");
 }
 
+void test_overview_target_selection_prefers_rendered_neighbor() {
+    const std::vector<ScrollerCore::Box> workspaceOneBoxes = {
+        {0.0, 0.0, 100.0, 80.0},
+        {0.0, 120.0, 100.0, 80.0},
+    };
+    const std::vector<ScrollerCore::Box> workspaceTwoBoxes = {
+        {0.0, 0.0, 100.0, 80.0},
+        {0.0, 120.0, 100.0, 80.0},
+        {0.0, 240.0, 100.0, 80.0},
+    };
+
+    const auto leftContent = Overview::buildWorkspaceContentBox({0.0, 0.0, 220.0, 220.0});
+    const auto rightContent = Overview::buildWorkspaceContentBox({240.0, 0.0, 220.0, 220.0});
+    const auto leftProjected = Overview::projectGlobalBoxesToContent(workspaceOneBoxes, leftContent, 0.0, 0.0);
+    const auto rightProjected = Overview::projectGlobalBoxesToContent(workspaceTwoBoxes, rightContent, 0.0, 0.0);
+
+    const std::vector<OverviewLogic::TargetCandidate> targets = {
+        {.monitorId = 1, .box = leftProjected[0]},
+        {.monitorId = 1, .box = rightProjected[1]},
+        {.monitorId = 1, .box = leftProjected[1]},
+        {.monitorId = 1, .box = rightProjected[2]},
+    };
+
+    const auto next = OverviewLogic::pickTargetIndex(targets, 2, Direction::Up);
+    expect_true(next.has_value() && *next == 0,
+                "overview movefocus prefers the aligned upward neighbor over a closer diagonal workspace target");
+}
+
 void test_overview_empty_accept_plan() {
     const auto plan = OverviewLogic::buildEmptyAcceptPlan(7, 42);
     expect_eq(plan.size(), static_cast<size_t>(2), "overview empty accept plan emits two steps");
@@ -137,6 +166,7 @@ void run_overview_logic_tests() {
     test_monitor_space_orientation();
     test_overview_target_selection_across_monitors();
     test_overview_empty_target_region_selection();
+    test_overview_target_selection_prefers_rendered_neighbor();
     test_overview_empty_accept_plan();
     test_overview_window_accept_plan();
     test_overview_special_workspace_accept_plan();

@@ -21,15 +21,40 @@ void test_project_boxes_to_content_preserves_order_and_fits_bounds() {
     expect_true(projected[0].y + projected[0].h <= 200.0, "projection stays inside content max y");
 }
 
+void test_project_global_boxes_to_content_tracks_workspace_card_position() {
+    const std::vector<ScrollerCore::Box> source = {
+        {0.0, 0.0, 100.0, 80.0},
+        {120.0, 0.0, 90.0, 80.0},
+    };
+
+    const auto leftContent = Overview::buildWorkspaceContentBox({0.0, 0.0, 220.0, 180.0});
+    const auto rightContent = Overview::buildWorkspaceContentBox({260.0, 0.0, 220.0, 180.0});
+    const auto leftProjected = Overview::projectGlobalBoxesToContent(source, leftContent, 0.0, 0.0);
+    const auto rightProjected = Overview::projectGlobalBoxesToContent(source, rightContent, 0.0, 0.0);
+
+    expect_true(leftProjected[0].x < rightProjected[0].x,
+                "global projection respects the workspace card's global x position");
+    expect_true(rightProjected[1].x + rightProjected[1].w <= rightContent.x + rightContent.w,
+                "global projection stays inside the destination content box");
+}
+
 void test_empty_workspace_preview_box_is_inset() {
     const auto preview = Overview::buildEmptyWorkspacePreviewBox({0.0, 0.0, 240.0, 160.0});
     expect_true(preview.x > 0.0 && preview.y > 0.0, "empty workspace preview is inset from content box");
     expect_true(preview.w < 240.0 && preview.h < 160.0, "empty workspace preview shrinks relative to content box");
 }
 
+void test_workspace_content_box_reserves_header_band() {
+    const auto content = Overview::buildWorkspaceContentBox({10.0, 20.0, 240.0, 160.0});
+    expect_true(content.x > 10.0 && content.y > 20.0, "workspace content box insets from the outer workspace frame");
+    expect_true(content.h < 160.0, "workspace content box reserves header height");
+}
+
 } // namespace
 
 void run_overview_scene_tests() {
     test_project_boxes_to_content_preserves_order_and_fits_bounds();
+    test_project_global_boxes_to_content_tracks_workspace_card_position();
     test_empty_workspace_preview_box_is_inset();
+    test_workspace_content_box_reserves_header_band();
 }

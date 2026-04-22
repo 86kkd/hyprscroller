@@ -10,6 +10,7 @@
  */
 #include "logic.h"
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 
@@ -24,6 +25,27 @@ double center_x(const ScrollerCore::Box& box) {
 
 double center_y(const ScrollerCore::Box& box) {
     return box.y + box.h / 2.0;
+}
+
+double overlap_length(double a0, double a1, double b0, double b1) {
+    return std::max(0.0, std::min(a1, b1) - std::max(a0, b0));
+}
+
+double beam_overlap(const ScrollerCore::Box& from, const ScrollerCore::Box& candidate, Direction direction) {
+    switch (direction) {
+        case Direction::Left:
+        case Direction::Right:
+            return overlap_length(from.y, from.y + from.h, candidate.y, candidate.y + candidate.h);
+        case Direction::Up:
+        case Direction::Down:
+            return overlap_length(from.x, from.x + from.w, candidate.x, candidate.x + candidate.w);
+        default:
+            return 0.0;
+    }
+}
+
+bool nearly_equal(double lhs, double rhs, double epsilon = 1e-6) {
+    return std::abs(lhs - rhs) <= epsilon;
 }
 
 bool is_in_direction(const ScrollerCore::Box& from, const ScrollerCore::Box& candidate, Direction direction) {
@@ -81,15 +103,17 @@ std::optional<size_t> pickTargetIndex(const std::vector<TargetCandidate>& target
 
     const auto& current = targets[currentIndex];
     auto bestIndex = std::optional<size_t>{};
+    auto bestBeamOverlap = 0.0;
     auto bestPrimary = std::numeric_limits<double>::infinity();
     auto bestMonitorPenalty = std::numeric_limits<int>::max();
     auto bestSecondary = std::numeric_limits<double>::infinity();
 
     // Ranking order:
     // 1. candidate must lie in the requested direction
-    // 2. nearest candidate on the primary axis wins
-    // 3. same-monitor targets beat cross-monitor ones
-    // 4. better perpendicular alignment breaks final ties
+    // 2. candidates that overlap the directional beam (same row/column) win
+    // 3. nearest candidate on the primary axis wins
+    // 4. same-monitor targets beat cross-monitor ones
+    // 5. better perpendicular alignment breaks final ties
     for (size_t index = 0; index < targets.size(); ++index) {
         if (index == currentIndex)
             continue;
@@ -98,14 +122,23 @@ std::optional<size_t> pickTargetIndex(const std::vector<TargetCandidate>& target
         if (!is_in_direction(current.box, candidate.box, direction))
             continue;
 
+        const auto beam = beam_overlap(current.box, candidate.box, direction);
         const auto primary = primary_distance(current.box, candidate.box, direction);
         const auto monitorPenalty = candidate.monitorId == current.monitorId ? 0 : 1;
         const auto secondary = secondary_distance(current.box, candidate.box, direction);
+        const auto beamAligned = beam > 0.0;
+        const auto bestBeamAligned = bestBeamOverlap > 0.0;
 
-        if (!bestIndex || primary < bestPrimary ||
-            (primary == bestPrimary && monitorPenalty < bestMonitorPenalty) ||
-            (primary == bestPrimary && monitorPenalty == bestMonitorPenalty && secondary < bestSecondary)) {
+        if (!bestIndex ||
+            (beamAligned && !bestBeamAligned) ||
+            (beamAligned == bestBeamAligned && primary < bestPrimary && !nearly_equal(primary, bestPrimary)) ||
+            (beamAligned == bestBeamAligned && nearly_equal(primary, bestPrimary) && monitorPenalty < bestMonitorPenalty) ||
+            (beamAligned == bestBeamAligned && nearly_equal(primary, bestPrimary) && monitorPenalty == bestMonitorPenalty &&
+             beamAligned && beam > bestBeamOverlap && !nearly_equal(beam, bestBeamOverlap)) ||
+            (beamAligned == bestBeamAligned && nearly_equal(primary, bestPrimary) && monitorPenalty == bestMonitorPenalty &&
+             (!beamAligned || nearly_equal(beam, bestBeamOverlap)) && secondary < bestSecondary)) {
             bestIndex = index;
+            bestBeamOverlap = beam;
             bestPrimary = primary;
             bestMonitorPenalty = monitorPenalty;
             bestSecondary = secondary;
