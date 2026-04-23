@@ -31,7 +31,6 @@ class Session {
     bool selectInitialTarget();
     bool acceptSelection();
     bool restoreOrigin();
-    bool createSyntheticEmptyTarget(Direction direction);
     std::optional<TargetRef> findBestTarget(Direction direction) const;
     void clear();
 

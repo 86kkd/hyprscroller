@@ -23,11 +23,6 @@ struct TargetCandidate {
     ScrollerCore::Box box;
 };
 
-struct RegionCandidate {
-    int               monitorId = MONITOR_ID_INVALID;
-    ScrollerCore::Box box;
-};
-
 enum class AcceptActionType {
     FocusMonitor,
     Workspace,
@@ -41,10 +36,6 @@ struct AcceptAction {
 };
 
 std::optional<size_t> pickTargetIndex(const std::vector<TargetCandidate>& targets, size_t currentIndex, Direction direction);
-std::optional<size_t> pickRegionIndexForSyntheticTarget(const std::vector<RegionCandidate>& regions, size_t currentRegionIndex,
-                                                        const ScrollerCore::Box& sourceBox, Direction direction);
-ScrollerCore::Box     buildSyntheticTargetBox(const RegionCandidate& region, const ScrollerCore::Box& sourceBox,
-                                              Direction direction);
 std::vector<AcceptAction> buildWorkspaceAcceptPlan(int monitorId, WorkspaceId workspaceId, bool specialWorkspace);
 std::vector<AcceptAction> buildEmptyAcceptPlan(int monitorId, WorkspaceId workspaceId);
 

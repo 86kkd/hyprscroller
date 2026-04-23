@@ -84,18 +84,6 @@ void test_overview_target_selection_across_monitors() {
                 "overview target selection crosses to the next monitor when the nearest target is there");
 }
 
-void test_overview_empty_target_region_selection() {
-    const std::vector<OverviewLogic::RegionCandidate> regions = {
-        {.monitorId = 1, .box = {0.0, 0.0, 300.0, 300.0}},
-        {.monitorId = 2, .box = {320.0, 0.0, 300.0, 300.0}},
-    };
-
-    const ScrollerCore::Box sourceBox(260.0, 120.0, 80.0, 80.0);
-    const auto regionIndex = OverviewLogic::pickRegionIndexForSyntheticTarget(regions, 0, sourceBox, Direction::Right);
-    expect_true(regionIndex.has_value() && *regionIndex == 1,
-                "overview empty target chooses the adjacent monitor region when crossing monitor bounds");
-}
-
 void test_overview_target_selection_prefers_rendered_neighbor() {
     const std::vector<ScrollerCore::Box> workspaceOneBoxes = {
         {0.0, 0.0, 100.0, 80.0},
@@ -122,6 +110,18 @@ void test_overview_target_selection_prefers_rendered_neighbor() {
     const auto next = OverviewLogic::pickTargetIndex(targets, 2, Direction::Up);
     expect_true(next.has_value() && *next == 0,
                 "overview movefocus prefers the aligned upward neighbor over a closer diagonal workspace target");
+}
+
+void test_overview_target_selection_stops_at_preview_edge() {
+    const std::vector<OverviewLogic::TargetCandidate> targets = {
+        {.monitorId = 1, .box = {0.0, 0.0, 100.0, 100.0}},
+        {.monitorId = 1, .box = {120.0, 0.0, 100.0, 100.0}},
+    };
+
+    expect_true(!OverviewLogic::pickTargetIndex(targets, 0, Direction::Left).has_value(),
+                "overview movefocus stops when there is no preview to the left");
+    expect_true(!OverviewLogic::pickTargetIndex(targets, 1, Direction::Right).has_value(),
+                "overview movefocus stops when there is no preview to the right");
 }
 
 void test_overview_empty_accept_plan() {
@@ -165,8 +165,8 @@ void run_overview_logic_tests() {
     test_overview_projection();
     test_monitor_space_orientation();
     test_overview_target_selection_across_monitors();
-    test_overview_empty_target_region_selection();
     test_overview_target_selection_prefers_rendered_neighbor();
+    test_overview_target_selection_stops_at_preview_edge();
     test_overview_empty_accept_plan();
     test_overview_window_accept_plan();
     test_overview_special_workspace_accept_plan();

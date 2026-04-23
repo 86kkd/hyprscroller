@@ -214,50 +214,6 @@ std::optional<TargetRef> Session::findBestTarget(Direction direction) const {
     return targetGraph[*nextIndex].ref;
 }
 
-bool Session::createSyntheticEmptyTarget(Direction direction) {
-    const auto* selection = model_.selection();
-    if (!selection)
-        return false;
-
-    // Synthetic targets are routed at monitor-region granularity rather than
-    // real-target granularity. The current selection box becomes the seed for
-    // where the "empty workspace" box should appear next.
-    std::vector<OverviewLogic::RegionCandidate> regions;
-    regions.reserve(model_.monitors().size());
-    auto currentRegionIndex = size_t{0};
-    auto foundCurrentRegion = false;
-    for (size_t index = 0; index < model_.monitors().size(); ++index) {
-        const auto& region = model_.monitors()[index];
-        regions.push_back({.monitorId = region.monitorId, .box = region.box});
-        if (!foundCurrentRegion && region.monitorId == selection->monitorId) {
-            currentRegionIndex = index;
-            foundCurrentRegion = true;
-        }
-    }
-
-    if (!foundCurrentRegion)
-        return false;
-
-    const auto regionIndex = OverviewLogic::pickRegionIndexForSyntheticTarget(regions, currentRegionIndex, selection->box, direction);
-    if (!regionIndex)
-        return false;
-
-    const auto& region = model_.monitors()[*regionIndex];
-    model_.setSyntheticSelection(makeEmptyTarget(SessionEffects::nextWorkspaceId(),
-                                                 region.monitorId,
-                                                 OverviewLogic::buildSyntheticTargetBox(regions[*regionIndex], selection->box, direction),
-                                                 true));
-    const auto* syntheticSelection = model_.selection();
-    spdlog::info("overview_create_empty: workspace={} monitor={} box=({}, {}, {}, {})",
-                 syntheticSelection ? syntheticSelection->workspaceId : INVALID_WORKSPACE_ID,
-                 syntheticSelection ? syntheticSelection->monitorId : INVALID_MONITOR_ID,
-                 syntheticSelection ? syntheticSelection->box.x : 0.0,
-                 syntheticSelection ? syntheticSelection->box.y : 0.0,
-                 syntheticSelection ? syntheticSelection->box.w : 0.0,
-                 syntheticSelection ? syntheticSelection->box.h : 0.0);
-    return true;
-}
-
 bool Session::moveSelection(Direction direction) {
     if (!active_ || !model_.selection())
         return false;
@@ -276,10 +232,9 @@ bool Session::moveSelection(Direction direction) {
         return true;
     }
 
-    const auto created = createSyntheticEmptyTarget(direction);
-    if (created)
-        damageMonitors();
-    return created;
+    // Overview navigation is preview-only: reaching an edge should stop rather
+    // than synthesizing a brand-new workspace candidate.
+    return false;
 }
 
 bool Session::acceptSelection() {

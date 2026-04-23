@@ -5,7 +5,6 @@
  * This file is intentionally renderer-free and compositor-free. It answers
  * questions such as:
  * - which target should directional navigation land on?
- * - which monitor region should host a synthetic empty-workspace target?
  * - which ordered dispatcher steps should be executed when the user accepts?
  */
 #include "logic.h"
@@ -146,95 +145,6 @@ std::optional<size_t> pickTargetIndex(const std::vector<TargetCandidate>& target
     }
 
     return bestIndex;
-}
-
-std::optional<size_t> pickRegionIndexForSyntheticTarget(const std::vector<RegionCandidate>& regions, size_t currentRegionIndex,
-                                                        const ScrollerCore::Box& sourceBox, Direction direction) {
-    if (regions.empty() || currentRegionIndex >= regions.size())
-        return std::nullopt;
-
-    const auto& current = regions[currentRegionIndex];
-    // Synthetic targets only leave the current region when the proposed box
-    // would overflow that region in the requested direction.
-    const auto overflowsCurrentRegion = [&] {
-        switch (direction) {
-            case Direction::Left:
-                return sourceBox.x < current.box.x;
-            case Direction::Right:
-                return sourceBox.x + sourceBox.w > current.box.x + current.box.w;
-            case Direction::Up:
-                return sourceBox.y < current.box.y;
-            case Direction::Down:
-                return sourceBox.y + sourceBox.h > current.box.y + current.box.h;
-            default:
-                return false;
-        }
-    };
-
-    if (!overflowsCurrentRegion())
-        return currentRegionIndex;
-
-    auto bestIndex = std::optional<size_t>{};
-    auto bestPrimary = std::numeric_limits<double>::infinity();
-    auto bestSecondary = std::numeric_limits<double>::infinity();
-
-    // Region selection is simpler than concrete target selection: regions are
-    // already monitor-sized buckets, so we only compare directional proximity
-    // and then alignment with the source box.
-    for (size_t index = 0; index < regions.size(); ++index) {
-        if (index == currentRegionIndex)
-            continue;
-
-        const auto& candidate = regions[index];
-        if (!is_in_direction(current.box, candidate.box, direction))
-            continue;
-
-        const auto primary = primary_distance(current.box, candidate.box, direction);
-        const auto secondary = secondary_distance(sourceBox, candidate.box, direction);
-        if (!bestIndex || primary < bestPrimary || (primary == bestPrimary && secondary < bestSecondary)) {
-            bestIndex = index;
-            bestPrimary = primary;
-            bestSecondary = secondary;
-        }
-    }
-
-    if (bestIndex)
-        return bestIndex;
-
-    return currentRegionIndex;
-}
-
-ScrollerCore::Box buildSyntheticTargetBox(const RegionCandidate& region, const ScrollerCore::Box& sourceBox, Direction direction) {
-    auto box = sourceBox;
-    // Advance by at least one source-box size, but also by a fraction of the
-    // destination region so very small source boxes still move perceptibly.
-    const auto stepX = std::max(box.w, region.box.w * 0.35);
-    const auto stepY = std::max(box.h, region.box.h * 0.35);
-
-    switch (direction) {
-        case Direction::Left:
-            box.x -= stepX;
-            break;
-        case Direction::Right:
-            box.x += stepX;
-            break;
-        case Direction::Up:
-            box.y -= stepY;
-            break;
-        case Direction::Down:
-            box.y += stepY;
-            break;
-        default:
-            break;
-    }
-
-    // Synthetic empty-workspace targets must stay fully inside the destination
-    // region because later hit-testing assumes valid in-bounds boxes.
-    box.w = std::min(box.w, region.box.w);
-    box.h = std::min(box.h, region.box.h);
-    box.x = std::clamp(box.x, region.box.x, region.box.x + std::max(0.0, region.box.w - box.w));
-    box.y = std::clamp(box.y, region.box.y, region.box.y + std::max(0.0, region.box.h - box.h));
-    return box;
 }
 
 std::vector<AcceptAction> buildEmptyAcceptPlan(int monitorId, WorkspaceId workspaceId) {
