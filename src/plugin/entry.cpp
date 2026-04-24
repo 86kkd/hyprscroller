@@ -34,6 +34,7 @@
 #include "layout/canvas/internal.h"
 #include "layout/canvas/layout.h"
 #include "layout/canvas/layout_repository.h"
+#include "layout/canvas/canvas_workspace_repository.h"
 #include "overview/render/render.h"
 
 // Hyprland plugin handle used by config lookups and dispatcher registration.
@@ -126,6 +127,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     PHANDLE = handle;
     init_logging();
     CanvasLayoutState::repository().initialize();
+    CanvasLayoutState::canvasRepository().initialize();
     spdlog::info("pluginInit handle={}", static_cast<const void*>(handle));
 
 #ifdef COLORS_IPC
@@ -165,6 +167,7 @@ APICALL EXPORT void PLUGIN_EXIT() {
             layout->persistCurrentSnapshot();
     }
     CanvasLayoutState::repository().flush();
+    CanvasLayoutState::canvasRepository().flush();
     Overview::shutdownRendererHooks(PHANDLE);
     spdlog::info("pluginExit");
 }

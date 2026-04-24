@@ -4,6 +4,8 @@
  */
 #include "plugin/dispatch/shared.h"
 
+#include "core/core.h"
+
 namespace dispatchers::detail {
 namespace {
 
@@ -50,6 +52,52 @@ void dispatch_movefocus(std::string arg) {
 
     spdlog::info("dispatch_movefocus: arg='{}' workspace={}", arg, action.workspace);
     action.layout->move_focus(action.workspace, *direction);
+}
+
+// focusmonitor <dir>: move monitor focus in normal mode, or move between
+// canvas-workspace tiles in overview mode.
+void dispatch_focusmonitor(std::string arg) {
+    const auto direction = parsedDirectionArg(arg);
+    if (!direction) {
+        spdlog::warn("dispatch_focusmonitor: unsupported arg='{}'", arg);
+        return;
+    }
+
+    if (Overview::session().active()) {
+        spdlog::info("dispatch_focusmonitor: overview arg='{}'", arg);
+        overviewSessionForDispatch().moveCanvasSelection(*direction);
+        return;
+    }
+
+    const auto sourceMonitor = ScrollerCore::monitorFromPointingOrCursor();
+    const auto monitorDirection = CanvasLayoutInternal::direction_to_math(*direction);
+    if (!g_pCompositor || !sourceMonitor || !monitorDirection) {
+        spdlog::warn("dispatch_focusmonitor: no route direction={} source_monitor={}",
+                     ScrollerCore::direction_name(*direction),
+                     sourceMonitor ? sourceMonitor->m_id : MONITOR_INVALID);
+        return;
+    }
+
+    const auto targetMonitor = g_pCompositor->getMonitorInDirection(sourceMonitor, *monitorDirection);
+    if (!targetMonitor) {
+        spdlog::info("dispatch_focusmonitor: no adjacent monitor direction={} source_monitor={}",
+                     ScrollerCore::direction_name(*direction),
+                     sourceMonitor->m_id);
+        return;
+    }
+
+    const auto targetWorkspaceId = CanvasLayoutInternal::preferred_workspace_id(targetMonitor, targetMonitor->activeWorkspaceID());
+    const auto targetWorkspace = g_pCompositor->getWorkspaceByID(targetWorkspaceId);
+    if (!CanvasLayoutInternal::focus_monitor_workspace(targetMonitor,
+                                                       targetWorkspace,
+                                                       targetWorkspaceId,
+                                                       true,
+                                                       "dispatch_focusmonitor")) {
+        spdlog::warn("dispatch_focusmonitor: failed direction={} target_monitor={} workspace={}",
+                     ScrollerCore::direction_name(*direction),
+                     targetMonitor->m_id,
+                     targetWorkspaceId);
+    }
 }
 
 // movewindow <dir>: reorder active window inside lane/stack.
@@ -131,6 +179,7 @@ void dispatch_focuslane(std::string arg) {
 void registerLayoutDispatchers() {
     registerDispatcher("scroller:cyclesize", dispatch_cyclesize);
     registerDispatcher("scroller:movefocus", dispatch_movefocus);
+    registerDispatcher("scroller:focusmonitor", dispatch_focusmonitor);
     registerDispatcher("scroller:movewindow", dispatch_movewindow);
     registerDispatcher("scroller:alignwindow", dispatch_alignwindow);
     registerDispatcher("scroller:admitwindow", dispatch_admitwindow);

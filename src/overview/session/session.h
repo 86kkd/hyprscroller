@@ -22,6 +22,7 @@ class Session {
     void close(bool acceptSelectionFlag);
     void dismiss();
     bool moveSelection(Direction direction);
+    bool moveCanvasSelection(Direction direction);
     void markInputHandled();
     bool consumeInputHandled(bool released);
     const Model& model() const;
@@ -29,6 +30,10 @@ class Session {
 
   private:
     bool selectInitialTarget();
+    bool selectCanvas(int canvasId, std::optional<int> preferredMonitorId = std::nullopt);
+    bool activateCanvas(int canvasId, int selectedMonitorId, const char* context);
+    bool finalizeCanvasTarget(const Target& target, bool warpCursor);
+    bool finalizeCanvasOrigin(const OriginState& origin);
     bool acceptSelection();
     bool restoreOrigin();
     std::optional<TargetRef> findBestTarget(Direction direction) const;
@@ -37,6 +42,9 @@ class Session {
     bool                  active_ = false;
     InputHandlingState    inputHandling_;
     Model                 model_;
+    int                   originCanvasId_ = INVALID_CANVAS_ID;
+    int                   viewCanvasId_ = INVALID_CANVAS_ID;
+    std::vector<CanvasLayoutState::SyntheticCanvasWorkspace> pendingCanvases_;
 };
 
 Session& session();

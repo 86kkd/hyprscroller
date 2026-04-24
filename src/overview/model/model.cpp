@@ -9,29 +9,18 @@
 #include "overview/model/model.h"
 
 #include <algorithm>
+#include <unordered_map>
 
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/desktop/Workspace.hpp>
 
 #include "layout/canvas/internal.h"
+#include "overview/navigation/logic.h"
 #include "overview/model/layout.h"
 #include "overview/scene/layout.h"
 
 namespace Overview {
 namespace {
-
-// A workspace may be logically assigned to one monitor but visibly rendered on
-// another one, especially for special workspaces. Prefer the currently visible
-// monitor whenever possible so overview reflects what the user actually sees.
-PHLMONITOR monitor_for_workspace(PHLWORKSPACE workspace) {
-    if (!workspace)
-        return nullptr;
-
-    if (const auto monitor = CanvasLayoutInternal::visible_monitor_for_workspace(workspace))
-        return monitor;
-
-    return g_pCompositor->getMonitorFromID(workspace->monitorID());
-}
 
 // Overview intentionally ignores floating/unmapped windows so navigation and
 // rendering only deal with tiled content produced by the canvas layout.
@@ -51,49 +40,59 @@ MonitorRegion make_monitor_region(PHLMONITOR monitor) {
     };
 }
 
-MonitorRegion* find_region_by_monitor_id(std::vector<MonitorRegion>& monitors, int monitorId) {
-    if (monitorId == INVALID_MONITOR_ID)
-        return nullptr;
-
-    const auto regionIt = std::find_if(monitors.begin(), monitors.end(), [&](const MonitorRegion& region) {
-        return region.monitorId == monitorId;
+const CanvasLayoutState::CanvasWorkspaceMember* find_member(const CanvasLayoutState::CanvasWorkspaceRecord& canvas, int monitorId) {
+    const auto memberIt = std::find_if(canvas.members.begin(), canvas.members.end(), [&](const auto& member) {
+        return member.monitorId == monitorId;
     });
-    return regionIt == monitors.end() ? nullptr : &*regionIt;
+    return memberIt == canvas.members.end() ? nullptr : &*memberIt;
 }
 
-MonitorRegion* resolve_workspace_region(std::vector<MonitorRegion>& monitors, int snapshotMonitorId, PHLWORKSPACE workspace) {
-    // Prefer the monitor id captured in the snapshot, then fall back to a fresh
-    // runtime lookup in case the workspace moved between snapshotting and model
-    // rebuild.
-    if (auto* region = find_region_by_monitor_id(monitors, snapshotMonitorId))
-        return region;
-
-    const auto monitor = monitor_for_workspace(workspace);
-    if (!monitor)
-        return nullptr;
-
-    return find_region_by_monitor_id(monitors, monitor->m_id);
+bool is_synthetic_canvas(const std::vector<CanvasLayoutState::SyntheticCanvasWorkspace>& synthetics, int canvasId) {
+    return std::any_of(synthetics.begin(), synthetics.end(), [&](const auto& synthetic) {
+        return synthetic.canvas.canvasId == canvasId;
+    });
 }
 
-WorkspaceNode build_workspace_node(const CanvasOverviewSnapshot& snapshot, int monitorId) {
+const CanvasLayoutState::CanvasWorkspaceRecord* find_canvas_record(const std::vector<CanvasLayoutState::CanvasWorkspaceRecord>& canvases, int canvasId) {
+    const auto canvasIt = std::find_if(canvases.begin(), canvases.end(), [&](const auto& canvas) {
+        return canvas.canvasId == canvasId;
+    });
+    return canvasIt == canvases.end() ? nullptr : &*canvasIt;
+}
+
+WorkspaceNode build_workspace_node(const CanvasLayoutState::CanvasWorkspaceRecord& canvas,
+                                   int monitorId,
+                                   const CanvasLayoutState::CanvasWorkspaceMember* member,
+                                   const CanvasOverviewSnapshot* snapshot,
+                                   bool synthetic) {
     WorkspaceNode node;
-    node.workspaceId = snapshot.workspaceId;
+    node.canvasId = canvas.canvasId;
+    node.tileX = canvas.tileX;
+    node.tileY = canvas.tileY;
+    node.workspaceId = member ? member->workspaceId : INVALID_WORKSPACE_ID;
     node.monitorId = monitorId;
+    node.specialWorkspace = member ? member->special : false;
+    node.synthetic = synthetic;
+
+    if (!snapshot)
+        return node;
 
     // Snapshot windows are already laid out by the canvas layer. Model building
     // only filters and rewraps them into overview targets.
-    for (const auto& snapshotWindow : snapshot.windows) {
+    for (const auto& snapshotWindow : snapshot->windows) {
         if (!is_tiled_overview_window(snapshotWindow.window))
             continue;
 
         node.targets.push_back({
             .type = TargetType::Window,
-            .workspaceId = snapshot.workspaceId,
+            .canvasId = canvas.canvasId,
+            .workspaceId = node.workspaceId,
             .monitorId = monitorId,
+            .specialWorkspace = node.specialWorkspace,
             .window = snapshotWindow.window,
             .box = snapshotWindow.box,
             .sourceBox = snapshotWindow.box,
-            .synthetic = false,
+            .synthetic = synthetic,
         });
     }
 
@@ -104,7 +103,7 @@ void project_workspace_targets(PHLMONITOR monitor, WorkspaceNode& workspace) {
     if (!monitor || workspace.targets.empty())
         return;
 
-    const auto contentBox = buildWorkspaceContentBox(workspace.box);
+    const auto contentBox = workspace.box;
     std::vector<size_t> windowIndexes;
     std::vector<ScrollerCore::Box> sourceBoxes;
     windowIndexes.reserve(workspace.targets.size());
@@ -124,9 +123,8 @@ void project_workspace_targets(PHLMONITOR monitor, WorkspaceNode& workspace) {
     }
 
     if (windowIndexes.empty()) {
-        const auto emptyPreviewBox = buildEmptyWorkspacePreviewBox(contentBox);
         for (auto& target : workspace.targets)
-            target.box = emptyPreviewBox;
+            target.box = contentBox;
         return;
     }
 
@@ -146,6 +144,7 @@ void Model::clear() {
     origin_ = {};
     monitors_.clear();
     targetGraph_.clear();
+    canvasGraph_.clear();
     selectionRef_.reset();
     syntheticSelection_.reset();
 }
@@ -170,6 +169,10 @@ const std::vector<TargetGraphNode>& Model::targetGraph() const {
     return targetGraph_;
 }
 
+const std::vector<CanvasGraphNode>& Model::canvasGraph() const {
+    return canvasGraph_;
+}
+
 const std::optional<TargetRef>& Model::selectionRef() const {
     return selectionRef_;
 }
@@ -179,6 +182,14 @@ const Target* Model::selection() const {
         return nullptr;
 
     return resolve(*selectionRef_);
+}
+
+std::optional<int> Model::selectionCanvasId() const {
+    const auto* selected = selection();
+    if (!selected)
+        return std::nullopt;
+
+    return selected->canvasId;
 }
 
 void Model::setSelection(const TargetRef& ref) {
@@ -238,11 +249,14 @@ const Target* Model::resolve(const TargetRef& ref) const {
 }
 
 std::optional<TargetRef> Model::findByWindow(PHLWINDOW window) const {
+    if (!window)
+        return std::nullopt;
+
     // Lookups are served from the flattened target graph because callers usually
     // care about "all selectable things", not the nested storage shape.
     for (const auto& node : targetGraph_) {
         const auto* target = resolve(node.ref);
-        if (target && target->window == window)
+        if (target && target->type == TargetType::Window && target->window == window)
             return node.ref;
     }
 
@@ -261,11 +275,106 @@ std::optional<TargetRef> Model::findByWorkspace(WORKSPACEID workspaceId) const {
     return std::nullopt;
 }
 
+std::optional<TargetRef> Model::firstTargetInCanvas(int canvasId, std::optional<int> preferredMonitorId) const {
+    std::optional<TargetRef> preferredWindow;
+    std::optional<TargetRef> preferredTarget;
+    std::optional<TargetRef> firstWindow;
+    std::optional<TargetRef> firstTargetInCanvasRef;
+
+    for (const auto& node : targetGraph_) {
+        const auto* target = resolve(node.ref);
+        if (!target || target->canvasId != canvasId)
+            continue;
+
+        if (!firstTargetInCanvasRef)
+            firstTargetInCanvasRef = node.ref;
+        if (target->type == TargetType::Window && !firstWindow)
+            firstWindow = node.ref;
+
+        if (preferredMonitorId && target->monitorId == *preferredMonitorId) {
+            if (!preferredTarget)
+                preferredTarget = node.ref;
+            if (target->type == TargetType::Window && !preferredWindow)
+                preferredWindow = node.ref;
+        }
+    }
+
+    if (preferredWindow)
+        return preferredWindow;
+    if (preferredTarget)
+        return preferredTarget;
+    if (firstWindow)
+        return firstWindow;
+    return firstTargetInCanvasRef;
+}
+
+std::optional<int> Model::findAdjacentCanvas(int canvasId, Direction direction) const {
+    if (canvasGraph_.empty())
+        return std::nullopt;
+
+    std::vector<OverviewLogic::TargetCandidate> candidates;
+    candidates.reserve(canvasGraph_.size());
+    auto currentIndex = std::optional<size_t>{};
+    for (size_t index = 0; index < canvasGraph_.size(); ++index) {
+        const auto& canvas = canvasGraph_[index];
+        candidates.push_back({
+            .monitorId = 0,
+            .box = canvas.box,
+        });
+        if (canvas.canvasId == canvasId)
+            currentIndex = index;
+    }
+
+    if (!currentIndex)
+        return std::nullopt;
+
+    const auto nextIndex = OverviewLogic::pickTargetIndex(candidates, *currentIndex, direction);
+    if (!nextIndex)
+        return std::nullopt;
+
+    return canvasGraph_[*nextIndex].canvasId;
+}
+
 std::optional<TargetRef> Model::firstTarget() const {
     if (targetGraph_.empty())
         return std::nullopt;
 
     return targetGraph_.front().ref;
+}
+
+void Model::rebuildCanvasGraph() {
+    canvasGraph_.clear();
+
+    for (const auto& region : monitors_) {
+        for (const auto& workspace : region.workspaces) {
+            const auto exists = std::any_of(canvasGraph_.begin(), canvasGraph_.end(), [&](const auto& canvas) {
+                return canvas.canvasId == workspace.canvasId;
+            });
+            if (exists)
+                continue;
+
+            canvasGraph_.push_back({
+                .canvasId = workspace.canvasId,
+                .tileX = workspace.tileX,
+                .tileY = workspace.tileY,
+                .box = {
+                    static_cast<double>(workspace.tileX) * 128.0,
+                    static_cast<double>(workspace.tileY) * 128.0,
+                    96.0,
+                    96.0,
+                },
+                .synthetic = workspace.synthetic,
+            });
+        }
+    }
+
+    std::sort(canvasGraph_.begin(), canvasGraph_.end(), [](const auto& lhs, const auto& rhs) {
+        if (lhs.tileY != rhs.tileY)
+            return lhs.tileY < rhs.tileY;
+        if (lhs.tileX != rhs.tileX)
+            return lhs.tileX < rhs.tileX;
+        return lhs.canvasId < rhs.canvasId;
+    });
 }
 
 void Model::rebuildTargetGraph() {
@@ -286,6 +395,7 @@ void Model::rebuildTargetGraph() {
                         .workspaceIndex = workspaceIndex,
                         .targetIndex = targetIndex,
                     },
+                    .canvasId = target.canvasId,
                     .monitorId = target.monitorId,
                     .workspaceId = target.workspaceId,
                     .box = target.box,
@@ -299,6 +409,7 @@ void Model::rebuildTargetGraph() {
     if (syntheticSelection_) {
         targetGraph_.push_back({
             .ref = TargetRef{.synthetic = true},
+            .canvasId = syntheticSelection_->canvasId,
             .monitorId = syntheticSelection_->monitorId,
             .workspaceId = syntheticSelection_->workspaceId,
             .box = syntheticSelection_->box,
@@ -306,18 +417,31 @@ void Model::rebuildTargetGraph() {
     }
 }
 
-void Model::rebuild() {
+void Model::rebuild(const std::vector<CanvasLayoutState::SyntheticCanvasWorkspace>& synthetics, int viewportCanvasId) {
     // Rebuild is a full snapshot refresh:
-    // 1. enumerate monitors into empty regions
-    // 2. ask every canvas-backed workspace for a read-only snapshot
-    // 3. attach each workspace to the correct monitor region
-    // 4. lay out workspace tiles inside every region
+    // 1. enumerate current monitors into empty regions
+    // 2. ask the persistent canvas repository for the canvas-workspace graph
+    // 3. attach one monitor-local workspace node per canvas
+    // 4. lay out those nodes by canvas tile coordinates
     // 5. project targets into final preview geometry
-    // 6. flatten the result into the navigation graph
+    // 6. flatten the result into both target and canvas navigation graphs
     monitors_.clear();
     selectionRef_.reset();
     syntheticSelection_.reset();
     targetGraph_.clear();
+    canvasGraph_.clear();
+
+    if (!g_pCompositor)
+        return;
+
+    auto& canvasRepo = CanvasLayoutState::canvasRepository();
+    canvasRepo.initialize();
+    const auto activeCanvasId = canvasRepo.ensureCurrentVisibleCanvas();
+    const auto previewCanvases = canvasRepo.previewCanvases(synthetics);
+    const auto* anchorCanvas = find_canvas_record(previewCanvases,
+                                                  viewportCanvasId != INVALID_CANVAS_ID ? viewportCanvasId : activeCanvasId);
+    const auto anchorTileX = anchorCanvas ? anchorCanvas->tileX : 0;
+    const auto anchorTileY = anchorCanvas ? anchorCanvas->tileY : 0;
 
     for (const auto& monitor : g_pCompositor->m_monitors) {
         if (!monitor)
@@ -326,34 +450,38 @@ void Model::rebuild() {
         monitors_.push_back(make_monitor_region(monitor));
     }
 
-    // Only workspaces backed by a live CanvasLayout participate in overview.
-    // That keeps overview aligned with the plugin's own layout state.
-    for (const auto& workspaceRef : g_pCompositor->getWorkspaces()) {
-        const auto workspace = workspaceRef.lock();
-        if (!workspace)
-            continue;
+    std::unordered_map<WORKSPACEID, CanvasOverviewSnapshot> workspaceSnapshots;
+    for (const auto& canvas : previewCanvases) {
+        for (const auto& member : canvas.members) {
+            if (member.workspaceId == INVALID_WORKSPACE_ID || workspaceSnapshots.contains(member.workspaceId))
+                continue;
 
-        auto* layout = CanvasLayoutInternal::get_canvas_for_workspace(workspace->m_id);
-        if (!layout)
-            continue;
+            auto* layout = CanvasLayoutInternal::get_canvas_for_workspace(member.workspaceId);
+            if (!layout)
+                continue;
 
-        const auto snapshot = layout->buildOverviewSnapshot();
-        auto* region = resolve_workspace_region(monitors_, snapshot.monitorId, workspace);
-        if (!region)
-            continue;
-
-        region->workspaces.push_back(build_workspace_node(snapshot, region->monitorId));
+            workspaceSnapshots.emplace(member.workspaceId, layout->buildOverviewSnapshot());
+        }
     }
 
-    // Grid layout fills in workspace boxes and injects empty targets for any
-    // workspace that has no tiled windows. Afterwards each target box is
-    // rewritten into the exact preview geometry that overview will render.
     for (auto& region : monitors_) {
-        layoutWorkspaceGrid(region);
+        region.workspaces.reserve(previewCanvases.size());
+        for (const auto& canvas : previewCanvases) {
+            const auto* member = find_member(canvas, region.monitorId);
+            const auto snapshotIt = member ? workspaceSnapshots.find(member->workspaceId) : workspaceSnapshots.end();
+            region.workspaces.push_back(build_workspace_node(canvas,
+                                                             region.monitorId,
+                                                             member,
+                                                             snapshotIt == workspaceSnapshots.end() ? nullptr : &snapshotIt->second,
+                                                             is_synthetic_canvas(synthetics, canvas.canvasId)));
+        }
+
+        layoutWorkspaceGrid(region, anchorTileX, anchorTileY);
         for (auto& workspace : region.workspaces)
             project_workspace_targets(region.monitor, workspace);
     }
 
+    rebuildCanvasGraph();
     rebuildTargetGraph();
 }
 

@@ -43,6 +43,7 @@ bool target_matches_selection(const Target& target, const Target* selection) {
         return false;
 
     return target.type == selection->type
+        && target.canvasId == selection->canvasId
         && target.workspaceId == selection->workspaceId
         && target.monitorId == selection->monitorId
         && target.window == selection->window
@@ -107,7 +108,7 @@ std::optional<SceneMonitor> buildSceneForMonitor(PHLMONITOR monitor, const Model
     for (const auto& workspace : region->workspaces) {
         SceneWorkspace sceneWorkspace;
         sceneWorkspace.box = localize_box(monitor, workspace.box);
-        sceneWorkspace.contentBox = buildWorkspaceContentBox(sceneWorkspace.box);
+        sceneWorkspace.contentBox = sceneWorkspace.box;
 
         const auto workspaceRef = g_pCompositor->getWorkspaceByID(workspace.workspaceId);
         sceneWorkspace.special = workspaceRef ? workspaceRef->m_isSpecialWorkspace : false;
@@ -124,7 +125,8 @@ std::optional<SceneMonitor> buildSceneForMonitor(PHLMONITOR monitor, const Model
                 continue;
 
             sceneWorkspace.selected = true;
-            scene.selectionBox = target.box;
+            if (target.type == TargetType::Window)
+                scene.selectionBox = target.box;
         }
 
         scene.workspaces.push_back(std::move(sceneWorkspace));
@@ -140,8 +142,6 @@ std::optional<SceneMonitor> buildSceneForMonitor(PHLMONITOR monitor, const Model
         syntheticTarget.synthetic = true;
         syntheticTarget.selected = target_matches_selection(*synthetic, selection);
         syntheticTarget.label = empty_target_label(*synthetic);
-        if (syntheticTarget.selected)
-            scene.selectionBox = syntheticTarget.box;
         scene.syntheticTarget = std::move(syntheticTarget);
     }
 

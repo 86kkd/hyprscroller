@@ -80,6 +80,17 @@ overview”这条固定链路，优先直接用仓库里的脚本：
 将逻辑选中项移动到第二块 monitor 的目标窗口，再执行 accept，并验证
 最终 focus 是否真的落到那个目标窗口上。
 
+如果你要验证“overview 里的 `focusmonitor` 会创建 / 选择新的 canvas workspace，
+并且 accept 后所有可见 monitor 一起切过去”，优先用这条脚本：
+
+```bash
+./scripts/repro-overview-canvas-workspaces.sh --outer-monitor HDMI-A-1
+```
+
+它会先验证 normal-mode `scroller:focusmonitor` 只切 monitor focus，
+再在 overview 里执行 `focusmonitor r -> accept`，并检查两块 nested monitor
+是否一起切到新的空白 canvas workspace。
+
 如果你要验证“layout 切换 / plugin reload 之后 scroller 是否恢复原布局”，
 优先用这条脚本：
 

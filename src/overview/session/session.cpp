@@ -19,6 +19,8 @@
 #include <hyprland/src/render/Renderer.hpp>
 #include <spdlog/spdlog.h>
 
+#include "layout/canvas/internal.h"
+#include "overview/render/state.h"
 #include "overview/navigation/logic.h"
 #include "overview/session/effects.h"
 #include "overview/navigation/selection.h"
@@ -44,8 +46,10 @@ const MonitorRegion* initial_empty_region(const Model& model) {
 // Synthetic empty targets are intentionally smaller than the full monitor box so
 // they render as a clear "new workspace candidate" instead of a full-screen fill.
 Target initial_empty_target(const MonitorRegion& region) {
-    return makeEmptyTarget(SessionEffects::nextWorkspaceId(),
+    return makeEmptyTarget(INVALID_CANVAS_ID,
+                           SessionEffects::nextWorkspaceId(),
                            region.monitorId,
+                           false,
                            {region.box.x + region.box.w * 0.16,
                             region.box.y + region.box.h * 0.16,
                             region.box.w * 0.68,
@@ -109,6 +113,9 @@ void Session::clear() {
     active_ = false;
     inputHandling_.reset();
     model_.clear();
+    originCanvasId_ = INVALID_CANVAS_ID;
+    viewCanvasId_ = INVALID_CANVAS_ID;
+    pendingCanvases_.clear();
 }
 
 void Session::markInputHandled() {
@@ -151,6 +158,15 @@ bool Session::selectInitialTarget() {
     }
 }
 
+bool Session::selectCanvas(int canvasId, std::optional<int> preferredMonitorId) {
+    const auto ref = model_.firstTargetInCanvas(canvasId, preferredMonitorId);
+    if (!ref)
+        return false;
+
+    model_.setSelection(*ref);
+    return true;
+}
+
 void Session::open() {
     if (active_)
         return;
@@ -160,13 +176,23 @@ void Session::open() {
     // 2. prepare/rebuild the read-only logical overview model
     // 3. choose an initial selection and start damaging monitors for rendering
     const auto origin = SessionEffects::captureOrigin();
+    originCanvasId_ = CanvasLayoutState::canvasRepository().ensureCurrentVisibleCanvas();
+    viewCanvasId_ = originCanvasId_;
     model_.setOrigin(origin.monitorId, origin.workspaceId, origin.window);
+    pendingCanvases_.clear();
     SessionEffects::prepareSnapshots();
-    model_.rebuild();
+    model_.rebuild(pendingCanvases_, viewCanvasId_);
     if (!selectInitialTarget()) {
         clear();
         spdlog::warn("overview_open: no targets available");
         return;
+    }
+
+    if (const auto selectionCanvasId = model_.selectionCanvasId();
+        selectionCanvasId && *selectionCanvasId != viewCanvasId_) {
+        viewCanvasId_ = *selectionCanvasId;
+        model_.rebuild(pendingCanvases_, viewCanvasId_);
+        (void)selectCanvas(viewCanvasId_, model_.origin().monitorId);
     }
 
     active_ = true;
@@ -182,7 +208,8 @@ void Session::open() {
 }
 
 std::optional<TargetRef> Session::findBestTarget(Direction direction) const {
-    if (!model_.selectionRef())
+    const auto* currentSelection = model_.selection();
+    if (!model_.selectionRef() || !currentSelection)
         return std::nullopt;
 
     const auto& targetGraph = model_.targetGraph();
@@ -190,28 +217,53 @@ std::optional<TargetRef> Session::findBestTarget(Direction direction) const {
         return std::nullopt;
 
     // Convert the richer overview target graph into the minimal pure-routing
-    // representation that `OverviewLogic` understands.
+    // representation that `OverviewLogic` understands. Window-level movefocus
+    // stays inside the selected canvas workspace and only traverses previews.
     std::vector<OverviewLogic::TargetCandidate> candidates;
-    candidates.reserve(targetGraph.size());
-    auto currentIndex = size_t{0};
-    auto foundCurrent = false;
-    for (size_t index = 0; index < targetGraph.size(); ++index) {
-        const auto& target = targetGraph[index];
-        candidates.push_back({.monitorId = target.monitorId, .box = target.box});
-        if (!foundCurrent && target.ref == *model_.selectionRef()) {
-            currentIndex = index;
-            foundCurrent = true;
-        }
+    std::vector<TargetRef> refs;
+    candidates.reserve(targetGraph.size() + 1);
+    refs.reserve(targetGraph.size());
+
+    candidates.push_back({
+        .monitorId = currentSelection->monitorId,
+        .box = currentSelection->box,
+    });
+
+    for (const auto& node : targetGraph) {
+        const auto* target = model_.resolve(node.ref);
+        if (!target || target->canvasId != currentSelection->canvasId || target->type != TargetType::Window)
+            continue;
+
+        candidates.push_back({
+            .monitorId = target->monitorId,
+            .box = target->box,
+        });
+        refs.push_back(node.ref);
     }
 
-    if (!foundCurrent)
+    if (refs.empty())
         return std::nullopt;
+
+    auto currentIndex = size_t{0};
+    if (currentSelection->type == TargetType::Window) {
+        auto foundCurrent = false;
+        for (size_t index = 0; index < refs.size(); ++index) {
+            if (refs[index] != *model_.selectionRef())
+                continue;
+
+            currentIndex = index + 1;
+            foundCurrent = true;
+            break;
+        }
+        if (!foundCurrent)
+            return std::nullopt;
+    }
 
     const auto nextIndex = OverviewLogic::pickTargetIndex(candidates, currentIndex, direction);
-    if (!nextIndex)
+    if (!nextIndex || *nextIndex == 0)
         return std::nullopt;
 
-    return targetGraph[*nextIndex].ref;
+    return refs[*nextIndex - 1];
 }
 
 bool Session::moveSelection(Direction direction) {
@@ -220,11 +272,10 @@ bool Session::moveSelection(Direction direction) {
 
     if (const auto targetRef = findBestTarget(direction)) {
         model_.setSelection(*targetRef);
-        if (const auto* selection = model_.selection(); selection && !selection->synthetic)
-            model_.clearSyntheticSelection();
         const auto* selection = model_.selection();
-        spdlog::info("overview_move: direction={} workspace={} window={} synthetic={}",
+        spdlog::info("overview_move: direction={} canvas={} workspace={} window={} synthetic={}",
                      ScrollerCore::direction_name(direction),
+                     selection ? selection->canvasId : INVALID_CANVAS_ID,
                      selection ? selection->workspaceId : INVALID_WORKSPACE_ID,
                      static_cast<const void*>(selection && selection->window ? selection->window.get() : nullptr),
                      selection ? selection->synthetic : false);
@@ -237,17 +288,195 @@ bool Session::moveSelection(Direction direction) {
     return false;
 }
 
+bool Session::moveCanvasSelection(Direction direction) {
+    const auto* currentSelection = model_.selection();
+    if (!active_ || !currentSelection)
+        return false;
+
+    const auto currentCanvasId = model_.selectionCanvasId();
+    if (!currentCanvasId)
+        return false;
+
+    const auto preferredMonitorId = currentSelection->monitorId;
+    if (const auto nextCanvasId = model_.findAdjacentCanvas(*currentCanvasId, direction)) {
+        viewCanvasId_ = *nextCanvasId;
+        model_.rebuild(pendingCanvases_, viewCanvasId_);
+        renderState().rebuildPreviewAnimations(model_);
+        if (!selectCanvas(*nextCanvasId, preferredMonitorId))
+            return false;
+
+        const auto* selection = model_.selection();
+        spdlog::info("overview_move_canvas: direction={} canvas={} workspace={}",
+                     ScrollerCore::direction_name(direction),
+                     selection ? selection->canvasId : INVALID_CANVAS_ID,
+                     selection ? selection->workspaceId : INVALID_WORKSPACE_ID);
+        damageMonitors();
+        return true;
+    }
+
+    auto& canvasRepo = CanvasLayoutState::canvasRepository();
+    pendingCanvases_.push_back(canvasRepo.buildSyntheticCanvas(direction, *currentCanvasId, pendingCanvases_));
+    viewCanvasId_ = pendingCanvases_.back().canvas.canvasId;
+    model_.rebuild(pendingCanvases_, viewCanvasId_);
+    renderState().rebuildPreviewAnimations(model_);
+    if (!selectCanvas(pendingCanvases_.back().canvas.canvasId, preferredMonitorId))
+        return false;
+
+    const auto* selection = model_.selection();
+    spdlog::info("overview_create_canvas: direction={} canvas={} workspace={}",
+                 ScrollerCore::direction_name(direction),
+                 selection ? selection->canvasId : INVALID_CANVAS_ID,
+                 selection ? selection->workspaceId : INVALID_WORKSPACE_ID);
+    damageMonitors();
+    return true;
+}
+
+bool Session::activateCanvas(int canvasId, int selectedMonitorId, const char* context) {
+    auto& canvasRepo = CanvasLayoutState::canvasRepository();
+    const auto previewCanvases = canvasRepo.previewCanvases(pendingCanvases_);
+    const auto canvasIt = std::find_if(previewCanvases.begin(), previewCanvases.end(), [&](const auto& canvas) {
+        return canvas.canvasId == canvasId;
+    });
+    if (canvasIt == previewCanvases.end())
+        return false;
+
+    std::vector<CanvasLayoutState::CanvasWorkspaceMember> members;
+    for (const auto& monitor : g_pCompositor->m_monitors) {
+        if (!monitor)
+            continue;
+
+        const auto memberIt = std::find_if(canvasIt->members.begin(), canvasIt->members.end(), [&](const auto& member) {
+            return member.monitorId == monitor->m_id;
+        });
+        if (memberIt != canvasIt->members.end())
+            members.push_back(*memberIt);
+    }
+    if (members.empty())
+        return false;
+
+    std::stable_sort(members.begin(), members.end(), [&](const auto& lhs, const auto& rhs) {
+        const auto lhsSelected = lhs.monitorId == selectedMonitorId;
+        const auto rhsSelected = rhs.monitorId == selectedMonitorId;
+        if (lhsSelected != rhsSelected)
+            return !lhsSelected && rhsSelected;
+        return lhs.monitorId < rhs.monitorId;
+    });
+
+    auto focusedSelectedMonitor = false;
+    for (const auto& member : members) {
+        const auto monitor = g_pCompositor->getMonitorFromID(member.monitorId);
+        if (!monitor)
+            continue;
+
+        const auto workspace = g_pCompositor->getWorkspaceByID(member.workspaceId);
+        const auto requireMonitorFocus = member.monitorId == selectedMonitorId;
+        focusedSelectedMonitor = focusedSelectedMonitor || requireMonitorFocus;
+        if (!CanvasLayoutInternal::focus_monitor_workspace(monitor,
+                                                           workspace,
+                                                           member.workspaceId,
+                                                           requireMonitorFocus,
+                                                           context))
+            return false;
+    }
+
+    if (focusedSelectedMonitor)
+        return true;
+
+    const auto fallbackMember = members.front();
+    const auto fallbackMonitor = g_pCompositor->getMonitorFromID(fallbackMember.monitorId);
+    if (!fallbackMonitor)
+        return false;
+
+    const auto fallbackWorkspace = g_pCompositor->getWorkspaceByID(fallbackMember.workspaceId);
+    return CanvasLayoutInternal::focus_monitor_workspace(fallbackMonitor,
+                                                         fallbackWorkspace,
+                                                         fallbackMember.workspaceId,
+                                                         true,
+                                                         context);
+}
+
+bool Session::finalizeCanvasTarget(const Target& target, bool warpCursor) {
+    if (!target.window)
+        return true;
+
+    auto* layout = CanvasLayoutInternal::get_canvas_for_workspace(target.workspaceId);
+    if (!layout)
+        return false;
+
+    const auto monitorId = target.window->monitorID();
+    layout->onWindowFocusChange(target.window);
+    layout->recalculateMonitor(monitorId);
+    return CanvasLayoutInternal::switch_to_window(target.window, warpCursor);
+}
+
+bool Session::finalizeCanvasOrigin(const OriginState& origin) {
+    if (!origin.window || !origin.window->m_isMapped)
+        return true;
+
+    const auto target = Target{
+        .type = TargetType::Window,
+        .workspaceId = origin.workspaceId,
+        .monitorId = origin.monitorId,
+        .window = origin.window,
+        .box = {},
+        .sourceBox = {},
+        .synthetic = false,
+    };
+    return finalizeCanvasTarget(target, false);
+}
+
 bool Session::acceptSelection() {
     const auto* selection = model_.selection();
     if (!selection)
         return false;
 
-    // Real side effects live in `effects.cpp`; keeping that split makes
-    // this file about control flow rather than compositor mutation details.
-    return SessionEffects::acceptTarget(*selection);
+    auto selectionCopy = *selection;
+    if (selectionCopy.canvasId != INVALID_CANVAS_ID) {
+        auto& canvasRepo = CanvasLayoutState::canvasRepository();
+        if (canvasRepo.find(selectionCopy.canvasId))
+            canvasRepo.ensureCanvasHasVisibleMembers(selectionCopy.canvasId);
+
+        const auto previewCanvases = canvasRepo.previewCanvases(pendingCanvases_);
+        const auto canvasIt = std::find_if(previewCanvases.begin(), previewCanvases.end(), [&](const auto& canvas) {
+            return canvas.canvasId == selectionCopy.canvasId;
+        });
+        if (canvasIt != previewCanvases.end()) {
+            const auto memberIt = std::find_if(canvasIt->members.begin(), canvasIt->members.end(), [&](const auto& member) {
+                return member.monitorId == selectionCopy.monitorId;
+            });
+            if (memberIt != canvasIt->members.end()) {
+                selectionCopy.workspaceId = memberIt->workspaceId;
+                selectionCopy.specialWorkspace = memberIt->special;
+            }
+        }
+
+        if (!activateCanvas(selectionCopy.canvasId, selectionCopy.monitorId, "overview_accept_canvas"))
+            return false;
+
+        if (!finalizeCanvasTarget(selectionCopy, true))
+            return false;
+
+        if (!pendingCanvases_.empty())
+            canvasRepo.commitSyntheticCanvases(pendingCanvases_, selectionCopy.canvasId);
+        else
+            canvasRepo.markActive(selectionCopy.canvasId);
+        pendingCanvases_.clear();
+        return true;
+    }
+
+    return SessionEffects::acceptTarget(selectionCopy);
 }
 
 bool Session::restoreOrigin() {
+    if (originCanvasId_ != INVALID_CANVAS_ID) {
+        auto& canvasRepo = CanvasLayoutState::canvasRepository();
+        if (canvasRepo.find(originCanvasId_))
+            canvasRepo.ensureCanvasHasVisibleMembers(originCanvasId_);
+        if (!activateCanvas(originCanvasId_, model_.origin().monitorId, "overview_restore_canvas"))
+            return false;
+        return finalizeCanvasOrigin(model_.origin());
+    }
+
     return SessionEffects::restoreOrigin(model_.origin());
 }
 
@@ -267,9 +496,10 @@ void Session::close(bool acceptSelectionFlag) {
     }
 
     const auto* selection = model_.selection();
-    spdlog::info("overview_close: accepted={} resolved={} selection_workspace={} selection_window={}",
+    spdlog::info("overview_close: accepted={} resolved={} selection_canvas={} selection_workspace={} selection_window={}",
                  acceptSelectionFlag,
                  resolved,
+                 selection ? selection->canvasId : INVALID_CANVAS_ID,
                  selection ? selection->workspaceId : INVALID_WORKSPACE_ID,
                  static_cast<const void*>(selection && selection->window ? selection->window.get() : nullptr));
     damageMonitors();
@@ -283,7 +513,8 @@ void Session::dismiss() {
     // Dismiss differs from close(false): it simply tears the overlay down
     // without running accept/restore side effects.
     const auto* selection = model_.selection();
-    spdlog::info("overview_dismiss: selection_workspace={} selection_window={}",
+    spdlog::info("overview_dismiss: selection_canvas={} selection_workspace={} selection_window={}",
+                 selection ? selection->canvasId : INVALID_CANVAS_ID,
                  selection ? selection->workspaceId : INVALID_WORKSPACE_ID,
                  static_cast<const void*>(selection && selection->window ? selection->window.get() : nullptr));
     damageMonitors();

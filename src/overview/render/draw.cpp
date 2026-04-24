@@ -486,11 +486,9 @@ void draw_window_preview(RenderState& state, const SceneTarget& target, const Bo
 }
 
 void draw_empty_target(const SceneTarget& target, const Box& bounds, double overlayAlpha) {
-    // Empty targets are intentionally minimal: they only need an outline to
-    // show "there is navigable blank space here".
-    const auto drawBox = scaled_target_box(target.box, overlayAlpha);
-    const auto border = Style::previewBorder(target.selected, static_cast<float>((target.selected ? 0.92 : 0.86) * overlayAlpha));
-    draw_outline_panel(drawBox, bounds, border, Style::kEmptyTargetRound, 2.0F);
+    (void)target;
+    (void)bounds;
+    (void)overlayAlpha;
 }
 
 } // namespace
@@ -582,16 +580,12 @@ void drawSceneMonitor(const SceneMonitor& scene, steady_tp now, RenderState& sta
                     selectionBox = drawBox;
             } else {
                 draw_empty_target(target, scene.box, progress);
-                if (target.selected)
-                    selectionBox = scaled_target_box(target.box, progress);
             }
         }
     }
 
     if (scene.syntheticTarget) {
         draw_empty_target(*scene.syntheticTarget, scene.box, progress);
-        if (scene.syntheticTarget->selected)
-            selectionBox = scaled_target_box(scene.syntheticTarget->box, progress);
     }
 
     if (!selectionBox && scene.selectionBox)

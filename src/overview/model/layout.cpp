@@ -5,23 +5,11 @@
 #include "overview/model/layout.h"
 
 #include <algorithm>
+#include <cmath>
 #include <vector>
 
 namespace Overview {
 namespace {
-
-// Empty-workspace targets are inset slightly so they read as a tile inside the
-// workspace region rather than being mistaken for the full region background.
-ScrollerCore::Box inset_box(const ScrollerCore::Box& box, double ratio, double minimumInset = 18.0) {
-    const auto insetX = std::min(std::max(minimumInset, box.w * ratio), std::max(0.0, box.w / 2.5));
-    const auto insetY = std::min(std::max(minimumInset, box.h * ratio), std::max(0.0, box.h / 2.5));
-    return {
-        box.x + insetX,
-        box.y + insetY,
-        std::max(24.0, box.w - insetX * 2.0),
-        std::max(24.0, box.h - insetY * 2.0),
-    };
-}
 
 void finalizeWorkspaceTargets(WorkspaceNode& node) {
     if (!node.targets.empty())
@@ -29,46 +17,67 @@ void finalizeWorkspaceTargets(WorkspaceNode& node) {
 
     // A workspace with no real windows still needs a selectable target so
     // directional navigation and "accept" keep working uniformly.
-    node.targets.push_back(makeEmptyTarget(node.workspaceId, node.monitorId, node.box, false));
+    node.targets.push_back(makeEmptyTarget(node.canvasId,
+                                           node.workspaceId,
+                                           node.monitorId,
+                                           node.specialWorkspace,
+                                           node.box,
+                                           node.synthetic));
+}
+
+void layoutCanvasTiles(MonitorRegion& region, int anchorTileX, int anchorTileY) {
+    const auto horizontalStride = region.box.w + std::max(48.0, region.box.w * 0.08);
+    const auto verticalStride = region.box.h + std::max(48.0, region.box.h * 0.08);
+
+    std::sort(region.workspaces.begin(), region.workspaces.end(), [](const WorkspaceNode& lhs, const WorkspaceNode& rhs) {
+        if (lhs.tileY != rhs.tileY)
+            return lhs.tileY < rhs.tileY;
+        if (lhs.tileX != rhs.tileX)
+            return lhs.tileX < rhs.tileX;
+        if (lhs.canvasId != rhs.canvasId)
+            return lhs.canvasId < rhs.canvasId;
+        return lhs.workspaceId < rhs.workspaceId;
+    });
+
+    for (auto& workspace : region.workspaces) {
+        const auto column = static_cast<double>(workspace.tileX - anchorTileX);
+        const auto row = static_cast<double>(workspace.tileY - anchorTileY);
+        workspace.box = {
+            region.box.x + column * horizontalStride,
+            region.box.y + row * verticalStride,
+            region.box.w,
+            region.box.h,
+        };
+        finalizeWorkspaceTargets(workspace);
+    }
 }
 
 } // namespace
 
-Target makeEmptyTarget(WORKSPACEID workspaceId, int monitorId, const ScrollerCore::Box& workspaceBox, bool synthetic) {
+Target makeEmptyTarget(int canvasId,
+                       WORKSPACEID workspaceId,
+                       int monitorId,
+                       bool specialWorkspace,
+                       const ScrollerCore::Box& workspaceBox,
+                       bool synthetic) {
     Target target;
     target.type = TargetType::EmptyWorkspace;
+    target.canvasId = canvasId;
     target.workspaceId = workspaceId;
     target.monitorId = monitorId;
+    target.specialWorkspace = specialWorkspace;
     target.window = nullptr;
-    target.box = inset_box(workspaceBox, synthetic ? 0.16 : 0.20);
+    target.box = workspaceBox;
     target.sourceBox = target.box;
     target.synthetic = synthetic;
     return target;
 }
 
-void layoutWorkspaceGrid(MonitorRegion& region) {
+void layoutWorkspaceGrid(MonitorRegion& region, int anchorTileX, int anchorTileY) {
     if (region.workspaces.empty())
         return;
 
-    // Grid helpers operate on workspace ids only; the richer WorkspaceNode data
-    // is stitched back in once grid cells have been chosen.
-    std::vector<int> workspaceIds;
-    workspaceIds.reserve(region.workspaces.size());
-    for (const auto& workspace : region.workspaces)
-        workspaceIds.push_back(workspace.workspaceId);
-
-    const auto cells = layoutWorkspaceGridCells(region.box, workspaceIds);
-    std::sort(region.workspaces.begin(), region.workspaces.end(), [](const WorkspaceNode& a, const WorkspaceNode& b) {
-        return a.workspaceId < b.workspaceId;
-    });
-
-    // After boxes are assigned, ensure every workspace exposes at least one
-    // selectable target, even if that target is synthetic/empty.
-    for (std::size_t index = 0; index < region.workspaces.size(); ++index) {
-        auto& workspace = region.workspaces[index];
-        workspace.box = cells[index].box;
-        finalizeWorkspaceTargets(workspace);
-    }
+    layoutCanvasTiles(region, anchorTileX, anchorTileY);
 }
 
 } // namespace Overview

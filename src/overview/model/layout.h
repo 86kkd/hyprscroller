@@ -9,6 +9,6 @@
 
 namespace Overview {
 
-void               layoutWorkspaceGrid(MonitorRegion& region);
+void layoutWorkspaceGrid(MonitorRegion& region, int anchorTileX, int anchorTileY);
 
 } // namespace Overview

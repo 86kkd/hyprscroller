@@ -301,6 +301,8 @@ ctest --test-dir Debug --output-on-failure
 - 预览渲染类问题：[`scripts/repro-overview.sh`](../scripts/repro-overview.sh)
 - overview 导航类问题：[`scripts/repro-overview-movefocus.sh`](../scripts/repro-overview-movefocus.sh)
 - overview 跨屏 accept 类问题：[`scripts/repro-overview-accept-cross-monitor.sh`](../scripts/repro-overview-accept-cross-monitor.sh)
+- overview canvas workspace / focusmonitor 链路：
+  [`scripts/repro-overview-canvas-workspaces.sh`](../scripts/repro-overview-canvas-workspaces.sh)
 
 如果已有脚本不够，就在它基础上改，不要新造完全不同的启动方式。
 

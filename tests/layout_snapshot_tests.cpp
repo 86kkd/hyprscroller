@@ -1,5 +1,6 @@
 #include <string>
 
+#include "core/canvas_workspace_snapshot.h"
 #include "core/layout_snapshot.h"
 
 #include "test_suite.h"
@@ -100,10 +101,49 @@ void test_snapshot_rejects_malformed_stack_line() {
     expect_true(!parsed.has_value(), "layout snapshot rejects malformed stack lines");
 }
 
+void test_canvas_workspace_snapshot_round_trip() {
+    using namespace ScrollerCanvasSnapshot;
+
+    RepositorySnapshot repository;
+    repository.activeCanvasId = 4;
+    repository.canvases.push_back({
+        .canvasId = 4,
+        .tileX = 1,
+        .tileY = -1,
+        .members = {
+            {.monitorId = 1, .workspaceId = 7, .special = false},
+            {.monitorId = 2, .workspaceId = 12, .special = true},
+        },
+    });
+
+    const auto serialized = serialize_repository(repository);
+    const auto parsed = deserialize_repository(serialized);
+    expect_true(parsed.has_value(), "canvas workspace snapshot round trip parses");
+    if (!parsed)
+        return;
+
+    expect_eq(parsed->activeCanvasId, 4, "canvas workspace snapshot keeps active canvas id");
+    expect_eq(parsed->canvases.size(), static_cast<size_t>(1), "canvas workspace snapshot keeps canvas count");
+    expect_eq(parsed->canvases[0].canvasId, 4, "canvas workspace snapshot keeps canvas id");
+    expect_eq(parsed->canvases[0].tileX, 1, "canvas workspace snapshot keeps tile x");
+    expect_eq(parsed->canvases[0].tileY, -1, "canvas workspace snapshot keeps tile y");
+    expect_eq(parsed->canvases[0].members.size(), static_cast<size_t>(2), "canvas workspace snapshot keeps member count");
+    expect_true(parsed->canvases[0].members[1].special, "canvas workspace snapshot keeps special member flag");
+}
+
+void test_canvas_workspace_snapshot_rejects_missing_active_line() {
+    const auto parsed = ScrollerCanvasSnapshot::deserialize_repository(
+        "VERSION 1\n"
+        "CANVAS 0 0 0 0\n");
+    expect_true(!parsed.has_value(), "canvas workspace snapshot rejects missing ACTIVE line");
+}
+
 } // namespace
 
 void run_layout_snapshot_tests() {
     test_snapshot_round_trip();
     test_snapshot_rejects_invalid_version();
     test_snapshot_rejects_malformed_stack_line();
+    test_canvas_workspace_snapshot_round_trip();
+    test_canvas_workspace_snapshot_rejects_missing_active_line();
 }
