@@ -81,15 +81,137 @@ overview”这条固定链路，优先直接用仓库里的脚本：
 最终 focus 是否真的落到那个目标窗口上。
 
 如果你要验证“overview 里的 `focusmonitor` 会创建 / 选择新的 canvas workspace，
-并且 accept 后所有可见 monitor 一起切过去”，优先用这条脚本：
+并且关闭 overview 后所有可见 monitor 一起切过去”，优先用这条脚本：
 
 ```bash
 ./scripts/repro-overview-canvas-workspaces.sh --outer-monitor HDMI-A-1
 ```
 
 它会先验证 normal-mode `scroller:focusmonitor` 只切 monitor focus，
-再在 overview 里执行 `focusmonitor r -> accept`，并检查两块 nested monitor
-是否一起切到新的空白 canvas workspace。
+再在 overview 里执行 `focusmonitor r -> toggleoverview(close-accept)`，并检查
+5 块 nested monitor 是否一起切到新的空白 canvas workspace，再验证可以切回原
+来的 canvas。脚本会把 nested 输出摆成“上中下三个横屏，左右各一个竖屏”的十字
+形拓扑，并同时断言 outer `aquamarine - WAYLAND-1..5` 预览窗口的几何都符合预期。
+
+### 2.1 复用 5 屏布局 Helper
+
+如果后面的集成测试也要复用这套 5 屏十字布局，不要在脚本里重复写 monitor 几何，
+直接 source 这个 helper：
+
+```bash
+source "$REPO_ROOT/scripts/lib/nested-monitor-layouts.sh"
+```
+
+这份 helper 提供的入口：
+
+- `hyprscroller_five_monitor_names`
+- `hyprscroller_five_outer_titles`
+- `hyprscroller_monitor_logical_geometry`
+- `hyprscroller_compute_five_monitor_outer_layout`
+- `hyprscroller_install_outer_output_map_time_float_rules`
+- `hyprscroller_outer_event_socket_path`
+- `hyprscroller_start_outer_output_event_watcher`
+- `hyprscroller_wait_for_outer_output_event_watcher_ready`
+- `hyprscroller_wait_for_outer_output_position_events`
+- `hyprscroller_create_positioned_wayland_outputs`
+- `hyprscroller_position_outer_windows`
+- `hyprscroller_apply_five_monitor_cross_layout`
+
+推荐时序是先根据 outer monitor 计算出 5 个 preview window 的几何，然后在启动
+nested Hyprland 之前安装最小 map-time `float` 规则，让后续
+`aquamarine - WAYLAND-*` 从 map 的第一刻就是 floating。第一个 nested output 用
+和 `scripts/repro-overview.sh` 一样的 exec rule 启动：`monitor; float; size; center`。
+之后订阅 outer Hyprland 的 `.socket2.sock` 事件流，watcher 收到 `openwindow`
+事件后，立即按 window address 执行 `resizewindowpixel` 和 `movewindowpixel`，
+并保留 `setfloating` 作为幂等兜底。创建每个 nested output 后，脚本仍会同步定位
+一次，最后应用 nested monitor 的十字拓扑。
+
+这份 helper 只安装 `float` 规则，不安装 map-time `size/move` 规则，也不调用
+`hyprctl reload config-only`。事件驱动 watcher 依赖 `python3` 连接 Hyprland 的
+Unix event socket。
+
+最小复用方式：
+
+```bash
+NESTED_MONITOR_NAMES=()
+OUTER_OUTPUT_TITLES=()
+OUTER_OUTPUT_XS=()
+OUTER_OUTPUT_YS=()
+OUTER_OUTPUT_WIDTHS=()
+OUTER_OUTPUT_HEIGHTS=()
+OUTER_OUTPUT_EVENT_STATE="$RUN_DIR/outer-output-events.tsv"
+OUTER_OUTPUT_EVENT_READY="$RUN_DIR/outer-output-events.ready"
+
+hyprscroller_five_monitor_names NESTED_MONITOR_NAMES
+hyprscroller_five_outer_titles OUTER_OUTPUT_TITLES
+
+hyprscroller_compute_five_monitor_outer_layout \
+  "$outer_monitor_json" \
+  "$WINDOW_WIDTH" \
+  "$WINDOW_HEIGHT" \
+  96 \
+  64 \
+  100 \
+  OUTER_OUTPUT_XS \
+  OUTER_OUTPUT_YS \
+  OUTER_OUTPUT_WIDTHS \
+  OUTER_OUTPUT_HEIGHTS
+
+hyprscroller_install_outer_output_map_time_float_rules OUTER_OUTPUT_TITLES
+
+OUTER_OUTPUT_EVENT_SOCKET="$(hyprscroller_outer_event_socket_path)"
+hyprscroller_start_outer_output_event_watcher \
+  OUTER_OUTPUT_EVENT_WATCHER_PID \
+  "$OUTER_OUTPUT_EVENT_SOCKET" \
+  "$OUTER_OUTPUT_EVENT_STATE" \
+  "$OUTER_OUTPUT_EVENT_READY" \
+  "$OUTER_MONITOR_X" \
+  "$OUTER_MONITOR_Y" \
+  OUTER_OUTPUT_TITLES \
+  OUTER_OUTPUT_XS \
+  OUTER_OUTPUT_YS \
+  OUTER_OUTPUT_WIDTHS \
+  OUTER_OUTPUT_HEIGHTS
+hyprscroller_wait_for_outer_output_event_watcher_ready "$OUTER_OUTPUT_EVENT_READY"
+
+hyprscroller_create_positioned_wayland_outputs \
+  "$NESTED_INSTANCE" \
+  1 \
+  5 \
+  wait_for_nested_monitor_count \
+  wait_for_outer_output_window_count \
+  "$OUTER_MONITOR_X" \
+  "$OUTER_MONITOR_Y" \
+  OUTER_OUTPUT_TITLES \
+  OUTER_OUTPUT_XS \
+  OUTER_OUTPUT_YS \
+  OUTER_OUTPUT_WIDTHS \
+  OUTER_OUTPUT_HEIGHTS
+
+hyprscroller_wait_for_outer_output_position_events "$OUTER_OUTPUT_EVENT_STATE" 5
+
+hyprscroller_position_outer_windows \
+  "$OUTER_MONITOR_X" \
+  "$OUTER_MONITOR_Y" \
+  OUTER_OUTPUT_TITLES \
+  OUTER_OUTPUT_XS \
+  OUTER_OUTPUT_YS \
+  OUTER_OUTPUT_WIDTHS \
+  OUTER_OUTPUT_HEIGHTS
+
+hyprscroller_apply_five_monitor_cross_layout \
+  "$NESTED_INSTANCE" \
+  "$WINDOW_WIDTH" \
+  "$WINDOW_HEIGHT"
+```
+
+这套 helper 默认生成的 nested monitor 拓扑是：
+
+- `WAYLAND-2` 上横屏
+- `WAYLAND-3` 中横屏
+- `WAYLAND-5` 下横屏
+- `WAYLAND-1` 左竖屏
+- `WAYLAND-4` 右竖屏
 
 如果你要验证“layout 切换 / plugin reload 之后 scroller 是否恢复原布局”，
 优先用这条脚本：
@@ -237,10 +359,19 @@ hyprctl -i <instance-signature> dispatch scroller:movefocus u
 hyprctl -i <instance-signature> dispatch scroller:movefocus d
 ```
 
+移动 overview 里的 canvas workspace focus：
+
+```bash
+hyprctl -i <instance-signature> dispatch scroller:focusmonitor r
+hyprctl -i <instance-signature> dispatch scroller:focusmonitor l
+hyprctl -i <instance-signature> dispatch scroller:focusmonitor u
+hyprctl -i <instance-signature> dispatch scroller:focusmonitor d
+```
+
 接受或取消：
 
 ```bash
-hyprctl -i <instance-signature> dispatch scroller:toggleoverview accept
+hyprctl -i <instance-signature> dispatch scroller:toggleoverview
 hyprctl -i <instance-signature> dispatch scroller:canceloverview
 ```
 

@@ -27,9 +27,9 @@ Options:
   -h, --help             Show this help text.
 
 The script exits non-zero when the nested test windows are not floating, when
-the outer nested output windows are not floating and fixed to the expected
-size/position, or when overview close fails to switch all visible monitors to
-the focused canvas workspace and back again.
+the outer nested output windows are not handled by the event watcher, floating,
+and fixed to the expected size/position, or when overview close fails to switch
+all visible monitors to the focused canvas workspace and back again.
 EOF
 }
 
@@ -241,23 +241,6 @@ collect_outer_windows_json() {
     '
 }
 
-monitor_logical_geometry() {
-    local monitor_json="$1"
-    local -n out_x_ref="$2"
-    local -n out_y_ref="$3"
-    local -n out_width_ref="$4"
-    local -n out_height_ref="$5"
-
-    out_x_ref="$(printf '%s\n' "$monitor_json" | jq -r '.x')"
-    out_y_ref="$(printf '%s\n' "$monitor_json" | jq -r '.y')"
-    out_width_ref="$(printf '%s\n' "$monitor_json" | jq -r '
-        if (.transform % 2) == 1 then .height else .width end
-    ')"
-    out_height_ref="$(printf '%s\n' "$monitor_json" | jq -r '
-        if (.transform % 2) == 1 then .width else .height end
-    ')"
-}
-
 compute_outer_output_layout() {
     local outer_monitor_json
     outer_monitor_json="$(hyprctl monitors -j | jq -c --arg monitor "$OUTER_MONITOR" '
@@ -265,129 +248,33 @@ compute_outer_output_layout() {
     ')"
     [[ -n "$outer_monitor_json" ]] || die "could not resolve outer monitor geometry for $OUTER_MONITOR"
 
-    monitor_logical_geometry \
+    hyprscroller_monitor_logical_geometry \
         "$outer_monitor_json" \
         OUTER_MONITOR_X \
         OUTER_MONITOR_Y \
         OUTER_MONITOR_WIDTH \
         OUTER_MONITOR_HEIGHT
 
-    local portrait_width="$WINDOW_HEIGHT"
-    local portrait_height="$WINDOW_WIDTH"
-    local landscape_width="$WINDOW_WIDTH"
-    local landscape_height="$WINDOW_HEIGHT"
-    local layout_margin=96
-    local layout_gap=64
-    local layout_scale_percent=100
-    local available_width=$(( OUTER_MONITOR_WIDTH - (2 * layout_margin) ))
-    local available_height=$(( OUTER_MONITOR_HEIGHT - (2 * layout_margin) - layout_gap ))
-    local center_landscape_y=$(( landscape_height + layout_gap + ((portrait_height - landscape_height) / 2) ))
-    local total_base_width=$(( portrait_width + layout_gap + landscape_width + layout_gap + portrait_width ))
-    local total_base_height=$(( landscape_height + layout_gap + portrait_height + layout_gap + landscape_height ))
-    local base_widths=(
-        "$portrait_width"
-        "$landscape_width"
-        "$landscape_width"
-        "$portrait_width"
-        "$landscape_width"
-    )
-    local base_heights=(
-        "$portrait_height"
-        "$landscape_height"
-        "$landscape_height"
-        "$portrait_height"
-        "$landscape_height"
-    )
-    local base_xs=(
-        0
-        "$(( portrait_width + layout_gap ))"
-        "$(( portrait_width + layout_gap ))"
-        "$(( portrait_width + layout_gap + landscape_width + layout_gap ))"
-        "$(( portrait_width + layout_gap ))"
-    )
-    local base_ys=(
-        "$(( landscape_height + layout_gap ))"
-        0
-        "$center_landscape_y"
-        "$(( landscape_height + layout_gap ))"
-        "$(( landscape_height + layout_gap + portrait_height + layout_gap ))"
-    )
-
-    (( available_width > 0 && available_height > 0 )) || die "computed an invalid outer nested output size"
-
-    local scale_num="$available_width"
-    local scale_den="$total_base_width"
-    if (( available_height * scale_den < scale_num * total_base_height )); then
-        scale_num="$available_height"
-        scale_den="$total_base_height"
-    fi
-
-    scale_num=$(( scale_num * layout_scale_percent ))
-    scale_den=$(( scale_den * 100 ))
-
-    local total_scaled_width=$(( (total_base_width * scale_num) / scale_den ))
-    local total_scaled_height=$(( (total_base_height * scale_num) / scale_den ))
-    local outer_origin_x=$(( (OUTER_MONITOR_WIDTH - total_scaled_width) / 2 ))
-    local outer_origin_y=$(( (OUTER_MONITOR_HEIGHT - total_scaled_height) / 2 ))
-    local index
-
-    OUTER_OUTPUT_XS=()
-    OUTER_OUTPUT_YS=()
-    OUTER_OUTPUT_WIDTHS=()
-    OUTER_OUTPUT_HEIGHTS=()
-
-    for index in "${!OUTER_OUTPUT_TITLES[@]}"; do
-        OUTER_OUTPUT_WIDTHS[$index]=$(( (base_widths[$index] * scale_num) / scale_den ))
-        OUTER_OUTPUT_HEIGHTS[$index]=$(( (base_heights[$index] * scale_num) / scale_den ))
-        OUTER_OUTPUT_XS[$index]=$(( outer_origin_x + ((base_xs[$index] * scale_num) / scale_den) ))
-        OUTER_OUTPUT_YS[$index]=$(( outer_origin_y + ((base_ys[$index] * scale_num) / scale_den) ))
-
-        (( OUTER_OUTPUT_WIDTHS[$index] > 0 && OUTER_OUTPUT_HEIGHTS[$index] > 0 )) \
-            || die "computed an invalid outer nested output size for ${OUTER_OUTPUT_TITLES[$index]}"
-    done
+    hyprscroller_compute_five_monitor_outer_layout \
+        "$outer_monitor_json" \
+        "$WINDOW_WIDTH" \
+        "$WINDOW_HEIGHT" \
+        96 \
+        64 \
+        100 \
+        OUTER_OUTPUT_XS \
+        OUTER_OUTPUT_YS \
+        OUTER_OUTPUT_WIDTHS \
+        OUTER_OUTPUT_HEIGHTS \
+        || die "computed an invalid outer nested output size"
 }
 
-enable_outer_output_rules() {
+prepare_outer_output_layout() {
     compute_outer_output_layout
 }
 
-position_outer_output_window() {
-    local title="$1"
-    local width="$2"
-    local height="$3"
-    local x="$4"
-    local y="$5"
-
-    hyprctl dispatch setfloating "title:^${title}$" >/dev/null
-    hyprctl dispatch resizewindowpixel "exact ${width} ${height},title:^${title}$" >/dev/null
-    hyprctl dispatch movewindowpixel "exact ${x} ${y},title:^${title}$" >/dev/null
-}
-
-apply_five_monitor_cross_layout() {
-    local landscape_width="$1"
-    local landscape_height="$2"
-    local portrait_width="$landscape_height"
-    local portrait_height="$landscape_width"
-    local row_gap=$(( landscape_height / 4 ))
-    local middle_x="$portrait_width"
-    local middle_y=$(( landscape_height + row_gap ))
-    local side_y=$(( middle_y + (landscape_height / 2) - (portrait_height / 2) ))
-    local right_x=$(( portrait_width + landscape_width ))
-    local bottom_y=$(( middle_y + landscape_height + row_gap ))
-
-    hyprctl -i "$NESTED_INSTANCE" keyword monitor \
-        "WAYLAND-1,${landscape_width}x${landscape_height}@60,0x${side_y},1,transform,3" >/dev/null
-    hyprctl -i "$NESTED_INSTANCE" keyword monitor \
-        "WAYLAND-2,${landscape_width}x${landscape_height}@60,${middle_x}x0,1,transform,0" >/dev/null
-    hyprctl -i "$NESTED_INSTANCE" keyword monitor \
-        "WAYLAND-3,${landscape_width}x${landscape_height}@60,${middle_x}x${middle_y},1,transform,0" >/dev/null
-    hyprctl -i "$NESTED_INSTANCE" keyword monitor \
-        "WAYLAND-4,${landscape_width}x${landscape_height}@60,${right_x}x${side_y},1,transform,1" >/dev/null
-    hyprctl -i "$NESTED_INSTANCE" keyword monitor \
-        "WAYLAND-5,${landscape_width}x${landscape_height}@60,${middle_x}x${bottom_y},1,transform,0" >/dev/null
-}
-
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$REPO_ROOT/scripts/lib/nested-monitor-layouts.sh"
 PLUGIN_PATH="$REPO_ROOT/Debug/hyprscroller.so"
 WINDOW_WIDTH=1800
 WINDOW_HEIGHT=1200
@@ -395,20 +282,8 @@ KEEP_OPEN=0
 OVERVIEW_HOLD_SECONDS=1
 OUTER_MONITOR=""
 NESTED_INSTANCE=""
-NESTED_MONITOR_NAMES=(
-    "WAYLAND-1"
-    "WAYLAND-2"
-    "WAYLAND-3"
-    "WAYLAND-4"
-    "WAYLAND-5"
-)
-OUTER_OUTPUT_TITLES=(
-    "aquamarine - WAYLAND-1"
-    "aquamarine - WAYLAND-2"
-    "aquamarine - WAYLAND-3"
-    "aquamarine - WAYLAND-4"
-    "aquamarine - WAYLAND-5"
-)
+NESTED_MONITOR_NAMES=()
+OUTER_OUTPUT_TITLES=()
 SOURCE_CLASS="hs-canvas-source"
 TARGET_CLASS="hs-canvas-target"
 OUTER_MONITOR_X=0
@@ -419,8 +294,22 @@ OUTER_OUTPUT_XS=()
 OUTER_OUTPUT_YS=()
 OUTER_OUTPUT_WIDTHS=()
 OUTER_OUTPUT_HEIGHTS=()
+OUTER_OUTPUT_EVENT_WATCHER_PID=""
+OUTER_OUTPUT_EVENT_SOCKET=""
+OUTER_OUTPUT_EVENT_STATE=""
+OUTER_OUTPUT_EVENT_READY=""
+OUTER_OUTPUT_MAP_TIME_RULES_INSTALLED=0
+
+hyprscroller_five_monitor_names NESTED_MONITOR_NAMES
+hyprscroller_five_outer_titles OUTER_OUTPUT_TITLES
 
 cleanup() {
+    if [[ -n "${OUTER_OUTPUT_EVENT_WATCHER_PID:-}" ]]; then
+        kill "$OUTER_OUTPUT_EVENT_WATCHER_PID" >/dev/null 2>&1 || true
+        wait "$OUTER_OUTPUT_EVENT_WATCHER_PID" >/dev/null 2>&1 || true
+        OUTER_OUTPUT_EVENT_WATCHER_PID=""
+    fi
+
     if [[ "${KEEP_OPEN:-0}" -eq 1 ]]; then
         return
     fi
@@ -474,6 +363,7 @@ done
 require_cmd hyprctl
 require_cmd jq
 require_cmd Hyprland
+require_cmd python3
 
 [[ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]] || die "run this inside an existing Hyprland session"
 [[ -f "$PLUGIN_PATH" ]] || die "plugin not found: $PLUGIN_PATH (run 'cmake --build ./Debug -j' first)"
@@ -485,13 +375,19 @@ if [[ -z "$OUTER_MONITOR" ]]; then
     [[ -n "$OUTER_MONITOR" ]] || die "could not auto-detect an outer monitor"
 fi
 
-enable_outer_output_rules
+prepare_outer_output_layout
 
 RUN_DIR="$(mktemp -d /tmp/hyprscroller-overview-canvas.XXXXXX)"
 CONFIG_PATH="$RUN_DIR/hyprland.conf"
 LOG_PATH="$RUN_DIR/hyprland.log"
 LAUNCHER_PATH="$RUN_DIR/launch-nested.sh"
 RESULT_PATH="$RUN_DIR/result.json"
+OUTER_OUTPUT_EVENT_STATE="$RUN_DIR/outer-output-events.tsv"
+OUTER_OUTPUT_EVENT_READY="$RUN_DIR/outer-output-events.ready"
+
+hyprscroller_install_outer_output_map_time_float_rules OUTER_OUTPUT_TITLES \
+    || die "failed to install map-time float rules for outer nested output windows"
+OUTER_OUTPUT_MAP_TIME_RULES_INSTALLED=1
 
 cat >"$CONFIG_PATH" <<EOF
 monitor = , preferred, auto, 1
@@ -535,8 +431,25 @@ exec Hyprland -c "$CONFIG_PATH" >"$LOG_PATH" 2>&1
 EOF
 chmod +x "$LAUNCHER_PATH"
 
+OUTER_OUTPUT_EVENT_SOCKET="$(hyprscroller_outer_event_socket_path)" \
+    || die "could not resolve outer Hyprland event socket"
+hyprscroller_start_outer_output_event_watcher \
+    OUTER_OUTPUT_EVENT_WATCHER_PID \
+    "$OUTER_OUTPUT_EVENT_SOCKET" \
+    "$OUTER_OUTPUT_EVENT_STATE" \
+    "$OUTER_OUTPUT_EVENT_READY" \
+    "$OUTER_MONITOR_X" \
+    "$OUTER_MONITOR_Y" \
+    OUTER_OUTPUT_TITLES \
+    OUTER_OUTPUT_XS \
+    OUTER_OUTPUT_YS \
+    OUTER_OUTPUT_WIDTHS \
+    OUTER_OUTPUT_HEIGHTS
+hyprscroller_wait_for_outer_output_event_watcher_ready "$OUTER_OUTPUT_EVENT_READY" \
+    || die "timed out waiting for outer output event watcher"
+
 BEFORE_MAX_TIME="$(hyprctl instances -j | jq '[.[].time] | max // 0')"
-LAUNCH_RULES="[monitor $OUTER_MONITOR; float]"
+LAUNCH_RULES="[monitor $OUTER_MONITOR; float; size ${OUTER_OUTPUT_WIDTHS[0]} ${OUTER_OUTPUT_HEIGHTS[0]}; center]"
 hyprctl dispatch exec "$LAUNCH_RULES $LAUNCHER_PATH" >/dev/null
 
 for ((attempt = 0; attempt < 80; ++attempt)); do
@@ -564,23 +477,46 @@ NESTED_SOCKET="$(hyprctl instances -j | jq -r --arg instance "$NESTED_INSTANCE" 
 [[ -n "$NESTED_SOCKET" ]] || die "could not resolve nested Wayland socket"
 
 wait_for_outer_output_window_count 1 || die "timed out waiting for the first outer nested output window"
-for expected_monitor_count in 2 3 4 5; do
-    hyprctl -i "$NESTED_INSTANCE" output create wayland >/dev/null
-    wait_for_nested_monitor_count "$expected_monitor_count" || die "timed out waiting for nested monitor count $expected_monitor_count"
-    wait_for_outer_output_window_count "$expected_monitor_count" || die "timed out waiting for outer nested output window count $expected_monitor_count"
-done
+hyprscroller_position_outer_window_index \
+    "$OUTER_MONITOR_X" \
+    "$OUTER_MONITOR_Y" \
+    0 \
+    OUTER_OUTPUT_TITLES \
+    OUTER_OUTPUT_XS \
+    OUTER_OUTPUT_YS \
+    OUTER_OUTPUT_WIDTHS \
+    OUTER_OUTPUT_HEIGHTS \
+    || die "failed to apply first outer nested output geometry"
+hyprscroller_create_positioned_wayland_outputs \
+    "$NESTED_INSTANCE" \
+    1 \
+    5 \
+    wait_for_nested_monitor_count \
+    wait_for_outer_output_window_count \
+    "$OUTER_MONITOR_X" \
+    "$OUTER_MONITOR_Y" \
+    OUTER_OUTPUT_TITLES \
+    OUTER_OUTPUT_XS \
+    OUTER_OUTPUT_YS \
+    OUTER_OUTPUT_WIDTHS \
+    OUTER_OUTPUT_HEIGHTS \
+    || die "timed out creating five nested wayland outputs"
 
-for index in "${!OUTER_OUTPUT_TITLES[@]}"; do
-    position_outer_output_window \
-        "${OUTER_OUTPUT_TITLES[$index]}" \
-        "${OUTER_OUTPUT_WIDTHS[$index]}" \
-        "${OUTER_OUTPUT_HEIGHTS[$index]}" \
-        "$(( OUTER_MONITOR_X + OUTER_OUTPUT_XS[$index] ))" \
-        "$(( OUTER_MONITOR_Y + OUTER_OUTPUT_YS[$index] ))"
-done
+hyprscroller_wait_for_outer_output_position_events "$OUTER_OUTPUT_EVENT_STATE" 5 \
+    || die "outer output event watcher did not position all five nested output windows"
+
+hyprscroller_position_outer_windows \
+    "$OUTER_MONITOR_X" \
+    "$OUTER_MONITOR_Y" \
+    OUTER_OUTPUT_TITLES \
+    OUTER_OUTPUT_XS \
+    OUTER_OUTPUT_YS \
+    OUTER_OUTPUT_WIDTHS \
+    OUTER_OUTPUT_HEIGHTS \
+    || die "failed to apply outer nested output geometry"
 sleep 0.5
 
-apply_five_monitor_cross_layout "$WINDOW_WIDTH" "$WINDOW_HEIGHT"
+hyprscroller_apply_five_monitor_cross_layout "$NESTED_INSTANCE" "$WINDOW_WIDTH" "$WINDOW_HEIGHT"
 sleep 0.5
 
 for monitor_name in "${NESTED_MONITOR_NAMES[@]}"; do
@@ -659,6 +595,7 @@ fi
 
 OUTER_WINDOWS_JSON="$(collect_outer_windows_json)"
 [[ "$(printf '%s\n' "$OUTER_WINDOWS_JSON" | jq 'length')" -eq 5 ]] || die "could not resolve all outer nested output window state"
+OUTER_OUTPUT_EVENT_COUNT="$(hyprscroller_outer_output_position_event_count "$OUTER_OUTPUT_EVENT_STATE")"
 
 jq -n \
   --argjson initialMonitors "$INITIAL_MONITORS_JSON" \
@@ -674,6 +611,10 @@ jq -n \
   --argjson sourceFloating "$( [[ "$(client_is_floating_by_class "$SOURCE_CLASS")" == "true" ]] && printf 'true' || printf 'false' )" \
   --argjson targetFloating "$( [[ "$(client_is_floating_by_class "$TARGET_CLASS")" == "true" ]] && printf 'true' || printf 'false' )" \
   --arg runtimeStatePath "$RUNTIME_STATE_COPY" \
+  --arg outerOutputEventSocket "$OUTER_OUTPUT_EVENT_SOCKET" \
+  --arg outerOutputEventState "$OUTER_OUTPUT_EVENT_STATE" \
+  --argjson outerOutputEventCount "$OUTER_OUTPUT_EVENT_COUNT" \
+  --argjson outerOutputMapTimeRulesInstalled "$OUTER_OUTPUT_MAP_TIME_RULES_INSTALLED" \
   '{
       initialMonitors: $initialMonitors,
       duringCreatePreviewMonitors: $duringCreatePreviewMonitors,
@@ -687,7 +628,11 @@ jq -n \
       normalFocusOk: ($normalFocusOk == 1),
       sourceFloating: $sourceFloating,
       targetFloating: $targetFloating,
-      runtimeStatePath: $runtimeStatePath
+      runtimeStatePath: $runtimeStatePath,
+      outerOutputEventSocket: $outerOutputEventSocket,
+      outerOutputEventState: $outerOutputEventState,
+      outerOutputEventCount: $outerOutputEventCount,
+      outerOutputMapTimeRulesInstalled: ($outerOutputMapTimeRulesInstalled == 1)
   }' >"$RESULT_PATH"
 
 if [[ "$KEEP_OPEN" -eq 1 ]]; then
@@ -709,6 +654,8 @@ SOURCE_FLOATING="$(jq -r '.sourceFloating' "$RESULT_PATH")"
 TARGET_FLOATING="$(jq -r '.targetFloating' "$RESULT_PATH")"
 SOURCE_CLIENT_SIZE="$(jq -r '.clients[] | select(.class == "hs-canvas-source") | (.size | @json)' "$RESULT_PATH")"
 TARGET_CLIENT_SIZE="$(jq -r '.clients[] | select(.class == "hs-canvas-target") | (.size | @json)' "$RESULT_PATH")"
+OUTER_OUTPUT_MAP_TIME_RULES_INSTALLED_RESULT="$(jq -r '.outerOutputMapTimeRulesInstalled' "$RESULT_PATH")"
+OUTER_OUTPUT_EVENT_COUNT="$(jq -r '.outerOutputEventCount' "$RESULT_PATH")"
 INITIAL_MONITOR_COUNT="$(jq -r '.initialMonitors | length' "$RESULT_PATH")"
 ALL_INITIAL_TRANSFORMS_OK="$(jq -r '
     ((.initialMonitors[] | select(.name == "WAYLAND-1") | .transform) == 3) and
@@ -752,6 +699,9 @@ printf 'config:                  %s\n' "$CONFIG_PATH"
 printf 'log:                     %s\n' "$LOG_PATH"
 printf 'result file:             %s\n' "$RESULT_PATH"
 printf 'runtime state:           %s\n' "$RUNTIME_STATE_COPY"
+printf 'outer event state:       %s\n' "$OUTER_OUTPUT_EVENT_STATE"
+printf 'outer map-time rules:    %s\n' "${OUTER_OUTPUT_MAP_TIME_RULES_INSTALLED_RESULT:-unknown}"
+printf 'outer event positioned:  %s\n' "${OUTER_OUTPUT_EVENT_COUNT:-0}"
 printf 'normal focus landed on:  %s\n' "${NORMAL_FOCUSED_MONITOR:-unknown}"
 printf 'normal focus ok:         %s\n' "${NORMAL_FOCUS_OK:-0}"
 printf 'initial monitor count:   %s\n' "${INITIAL_MONITOR_COUNT:-unknown}"
@@ -805,6 +755,8 @@ if [[ "$INITIAL_MONITOR_COUNT" == "5" \
    && "$FINAL_RETURNED_ALL" == "true" \
    && "$SOURCE_FLOATING" == "true" \
    && "$TARGET_FLOATING" == "true" \
+   && "$OUTER_OUTPUT_MAP_TIME_RULES_INSTALLED_RESULT" == "true" \
+   && "$OUTER_OUTPUT_EVENT_COUNT" -ge 5 \
    && "$OUTER_WINDOW_LAYOUT_OK" == "1" \
    && "$CLIENTS_ON_FINAL_SOURCE" == "1" \
    && "$CLIENTS_ON_FINAL_TARGET" == "1" \
