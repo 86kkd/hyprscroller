@@ -84,6 +84,10 @@ For stateful layout changes, pair those tests with:
 - [smoke test checklist](./docs/smoke-test-checklist.md)
 - [Hyprland testing notes](./docs/hyprland-testing.md)
 
+For the locally maintained Hyprland layout-switch helper script that wires
+`master` / `dwindle` / `scroller` and the current scroller-specific binds, see
+[examples/ChangeLayout.sh](./examples/ChangeLayout.sh).
+
 A more automated option is to use `hyprpm`.
 
 ``` sh
