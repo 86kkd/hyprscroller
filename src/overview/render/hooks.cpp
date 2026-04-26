@@ -8,7 +8,9 @@
 #include <exception>
 
 #include <hyprland/src/Compositor.hpp>
+#include <hyprland/src/devices/IKeyboard.hpp>
 #include <hyprland/src/event/EventBus.hpp>
+#include <hyprland/src/managers/SeatManager.hpp>
 #include <hyprland/src/render/OpenGL.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 #include <spdlog/spdlog.h>
@@ -26,6 +28,28 @@ namespace {
 CHyprSignalListener g_renderPreListener = nullptr;
 CHyprSignalListener g_renderStageListener = nullptr;
 CHyprSignalListener g_keyboardKeyListener = nullptr;
+
+bool no_overview_modifiers_remaining() {
+    constexpr uint32_t kTransientModifierMask =
+        HL_MODIFIER_SHIFT |
+        HL_MODIFIER_CTRL |
+        HL_MODIFIER_ALT |
+        HL_MODIFIER_MOD2 |
+        HL_MODIFIER_MOD3 |
+        HL_MODIFIER_META |
+        HL_MODIFIER_MOD5;
+
+    if (!g_pSeatManager)
+        return true;
+
+    const auto keyboard = g_pSeatManager->m_keyboard.lock();
+    if (!keyboard)
+        return true;
+
+    // Hold-to-preview overview should commit once the last transient modifier
+    // (super/alt/ctrl/shift-style keys) has been released.
+    return (keyboard->getModifiers() & kTransientModifierMask) == 0;
+}
 
 void damage_monitor_if_animating(PHLMONITOR monitor, steady_tp now) {
     if (!monitor)
@@ -131,12 +155,14 @@ bool initializeRendererHooksImpl(HANDLE handle) {
             auto& overview = session();
             const auto released = event.state == WL_KEYBOARD_KEY_STATE_RELEASED;
             const auto handledByOverview = overview.consumeInputHandled(released);
+            const auto noModifiersRemaining = released && event.updateMods && no_overview_modifiers_remaining();
 
-            if (shouldDismissOnKeyRelease(overview.active(),
-                                          released,
-                                          event.updateMods,
-                                          handledByOverview))
-                overview.dismiss();
+            if (shouldCloseOverviewOnKeyRelease(overview.active(),
+                                                released,
+                                                event.updateMods,
+                                                handledByOverview,
+                                                noModifiersRemaining))
+                overview.close(true);
         });
 
         spdlog::info("overview_renderer_init: using render-pass overlay backend");

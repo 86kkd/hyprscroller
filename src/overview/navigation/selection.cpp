@@ -51,11 +51,18 @@ InitialSelectionChoice chooseInitialSelectionChoice(bool hasTargets,
     return InitialSelectionChoice::None;
 }
 
-bool shouldDismissOnKeyRelease(bool overviewActive,
-                               bool released,
-                               bool updateModsOnly,
-                               bool handledByOverview) {
-    return overviewActive && released && !updateModsOnly && !handledByOverview;
+bool shouldCloseOverviewOnKeyRelease(bool overviewActive,
+                                     bool released,
+                                     bool updateModsOnly,
+                                     bool handledByOverview,
+                                     bool noModifiersRemaining) {
+    if (!overviewActive || !released || handledByOverview)
+        return false;
+
+    if (!updateModsOnly)
+        return true;
+
+    return noModifiersRemaining;
 }
 
 } // namespace Overview

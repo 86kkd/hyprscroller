@@ -144,6 +144,7 @@ The plugin adds the following dispatchers:
 | `scroller:expelwindow`    | Pop the current window out of its column and place it on a new column to the right.                                         |
 | `scroller:fitsize`        | Resize columns (*row* mode) or windows (*col* mode) so they fit on the screen: `active`, `visible`, `all`, `toend`, `tobeg` |
 | `scroller:togglefullscreen` | Toggle scroller fullscreen for the active window. In *row* mode it expands horizontally to the monitor width; in *column* mode it expands vertically to the monitor height. |
+| `scroller:focusmonitor`   | Move monitor focus in normal mode, or move the focused canvas workspace preview in overview mode.                          |
 | `scroller:toggleoverview` | Toggle the read-only monitor/workspace/window overview overlay                                                             |
 | `scroller:marksadd`       | Add a named mark. Argument is the name of the mark                                                                          |
 | `scroller:marksdelete`    | Delete a named mark. Argument is the name of the mark                                                                       |
@@ -269,9 +270,15 @@ monitors. Overview is now a read-only navigation layer:
 
 1. Real window geometry is left untouched while overview is open.
 2. `scroller:movefocus` moves the logical overview selection instead of real focus.
-3. `scroller:toggleoverview accept` accepts the selected target.
-4. `scroller:toggleoverview cancel` or `scroller:canceloverview` restores the
+3. `scroller:focusmonitor` moves the focused canvas workspace preview while overview stays open.
+4. Closing overview accepts the currently focused target/canvas.
+5. `scroller:toggleoverview cancel` or `scroller:canceloverview` restores the
    original workspace/window.
+
+With hold-to-preview bindings, that means you can hold your main modifier,
+open overview, use `scroller:focusmonitor` on `N/M/,/.` to change canvas
+workspace focus, and release the modifier to enter the currently focused
+canvas workspace.
 
 Overview can target:
 

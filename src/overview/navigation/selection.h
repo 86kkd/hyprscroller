@@ -31,9 +31,10 @@ InitialSelectionChoice chooseInitialSelectionChoice(bool hasTargets,
                                                     bool hasFirstTarget,
                                                     bool hasInitialEmptyRegion);
 
-bool shouldDismissOnKeyRelease(bool overviewActive,
-                               bool released,
-                               bool updateModsOnly,
-                               bool handledByOverview);
+bool shouldCloseOverviewOnKeyRelease(bool overviewActive,
+                                     bool released,
+                                     bool updateModsOnly,
+                                     bool handledByOverview,
+                                     bool noModifiersRemaining);
 
 } // namespace Overview
