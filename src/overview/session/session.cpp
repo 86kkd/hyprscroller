@@ -208,8 +208,7 @@ void Session::open() {
 }
 
 std::optional<TargetRef> Session::findBestTarget(Direction direction) const {
-    const auto* currentSelection = model_.selection();
-    if (!model_.selectionRef() || !currentSelection)
+    if (!model_.selectionRef())
         return std::nullopt;
 
     const auto& targetGraph = model_.targetGraph();
@@ -217,53 +216,38 @@ std::optional<TargetRef> Session::findBestTarget(Direction direction) const {
         return std::nullopt;
 
     // Convert the richer overview target graph into the minimal pure-routing
-    // representation that `OverviewLogic` understands. Window-level movefocus
-    // stays inside the selected canvas workspace and only traverses previews.
-    std::vector<OverviewLogic::TargetCandidate> candidates;
+    // representation that `OverviewLogic` understands. Movefocus stays inside
+    // the selected canvas, but empty-workspace targets remain selectable.
+    std::vector<OverviewLogic::CanvasTargetCandidate> candidates;
     std::vector<TargetRef> refs;
-    candidates.reserve(targetGraph.size() + 1);
+    candidates.reserve(targetGraph.size());
     refs.reserve(targetGraph.size());
 
-    candidates.push_back({
-        .monitorId = currentSelection->monitorId,
-        .box = currentSelection->box,
-    });
-
+    auto currentIndex = std::optional<size_t>{};
     for (const auto& node : targetGraph) {
         const auto* target = model_.resolve(node.ref);
-        if (!target || target->canvasId != currentSelection->canvasId || target->type != TargetType::Window)
+        if (!target)
             continue;
 
         candidates.push_back({
+            .canvasId = target->canvasId,
             .monitorId = target->monitorId,
             .box = target->box,
         });
         refs.push_back(node.ref);
+
+        if (node.ref == *model_.selectionRef())
+            currentIndex = refs.size() - 1;
     }
 
-    if (refs.empty())
+    if (!currentIndex)
         return std::nullopt;
 
-    auto currentIndex = size_t{0};
-    if (currentSelection->type == TargetType::Window) {
-        auto foundCurrent = false;
-        for (size_t index = 0; index < refs.size(); ++index) {
-            if (refs[index] != *model_.selectionRef())
-                continue;
-
-            currentIndex = index + 1;
-            foundCurrent = true;
-            break;
-        }
-        if (!foundCurrent)
-            return std::nullopt;
-    }
-
-    const auto nextIndex = OverviewLogic::pickTargetIndex(candidates, currentIndex, direction);
-    if (!nextIndex || *nextIndex == 0)
+    const auto nextIndex = OverviewLogic::pickTargetIndexInCanvas(candidates, *currentIndex, direction);
+    if (!nextIndex)
         return std::nullopt;
 
-    return refs[*nextIndex - 1];
+    return refs[*nextIndex];
 }
 
 bool Session::moveSelection(Direction direction) {
@@ -331,7 +315,7 @@ bool Session::moveCanvasSelection(Direction direction) {
     return true;
 }
 
-bool Session::activateCanvas(int canvasId, int selectedMonitorId, const char* context) {
+bool Session::activateCanvas(int canvasId, int selectedMonitorId, bool requireSelectedMonitorFocus, const char* context) {
     auto& canvasRepo = CanvasLayoutState::canvasRepository();
     const auto previewCanvases = canvasRepo.previewCanvases(pendingCanvases_);
     const auto canvasIt = std::find_if(previewCanvases.begin(), previewCanvases.end(), [&](const auto& canvas) {
@@ -362,15 +346,16 @@ bool Session::activateCanvas(int canvasId, int selectedMonitorId, const char* co
         return lhs.monitorId < rhs.monitorId;
     });
 
-    auto focusedSelectedMonitor = false;
+    auto visitedSelectedMonitor = false;
     for (const auto& member : members) {
         const auto monitor = g_pCompositor->getMonitorFromID(member.monitorId);
         if (!monitor)
             continue;
 
         const auto workspace = g_pCompositor->getWorkspaceByID(member.workspaceId);
-        const auto requireMonitorFocus = member.monitorId == selectedMonitorId;
-        focusedSelectedMonitor = focusedSelectedMonitor || requireMonitorFocus;
+        const auto selectedMember = member.monitorId == selectedMonitorId;
+        const auto requireMonitorFocus = selectedMember && requireSelectedMonitorFocus;
+        visitedSelectedMonitor = visitedSelectedMonitor || selectedMember;
         if (!CanvasLayoutInternal::focus_monitor_workspace(monitor,
                                                            workspace,
                                                            member.workspaceId,
@@ -379,7 +364,7 @@ bool Session::activateCanvas(int canvasId, int selectedMonitorId, const char* co
             return false;
     }
 
-    if (focusedSelectedMonitor)
+    if (visitedSelectedMonitor)
         return true;
 
     const auto fallbackMember = members.front();
@@ -450,7 +435,8 @@ bool Session::acceptSelection() {
             }
         }
 
-        if (!activateCanvas(selectionCopy.canvasId, selectionCopy.monitorId, "overview_accept_canvas"))
+        const auto requireSelectedMonitorFocus = selectionCopy.type != TargetType::Window || !selectionCopy.window;
+        if (!activateCanvas(selectionCopy.canvasId, selectionCopy.monitorId, requireSelectedMonitorFocus, "overview_accept_canvas"))
             return false;
 
         if (!finalizeCanvasTarget(selectionCopy, true))
@@ -472,9 +458,11 @@ bool Session::restoreOrigin() {
         auto& canvasRepo = CanvasLayoutState::canvasRepository();
         if (canvasRepo.find(originCanvasId_))
             canvasRepo.ensureCanvasHasVisibleMembers(originCanvasId_);
-        if (!activateCanvas(originCanvasId_, model_.origin().monitorId, "overview_restore_canvas"))
+        const auto& origin = model_.origin();
+        const auto restoreWindow = origin.window && origin.window->m_isMapped;
+        if (!activateCanvas(originCanvasId_, origin.monitorId, !restoreWindow, "overview_restore_canvas"))
             return false;
-        return finalizeCanvasOrigin(model_.origin());
+        return finalizeCanvasOrigin(origin);
     }
 
     return SessionEffects::restoreOrigin(model_.origin());

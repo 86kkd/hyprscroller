@@ -23,6 +23,12 @@ struct TargetCandidate {
     ScrollerCore::Box box;
 };
 
+struct CanvasTargetCandidate {
+    int               canvasId = -1;
+    int               monitorId = MONITOR_ID_INVALID;
+    ScrollerCore::Box box;
+};
+
 enum class AcceptActionType {
     FocusMonitor,
     Workspace,
@@ -36,6 +42,8 @@ struct AcceptAction {
 };
 
 std::optional<size_t> pickTargetIndex(const std::vector<TargetCandidate>& targets, size_t currentIndex, Direction direction);
+std::optional<size_t> pickTargetIndexInCanvas(const std::vector<CanvasTargetCandidate>& targets, size_t currentIndex,
+                                              Direction direction);
 std::vector<AcceptAction> buildWorkspaceAcceptPlan(int monitorId, WorkspaceId workspaceId, bool specialWorkspace);
 std::vector<AcceptAction> buildEmptyAcceptPlan(int monitorId, WorkspaceId workspaceId);
 

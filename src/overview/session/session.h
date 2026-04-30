@@ -31,7 +31,7 @@ class Session {
   private:
     bool selectInitialTarget();
     bool selectCanvas(int canvasId, std::optional<int> preferredMonitorId = std::nullopt);
-    bool activateCanvas(int canvasId, int selectedMonitorId, const char* context);
+    bool activateCanvas(int canvasId, int selectedMonitorId, bool requireSelectedMonitorFocus, const char* context);
     bool finalizeCanvasTarget(const Target& target, bool warpCursor);
     bool finalizeCanvasOrigin(const OriginState& origin);
     bool acceptSelection();

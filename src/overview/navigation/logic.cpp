@@ -147,6 +147,43 @@ std::optional<size_t> pickTargetIndex(const std::vector<TargetCandidate>& target
     return bestIndex;
 }
 
+std::optional<size_t> pickTargetIndexInCanvas(const std::vector<CanvasTargetCandidate>& targets, size_t currentIndex,
+                                              Direction direction) {
+    if (currentIndex >= targets.size())
+        return std::nullopt;
+
+    std::vector<TargetCandidate> canvasTargets;
+    std::vector<size_t> originalIndexes;
+    canvasTargets.reserve(targets.size());
+    originalIndexes.reserve(targets.size());
+
+    const auto currentCanvasId = targets[currentIndex].canvasId;
+    auto canvasCurrentIndex = std::optional<size_t>{};
+    for (size_t index = 0; index < targets.size(); ++index) {
+        const auto& target = targets[index];
+        if (target.canvasId != currentCanvasId)
+            continue;
+
+        if (index == currentIndex)
+            canvasCurrentIndex = canvasTargets.size();
+
+        canvasTargets.push_back({
+            .monitorId = target.monitorId,
+            .box = target.box,
+        });
+        originalIndexes.push_back(index);
+    }
+
+    if (!canvasCurrentIndex)
+        return std::nullopt;
+
+    const auto nextIndex = pickTargetIndex(canvasTargets, *canvasCurrentIndex, direction);
+    if (!nextIndex)
+        return std::nullopt;
+
+    return originalIndexes[*nextIndex];
+}
+
 std::vector<AcceptAction> buildEmptyAcceptPlan(int monitorId, WorkspaceId workspaceId) {
     // Empty targets create/focus a workspace but do not need any follow-up
     // window activation step.

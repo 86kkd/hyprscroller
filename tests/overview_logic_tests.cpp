@@ -124,6 +124,18 @@ void test_overview_target_selection_stops_at_preview_edge() {
                 "overview movefocus stops when there is no preview to the right");
 }
 
+void test_overview_target_selection_keeps_empty_targets_reachable_in_canvas() {
+    const std::vector<OverviewLogic::CanvasTargetCandidate> targets = {
+        {.canvasId = 10, .monitorId = 1, .box = {0.0, 0.0, 100.0, 100.0}},
+        {.canvasId = 10, .monitorId = 1, .box = {140.0, 0.0, 100.0, 100.0}},
+        {.canvasId = 20, .monitorId = 1, .box = {120.0, 0.0, 100.0, 100.0}},
+    };
+
+    const auto next = OverviewLogic::pickTargetIndexInCanvas(targets, 0, Direction::Right);
+    expect_true(next.has_value() && *next == 1,
+                "overview movefocus can select same-canvas empty workspace targets before accept");
+}
+
 void test_overview_empty_accept_plan() {
     const auto plan = OverviewLogic::buildEmptyAcceptPlan(7, 42);
     expect_eq(plan.size(), static_cast<size_t>(2), "overview empty accept plan emits two steps");
@@ -167,6 +179,7 @@ void run_overview_logic_tests() {
     test_overview_target_selection_across_monitors();
     test_overview_target_selection_prefers_rendered_neighbor();
     test_overview_target_selection_stops_at_preview_edge();
+    test_overview_target_selection_keeps_empty_targets_reachable_in_canvas();
     test_overview_empty_accept_plan();
     test_overview_window_accept_plan();
     test_overview_special_workspace_accept_plan();
