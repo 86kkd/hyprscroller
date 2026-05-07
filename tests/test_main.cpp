@@ -6,6 +6,7 @@
 
 int main() {
     run_core_logic_tests();
+    run_grid_logic_tests();
     run_layout_snapshot_tests();
     run_layout_logic_tests();
     run_overview_logic_tests();

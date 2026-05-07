@@ -35,6 +35,7 @@
 #include "layout/canvas/layout.h"
 #include "layout/canvas/layout_repository.h"
 #include "layout/canvas/canvas_workspace_repository.h"
+#include "layout/grid/layout.h"
 #include "overview/render/render.h"
 
 // Hyprland plugin handle used by config lookups and dispatcher registration.
@@ -150,6 +151,11 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         "scroller",
         &typeid(CanvasLayout),
         []() -> UP<Layout::ITiledAlgorithm> { return makeUnique<CanvasLayout>(); });
+    HyprlandAPI::addTiledAlgo(
+        PHANDLE,
+        "scrollergrid",
+        &typeid(ScrollerGrid::GridLayout),
+        []() -> UP<Layout::ITiledAlgorithm> { return makeUnique<ScrollerGrid::GridLayout>(); });
 
     Overview::initializeRendererHooks(PHANDLE);
 
