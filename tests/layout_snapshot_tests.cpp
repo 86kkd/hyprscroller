@@ -59,6 +59,12 @@ void test_snapshot_round_trip() {
 
     canvas.lanes.push_back(firstLane);
     canvas.lanes.push_back(secondLane);
+    canvas.grid.enabled = true;
+    canvas.grid.activeItemIndex = 1;
+    canvas.grid.viewportColumn = 3;
+    canvas.grid.viewportRow = -2;
+    canvas.grid.items.push_back({.key = 0x44, .column = 1, .row = 2, .columnSpan = 1, .rowSpan = 1});
+    canvas.grid.items.push_back({.key = 0x55, .column = 3, .row = 2, .columnSpan = 2, .rowSpan = 1});
     repository.emplace(canvas.workspaceId, canvas);
 
     const auto serialized = serialize_repository(repository);
@@ -84,6 +90,33 @@ void test_snapshot_round_trip() {
     expect_eq(restored.lanes[0].stacks[0].activeWindowKey, static_cast<uintptr_t>(0x22), "layout snapshot keeps active window key");
     expect_eq(restored.lanes[0].stacks[0].windows[1].heightMode, 5, "layout snapshot keeps window height mode");
     expect_box_eq(restored.lanes[1].stacks[0].geom, {100.0, 120.0, 800.0, 900.0}, "layout snapshot keeps stack geom");
+    expect_true(restored.grid.enabled, "layout snapshot keeps grid enabled flag");
+    expect_eq(restored.grid.activeItemIndex, 1, "layout snapshot keeps grid active item");
+    expect_eq(restored.grid.viewportColumn, 3, "layout snapshot keeps grid viewport column");
+    expect_eq(restored.grid.viewportRow, -2, "layout snapshot keeps grid viewport row");
+    expect_eq(restored.grid.items.size(), static_cast<size_t>(2), "layout snapshot keeps grid item count");
+    expect_eq(restored.grid.items[1].key, static_cast<uintptr_t>(0x55), "layout snapshot keeps grid item key");
+    expect_eq(restored.grid.items[1].columnSpan, 2, "layout snapshot keeps grid item span");
+}
+
+void test_snapshot_accepts_legacy_lane_format() {
+    const std::string legacy =
+        "VERSION 1\n"
+        "WORKSPACE 4 0 1\n"
+        "LANE 0 0 0 0 1\n"
+        "STACK 1 0 0 0 10 20 300 400 1 2 3 4 11 1\n"
+        "WINDOW 11 3 20 300 20 300\n";
+    const auto parsed = ScrollerSnapshot::deserialize_repository(legacy);
+    expect_true(parsed.has_value(), "layout snapshot accepts legacy v1 lane format");
+    if (!parsed)
+        return;
+
+    const auto it = parsed->find(4);
+    expect_true(it != parsed->end(), "legacy layout snapshot keeps workspace");
+    if (it == parsed->end())
+        return;
+
+    expect_true(!it->second.grid.enabled, "legacy layout snapshot leaves grid disabled");
 }
 
 void test_snapshot_rejects_invalid_version() {
@@ -142,6 +175,7 @@ void test_canvas_workspace_snapshot_rejects_missing_active_line() {
 
 void run_layout_snapshot_tests() {
     test_snapshot_round_trip();
+    test_snapshot_accepts_legacy_lane_format();
     test_snapshot_rejects_invalid_version();
     test_snapshot_rejects_malformed_stack_line();
     test_canvas_workspace_snapshot_round_trip();

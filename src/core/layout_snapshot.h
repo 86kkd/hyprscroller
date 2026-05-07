@@ -11,7 +11,8 @@
 
 namespace ScrollerSnapshot {
 
-constexpr int kFormatVersion = 1;
+constexpr int kLegacyFormatVersion = 1;
+constexpr int kFormatVersion = 2;
 
 struct WindowSnapshot {
     uintptr_t key = 0;
@@ -41,11 +42,28 @@ struct LaneSnapshot {
     std::vector<StackSnapshot>  stacks;
 };
 
+struct GridItemSnapshot {
+    uintptr_t key = 0;
+    int       column = 0;
+    int       row = 0;
+    int       columnSpan = 1;
+    int       rowSpan = 1;
+};
+
+struct GridSnapshot {
+    bool                          enabled = false;
+    int                           activeItemIndex = -1;
+    int                           viewportColumn = 0;
+    int                           viewportRow = 0;
+    std::vector<GridItemSnapshot> items;
+};
+
 struct CanvasSnapshot {
     int                        version = kFormatVersion;
     int                        workspaceId = -1;
     size_t                     activeLaneIndex = 0;
     std::vector<LaneSnapshot>  lanes;
+    GridSnapshot               grid;
 };
 
 using RepositorySnapshot = std::unordered_map<int, CanvasSnapshot>;

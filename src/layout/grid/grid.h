@@ -4,6 +4,7 @@
 #include <optional>
 #include <vector>
 
+#include "core/layout_snapshot.h"
 #include "core/types.h"
 
 namespace ScrollerGrid {
@@ -49,10 +50,6 @@ ScrollerCore::Box grid_item_logical_box(const GridItem& item,
                                         const GridProfile& profile,
                                         const ScrollerCore::Box& workarea);
 
-ScrollerCore::Box avoid_reserved_edges_for_hidden_box(const ScrollerCore::Box& logicalBox,
-                                                      const ScrollerCore::Box& fullBox,
-                                                      const ScrollerCore::Box& workareaBox);
-
 RenderedGridItem render_grid_item(const GridItem& item,
                                   const GridViewport& viewport,
                                   const GridProfile& profile,
@@ -80,6 +77,11 @@ public:
                               bool focusWrap);
     void ensure_active_visible(const GridProfile& profile, GridViewport& viewport) const;
     bool swap_windows(uintptr_t a, uintptr_t b);
+    GridMoveResult move_active_window(Direction direction,
+                                      const GridProfile& profile,
+                                      GridViewport& viewport);
+    ScrollerSnapshot::GridSnapshot capture_snapshot(const GridViewport& viewport) const;
+    void restore_snapshot(const ScrollerSnapshot::GridSnapshot& snapshot);
 
     std::vector<RenderedGridItem> render(const GridViewport& viewport,
                                          const GridProfile& profile,
@@ -88,6 +90,7 @@ public:
 
 private:
     std::optional<size_t> index_for_key(uintptr_t key) const;
+    std::optional<size_t> first_occupied_index(int column, int row, int columnSpan, int rowSpan, std::optional<size_t> ignoredIndex = std::nullopt) const;
     bool cell_range_occupied(int column, int row, int columnSpan, int rowSpan) const;
     bool shift_viewport(Direction direction, GridViewport& viewport) const;
 

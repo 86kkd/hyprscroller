@@ -130,6 +130,16 @@ std::string serialize_repository(const RepositorySnapshot &snapshots) {
                 }
             }
         }
+        out << "GRID " << (canvas.grid.enabled ? 1 : 0) << ' '
+            << canvas.grid.activeItemIndex << ' '
+            << canvas.grid.viewportColumn << ' '
+            << canvas.grid.viewportRow << ' '
+            << canvas.grid.items.size() << '\n';
+        for (const auto &item : canvas.grid.items) {
+            out << "GRIDITEM " << item.key << ' '
+                << item.column << ' ' << item.row << ' '
+                << item.columnSpan << ' ' << item.rowSpan << '\n';
+        }
     }
 
     return out.str();
@@ -141,6 +151,7 @@ std::optional<RepositorySnapshot> deserialize_repository(std::string_view data) 
     std::string line;
 
     bool sawVersion = false;
+    int formatVersion = 0;
     CanvasSnapshot *currentCanvas = nullptr;
     LaneSnapshot *currentLane = nullptr;
     StackSnapshot *currentStack = nullptr;
@@ -152,8 +163,11 @@ std::optional<RepositorySnapshot> deserialize_repository(std::string_view data) 
 
         if (tokens[0] == "VERSION") {
             int version = 0;
-            if (tokens.size() != 2 || !parse_token(tokens[1], version) || version != kFormatVersion)
+            if (tokens.size() != 2 ||
+                !parse_token(tokens[1], version) ||
+                (version != kLegacyFormatVersion && version != kFormatVersion))
                 return std::nullopt;
+            formatVersion = version;
             sawVersion = true;
             continue;
         }
@@ -233,6 +247,40 @@ std::optional<RepositorySnapshot> deserialize_repository(std::string_view data) 
                 !parse_token(tokens[6], window.memH))
                 return std::nullopt;
             currentStack->windows.push_back(std::move(window));
+            continue;
+        }
+
+        if (tokens[0] == "GRID") {
+            if (!currentCanvas || formatVersion < kFormatVersion)
+                return std::nullopt;
+
+            size_t itemCount = 0;
+            if (tokens.size() != 6 ||
+                !parse_bool_token(tokens[1], currentCanvas->grid.enabled) ||
+                !parse_token(tokens[2], currentCanvas->grid.activeItemIndex) ||
+                !parse_token(tokens[3], currentCanvas->grid.viewportColumn) ||
+                !parse_token(tokens[4], currentCanvas->grid.viewportRow) ||
+                !parse_size_token(tokens[5], itemCount))
+                return std::nullopt;
+            currentCanvas->grid.items.reserve(itemCount);
+            currentLane = nullptr;
+            currentStack = nullptr;
+            continue;
+        }
+
+        if (tokens[0] == "GRIDITEM") {
+            if (!currentCanvas || formatVersion < kFormatVersion)
+                return std::nullopt;
+
+            GridItemSnapshot item;
+            if (tokens.size() != 6 ||
+                !parse_key_token(tokens[1], item.key) ||
+                !parse_token(tokens[2], item.column) ||
+                !parse_token(tokens[3], item.row) ||
+                !parse_token(tokens[4], item.columnSpan) ||
+                !parse_token(tokens[5], item.rowSpan))
+                return std::nullopt;
+            currentCanvas->grid.items.push_back(item);
             continue;
         }
 

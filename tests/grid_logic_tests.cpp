@@ -90,6 +90,28 @@ void test_move_focus_can_move_empty_viewport_space() {
     expect_eq(model.active_item()->key, static_cast<uintptr_t>(1), "active item is preserved while viewport moves");
 }
 
+void test_move_active_window_moves_or_swaps_grid_cells() {
+    ScrollerGrid::GridModel model;
+    const auto profile = ScrollerGrid::profile_for_workarea(Mode::Row, {0.0, 0.0, 1200.0, 800.0});
+    ScrollerGrid::GridViewport viewport;
+
+    model.add_window(1, profile);
+    model.add_window(2, profile);
+    model.focus_window(2);
+
+    expect_eq(model.move_active_window(Direction::Right, profile, viewport), ScrollerGrid::GridMoveResult::Moved,
+              "grid movewindow moves into empty cell");
+    expect_eq(model.item_for_key(2)->column, 2, "moved item advances to empty cell");
+    expect_eq(viewport.originColumn, 1, "viewport follows moved item");
+
+    expect_eq(model.move_active_window(Direction::Left, profile, viewport), ScrollerGrid::GridMoveResult::Moved,
+              "grid movewindow moves back into empty cell");
+    expect_eq(model.move_active_window(Direction::Left, profile, viewport), ScrollerGrid::GridMoveResult::Moved,
+              "grid movewindow swaps with occupied cell");
+    expect_eq(model.item_for_key(2)->column, 0, "active item takes occupied cell");
+    expect_eq(model.item_for_key(1)->column, 1, "neighbor moves into active item's previous cell");
+}
+
 void test_hidden_boxes_keep_waybar_reserved_gap() {
     const ScrollerCore::Box full{0.0, 0.0, 1080.0, 1920.0};
     const ScrollerCore::Box workarea{0.0, 40.0, 1080.0, 1880.0};
@@ -118,5 +140,6 @@ void run_grid_logic_tests() {
     test_grid_inserts_along_orientation_axis();
     test_move_focus_scrolls_viewport_to_active_item();
     test_move_focus_can_move_empty_viewport_space();
+    test_move_active_window_moves_or_swaps_grid_cells();
     test_hidden_boxes_keep_waybar_reserved_gap();
 }

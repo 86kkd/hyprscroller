@@ -13,6 +13,7 @@
 #include "core/monitor_geometry.h"
 #include "core/owner_index.h"
 #include "core/intrusive_list.h"
+#include "core/workarea_pager.h"
 #include "model/stack/logic.h"
 
 #include "test_suite.h"
@@ -276,6 +277,20 @@ void test_monitor_geometry() {
     expect_near(fallbackSize.y, 3840.0, 1e-9, "missing transformed size still preserves portrait height");
 }
 
+void test_workarea_pager() {
+    const ScrollerCore::Box full{0.0, 0.0, 1080.0, 1920.0};
+    const ScrollerCore::Box workarea{0.0, 40.0, 1080.0, 1880.0};
+    const auto above = ScrollerCore::project_box_to_workarea_page({0.0, -900.0, 1080.0, 940.0}, full, workarea);
+    expect_near(above.committed.y, -940.0, 1e-9, "workarea pager keeps top reserved edge clear");
+    expect_true(!above.visible, "workarea pager marks fully hidden top box invisible");
+
+    const ScrollerCore::Box fullWithLeftBar{0.0, 0.0, 1920.0, 1080.0};
+    const ScrollerCore::Box workareaWithLeftBar{48.0, 0.0, 1872.0, 1080.0};
+    const auto left = ScrollerCore::project_box_to_workarea_page({-888.0, 0.0, 936.0, 1080.0}, fullWithLeftBar, workareaWithLeftBar);
+    expect_near(left.committed.x, -936.0, 1e-9, "workarea pager keeps left reserved edge clear");
+    expect_true(!left.visible, "workarea pager marks fully hidden left box invisible");
+}
+
 void test_owner_index() {
     ScrollerCore::OwnerIndex<int, FakeOwner> index;
     FakeOwner stackA{.id = 1, .keys = {1, 2}};
@@ -456,6 +471,7 @@ void run_core_logic_tests() {
     test_anchor_selection();
     test_layout_profile();
     test_monitor_geometry();
+    test_workarea_pager();
     test_owner_index();
     test_fit_size_helpers();
     test_list_move_only();

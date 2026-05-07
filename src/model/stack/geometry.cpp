@@ -19,6 +19,7 @@
 #include "core/layout_math.h"
 #include "core/layout_profile.h"
 #include "core/monitor_geometry_runtime.h"
+#include "core/workarea_pager.h"
 
 namespace ScrollerModel {
 namespace {
@@ -37,7 +38,7 @@ Box logical_window_box(const Box &stackGeom, Mode mode, double border, const Vec
     };
 }
 
-Box safe_committed_box(const Box &logicalBox, const Box &visibleBox, double minSpan) {
+Box safe_committed_box(const Box &logicalBox, const Box &visibleBox, const Box &fullBox, double minSpan) {
     auto safeBox = logicalBox;
     safeBox.w = std::max(safeBox.w, minSpan);
     safeBox.h = std::max(safeBox.h, minSpan);
@@ -57,22 +58,22 @@ Box safe_committed_box(const Box &logicalBox, const Box &visibleBox, double minS
 
     if (boxRight <= visibleBox.x) {
         safeBox.x = visibleBox.x - safeBox.w;
-        return safeBox;
+        return ScrollerCore::avoid_reserved_edges_for_hidden_box(safeBox, fullBox, visibleBox);
     }
 
     if (logicalBox.x >= visibleRight) {
         safeBox.x = visibleRight;
-        return safeBox;
+        return ScrollerCore::avoid_reserved_edges_for_hidden_box(safeBox, fullBox, visibleBox);
     }
 
     if (boxBottom <= visibleBox.y) {
         safeBox.y = visibleBox.y - safeBox.h;
-        return safeBox;
+        return ScrollerCore::avoid_reserved_edges_for_hidden_box(safeBox, fullBox, visibleBox);
     }
 
     if (logicalBox.y >= visibleBottom) {
         safeBox.y = visibleBottom;
-        return safeBox;
+        return ScrollerCore::avoid_reserved_edges_for_hidden_box(safeBox, fullBox, visibleBox);
     }
 
     return safeBox;
@@ -329,6 +330,7 @@ void Stack::adjust_windows(ListNode<Window *> *win, const Vector2D &gap_x, doubl
     auto anchorWindow = win ? win->data()->ptr().lock() : nullptr;
     auto monitor = anchorWindow ? g_pCompositor->getMonitorFromID(anchorWindow->monitorID()) : nullptr;
     const auto monitorBox = monitor ? ScrollerCore::logical_monitor_box(monitor) : ScrollerCore::Box{};
+    const auto fullCommitBox = monitor ? monitorBox : visibleBox;
     const auto fullStart = monitor ? (mode == Mode::Column ? monitorBox.x : monitorBox.y) : StackInternal::stack_local_origin(geom, mode);
     const auto fullEnd = monitor
         ? (mode == Mode::Column ? monitorBox.x + monitorBox.w : monitorBox.y + monitorBox.h)
@@ -383,7 +385,7 @@ void Stack::adjust_windows(ListNode<Window *> *win, const Vector2D &gap_x, doubl
         const auto localSize = w->data()->get_geom_h();
         const auto logicalBox = logical_window_box(geom, mode, border, gap_x, w->data()->get_geom_y(), localSize, gap0, gap1);
         const auto minCommittedSpan = std::max(1.0, 2.0 * border + 1.0);
-        const auto committedBox = safe_committed_box(logicalBox, visibleBox, minCommittedSpan);
+        const auto committedBox = safe_committed_box(logicalBox, visibleBox, fullCommitBox, minCommittedSpan);
         window->m_position = Vector2D(committedBox.x, committedBox.y);
         window->m_size = Vector2D(committedBox.w, committedBox.h);
         StackInternal::sync_window_target_geometry(window);

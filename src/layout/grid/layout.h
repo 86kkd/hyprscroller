@@ -9,6 +9,7 @@
 #include <hyprland/src/layout/algorithm/TiledAlgorithm.hpp>
 #include <hyprland/src/layout/target/Target.hpp>
 
+#include "core/overview_snapshot.h"
 #include "layout/grid/grid.h"
 
 namespace ScrollerGrid {
@@ -29,8 +30,16 @@ public:
     void                             swapTargets(SP<Layout::ITarget> a, SP<Layout::ITarget> b) override;
     void                             moveTargetInDirection(SP<Layout::ITarget> target, Math::eDirection direction, bool silent = false) override;
 
+    void move_focus(int workspace, Direction direction);
+    void move_window(int workspace, Direction direction);
+    void focus_window(PHLWINDOW window);
+    void recalculateMonitor(const int& monitorId);
+    void prepareForOverviewSnapshot();
+    CanvasOverviewSnapshot buildOverviewSnapshot() const;
+
 private:
     PHLMONITOR resolve_monitor() const;
+    PHLWINDOW reference_window() const;
     PHLWINDOW active_window() const;
     GridProfile current_profile(PHLMONITOR monitor) const;
     void relayout(PHLMONITOR monitor);

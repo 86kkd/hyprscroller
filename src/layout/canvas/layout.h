@@ -21,23 +21,12 @@
 
 #include "../../core/owner_index.h"
 #include "../../core/layout_snapshot.h"
+#include "../../core/overview_snapshot.h"
 #include "../../core/types.h"
 #include "core/intrusive_list.h"
 #include "handoff_state.h"
 
 class Lane;
-
-struct CanvasOverviewSnapshotWindow {
-    PHLWINDOW         window = nullptr;
-    // Full logical layout box, not the safety-clipped compositor geometry.
-    ScrollerCore::Box box;
-};
-
-struct CanvasOverviewSnapshot {
-    WORKSPACEID                           workspaceId = WORKSPACE_INVALID;
-    int                                   monitorId = MONITOR_INVALID;
-    std::vector<CanvasOverviewSnapshotWindow> windows;
-};
 
 /**
  * @brief Tiled layout controller for one canvas/workspace instance.

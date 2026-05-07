@@ -22,6 +22,7 @@
 #include "core/direction.h"
 #include "layout/canvas/internal.h"
 #include "layout/canvas/layout.h"
+#include "layout/grid/layout.h"
 #include "overview/session/session.h"
 
 extern HANDLE PHANDLE;
@@ -31,6 +32,15 @@ namespace dispatchers::detail {
 struct WorkspaceActionLayout {
     CanvasLayout* layout = nullptr;
     int           workspace = -1;
+
+    explicit operator bool() const {
+        return layout != nullptr && workspace != -1;
+    }
+};
+
+struct WorkspaceActionGridLayout {
+    ScrollerGrid::GridLayout* layout = nullptr;
+    int                       workspace = -1;
 
     explicit operator bool() const {
         return layout != nullptr && workspace != -1;
@@ -61,6 +71,22 @@ inline CanvasLayout* getCanvasForWorkspace(const int workspaceId) {
     return dynamic_cast<CanvasLayout*>(tiled.get());
 }
 
+inline ScrollerGrid::GridLayout* getGridForWorkspace(const int workspaceId) {
+    const auto workspace = g_pCompositor->getWorkspaceByID(workspaceId);
+    if (!workspace || !workspace->m_space)
+        return nullptr;
+
+    const auto algorithm = workspace->m_space->algorithm();
+    if (!algorithm)
+        return nullptr;
+
+    const auto& tiled = algorithm->tiledAlgo();
+    if (!tiled)
+        return nullptr;
+
+    return dynamic_cast<ScrollerGrid::GridLayout*>(tiled.get());
+}
+
 inline PHLWORKSPACE getWorkspaceForAction(PHLMONITOR monitor) {
     if (!monitor)
         return nullptr;
@@ -76,7 +102,7 @@ inline PHLWORKSPACE getWorkspaceForAction(PHLMONITOR monitor) {
     return g_pCompositor->getWorkspaceByID(activeWorkspaceId);
 }
 
-inline CanvasLayout* layoutForAction(int* workspace) {
+inline PHLWORKSPACE workspaceForActionContext(int* workspace) {
     if (Overview::session().active()) {
         spdlog::debug("layout_for_action: ignored while global overview is active");
         if (workspace)
@@ -119,15 +145,37 @@ inline CanvasLayout* layoutForAction(int* workspace) {
     if (workspace)
         *workspace = workspaceId;
 
-    auto* layout = getCanvasForWorkspace(workspaceId);
+    return selectedWorkspace;
+}
+
+inline CanvasLayout* layoutForAction(int* workspace) {
+    const auto selectedWorkspace = workspaceForActionContext(workspace);
+    if (!selectedWorkspace)
+        return nullptr;
+
+    auto* layout = getCanvasForWorkspace(selectedWorkspace->m_id);
     if (layout)
         layout->prepareForActionContext();
     return layout;
 }
 
+inline ScrollerGrid::GridLayout* gridLayoutForAction(int* workspace) {
+    const auto selectedWorkspace = workspaceForActionContext(workspace);
+    if (!selectedWorkspace)
+        return nullptr;
+
+    return getGridForWorkspace(selectedWorkspace->m_id);
+}
+
 inline WorkspaceActionLayout workspaceLayoutForAction() {
     WorkspaceActionLayout action;
     action.layout = layoutForAction(&action.workspace);
+    return action;
+}
+
+inline WorkspaceActionGridLayout workspaceGridLayoutForAction() {
+    WorkspaceActionGridLayout action;
+    action.layout = gridLayoutForAction(&action.workspace);
     return action;
 }
 

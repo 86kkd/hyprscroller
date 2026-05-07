@@ -13,8 +13,11 @@
 
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/desktop/Workspace.hpp>
+#include <hyprland/src/layout/algorithm/Algorithm.hpp>
+#include <hyprland/src/layout/space/Space.hpp>
 
 #include "layout/canvas/internal.h"
+#include "layout/grid/layout.h"
 #include "overview/navigation/logic.h"
 #include "overview/model/layout.h"
 #include "overview/scene/layout.h"
@@ -58,6 +61,18 @@ const CanvasLayoutState::CanvasWorkspaceRecord* find_canvas_record(const std::ve
         return canvas.canvasId == canvasId;
     });
     return canvasIt == canvases.end() ? nullptr : &*canvasIt;
+}
+
+ScrollerGrid::GridLayout* grid_layout_for_workspace(WORKSPACEID workspaceId) {
+    const auto workspace = g_pCompositor->getWorkspaceByID(workspaceId);
+    if (!workspace || !workspace->m_space)
+        return nullptr;
+
+    const auto algorithm = workspace->m_space->algorithm();
+    if (!algorithm || !algorithm->tiledAlgo())
+        return nullptr;
+
+    return dynamic_cast<ScrollerGrid::GridLayout*>(algorithm->tiledAlgo().get());
 }
 
 WorkspaceNode build_workspace_node(const CanvasLayoutState::CanvasWorkspaceRecord& canvas,
@@ -457,10 +472,13 @@ void Model::rebuild(const std::vector<CanvasLayoutState::SyntheticCanvasWorkspac
                 continue;
 
             auto* layout = CanvasLayoutInternal::get_canvas_for_workspace(member.workspaceId);
-            if (!layout)
+            if (layout) {
+                workspaceSnapshots.emplace(member.workspaceId, layout->buildOverviewSnapshot());
                 continue;
+            }
 
-            workspaceSnapshots.emplace(member.workspaceId, layout->buildOverviewSnapshot());
+            if (auto* gridLayout = grid_layout_for_workspace(member.workspaceId))
+                workspaceSnapshots.emplace(member.workspaceId, gridLayout->buildOverviewSnapshot());
         }
     }
 

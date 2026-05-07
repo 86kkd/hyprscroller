@@ -10,14 +10,28 @@
 
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/desktop/Workspace.hpp>
+#include <hyprland/src/layout/algorithm/Algorithm.hpp>
+#include <hyprland/src/layout/space/Space.hpp>
 
 #include "layout/canvas/internal.h"
+#include "layout/grid/layout.h"
 #include "overview/session/effects_runtime.h"
 
 namespace Overview::SessionEffects {
 namespace {
 
 constexpr MONITORID INVALID_MONITOR_ID = static_cast<MONITORID>(-1);
+
+ScrollerGrid::GridLayout* grid_layout_for_workspace(PHLWORKSPACE workspace) {
+    if (!workspace || !workspace->m_space)
+        return nullptr;
+
+    const auto algorithm = workspace->m_space->algorithm();
+    if (!algorithm || !algorithm->tiledAlgo())
+        return nullptr;
+
+    return dynamic_cast<ScrollerGrid::GridLayout*>(algorithm->tiledAlgo().get());
+}
 
 class HyprlandSessionEffectsRuntime final : public Runtime {
   public:
@@ -88,8 +102,13 @@ class HyprlandSessionEffectsRuntime final : public Runtime {
             return;
 
         auto* layout = CanvasLayoutInternal::get_canvas_for_workspace(workspace->m_id);
-        if (!layout)
+        if (!layout) {
+            if (auto* gridLayout = grid_layout_for_workspace(workspace)) {
+                gridLayout->focus_window(window);
+                gridLayout->recalculateMonitor(monitorId);
+            }
             return;
+        }
 
         layout->onWindowFocusChange(window);
         layout->recalculateMonitor(monitorId);
@@ -100,8 +119,11 @@ class HyprlandSessionEffectsRuntime final : public Runtime {
             return;
 
         auto* layout = CanvasLayoutInternal::get_canvas_for_workspace(workspace->m_id);
-        if (!layout)
+        if (!layout) {
+            if (auto* gridLayout = grid_layout_for_workspace(workspace))
+                gridLayout->prepareForOverviewSnapshot();
             return;
+        }
 
         layout->prepareForOverviewSnapshot();
     }

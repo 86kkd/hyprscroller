@@ -5,8 +5,8 @@
 #include <spdlog/spdlog.h>
 
 #include "core/core.h"
-#include "core/monitor_geometry_runtime.h"
 #include "core/window_key.h"
+#include "layout/canvas/internal.h"
 
 namespace ScrollerGrid {
 namespace {
@@ -40,10 +40,22 @@ void sync_window_target_geometry(PHLWINDOW window) {
 } // namespace
 
 PHLMONITOR GridLayout::resolve_monitor() const {
-    if (const auto active = active_window())
-        return g_pCompositor->getMonitorFromID(active->monitorID());
+    if (const auto window = reference_window())
+        return g_pCompositor->getMonitorFromID(window->monitorID());
 
     return ScrollerCore::monitorFromPointingOrCursor();
+}
+
+PHLWINDOW GridLayout::reference_window() const {
+    if (const auto active = active_window())
+        return active;
+
+    for (const auto& [_, window] : windowsByKey) {
+        if (window)
+            return window;
+    }
+
+    return nullptr;
 }
 
 PHLWINDOW GridLayout::active_window() const {
@@ -59,17 +71,16 @@ GridProfile GridLayout::current_profile(PHLMONITOR monitor) const {
     if (!monitor)
         return {};
 
-    return profile_for_workarea_extent(ScrollerCore::logical_workarea_box(monitor, 0.0));
+    return profile_for_workarea_extent(CanvasLayoutInternal::compute_canvas_bounds(monitor).max);
 }
 
 void GridLayout::relayout(PHLMONITOR monitor) {
     if (!monitor)
         return;
 
-    const auto full = ScrollerCore::logical_monitor_box(monitor);
-    const auto workarea = ScrollerCore::logical_workarea_box(monitor, 0.0);
-    const auto profile = profile_for_workarea_extent(workarea);
-    for (const auto& item : model.render(viewport, profile, full, workarea)) {
+    const auto bounds = CanvasLayoutInternal::compute_canvas_bounds(monitor);
+    const auto profile = profile_for_workarea_extent(bounds.max);
+    for (const auto& item : model.render(viewport, profile, bounds.full, bounds.max)) {
         const auto it = windowsByKey.find(item.key);
         if (it == windowsByKey.end() || !it->second)
             continue;
@@ -166,6 +177,80 @@ void GridLayout::moveTargetInDirection(SP<Layout::ITarget> target, Math::eDirect
     const auto profile = current_profile(monitor);
     (void)model.move_focus(*parsed, profile, viewport, false);
     relayout(monitor);
+}
+
+void GridLayout::move_focus(int workspace, Direction direction) {
+    (void)workspace;
+
+    const auto monitor = resolve_monitor();
+    const auto profile = current_profile(monitor);
+    if (model.move_focus(direction, profile, viewport, false) != GridMoveResult::Moved)
+        return;
+
+    relayout(monitor);
+    (void)CanvasLayoutInternal::switch_to_window(active_window(), true);
+}
+
+void GridLayout::move_window(int workspace, Direction direction) {
+    (void)workspace;
+
+    const auto monitor = resolve_monitor();
+    const auto profile = current_profile(monitor);
+    if (model.move_active_window(direction, profile, viewport) != GridMoveResult::Moved)
+        return;
+
+    relayout(monitor);
+    (void)CanvasLayoutInternal::switch_to_window(active_window(), true);
+}
+
+void GridLayout::focus_window(PHLWINDOW window) {
+    if (!window)
+        return;
+
+    const auto key = ScrollerCore::window_key(window);
+    if (!model.focus_window(key))
+        return;
+
+    const auto monitor = g_pCompositor->getMonitorFromID(window->monitorID());
+    model.ensure_active_visible(current_profile(monitor), viewport);
+    relayout(monitor);
+}
+
+void GridLayout::recalculateMonitor(const int& monitorId) {
+    relayout(g_pCompositor->getMonitorFromID(monitorId));
+}
+
+void GridLayout::prepareForOverviewSnapshot() {
+    relayout(resolve_monitor());
+}
+
+CanvasOverviewSnapshot GridLayout::buildOverviewSnapshot() const {
+    CanvasOverviewSnapshot snapshot;
+
+    const auto window = reference_window();
+    if (!window)
+        return snapshot;
+
+    snapshot.workspaceId = window->workspaceID();
+    const auto monitor = g_pCompositor->getMonitorFromID(window->monitorID());
+    snapshot.monitorId = monitor ? monitor->m_id : window->monitorID();
+    if (!monitor)
+        return snapshot;
+
+    const auto bounds = CanvasLayoutInternal::compute_canvas_bounds(monitor);
+    const auto profile = profile_for_workarea_extent(bounds.max);
+    for (const auto& item : model.render(viewport, profile, bounds.full, bounds.max)) {
+        const auto it = windowsByKey.find(item.key);
+        if (it == windowsByKey.end() || !it->second)
+            continue;
+
+        snapshot.windows.push_back({
+            .window = it->second,
+            .box = item.logicalBox,
+        });
+    }
+
+    return snapshot;
 }
 
 } // namespace ScrollerGrid

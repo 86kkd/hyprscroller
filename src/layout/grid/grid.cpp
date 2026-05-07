@@ -4,6 +4,8 @@
 #include <cmath>
 #include <limits>
 
+#include "core/workarea_pager.h"
+
 namespace ScrollerGrid {
 namespace {
 
@@ -13,13 +15,6 @@ double safe_half(double value) {
 
 bool ranges_intersect(int a0, int a1, int b0, int b1) {
     return a0 < b1 && b0 < a1;
-}
-
-bool boxes_intersect(const ScrollerCore::Box& a, const ScrollerCore::Box& b) {
-    return a.x + a.w > b.x &&
-           a.x < b.x + b.w &&
-           a.y + a.h > b.y &&
-           a.y < b.y + b.h;
 }
 
 double center_x(const GridItem& item) {
@@ -98,40 +93,18 @@ ScrollerCore::Box grid_item_logical_box(const GridItem& item,
     };
 }
 
-ScrollerCore::Box avoid_reserved_edges_for_hidden_box(const ScrollerCore::Box& logicalBox,
-                                                      const ScrollerCore::Box& fullBox,
-                                                      const ScrollerCore::Box& workareaBox) {
-    auto committed = logicalBox;
-
-    const auto reservedLeft = std::max(0.0, workareaBox.x - fullBox.x);
-    const auto reservedTop = std::max(0.0, workareaBox.y - fullBox.y);
-    const auto reservedRight = std::max(0.0, (fullBox.x + fullBox.w) - (workareaBox.x + workareaBox.w));
-    const auto reservedBottom = std::max(0.0, (fullBox.y + fullBox.h) - (workareaBox.y + workareaBox.h));
-
-    if (reservedLeft > 0.0 && committed.x + committed.w <= workareaBox.x)
-        committed.x -= reservedLeft;
-    else if (reservedRight > 0.0 && committed.x >= workareaBox.x + workareaBox.w)
-        committed.x += reservedRight;
-
-    if (reservedTop > 0.0 && committed.y + committed.h <= workareaBox.y)
-        committed.y -= reservedTop;
-    else if (reservedBottom > 0.0 && committed.y >= workareaBox.y + workareaBox.h)
-        committed.y += reservedBottom;
-
-    return committed;
-}
-
 RenderedGridItem render_grid_item(const GridItem& item,
                                   const GridViewport& viewport,
                                   const GridProfile& profile,
                                   const ScrollerCore::Box& fullBox,
                                   const ScrollerCore::Box& workareaBox) {
     const auto logical = grid_item_logical_box(item, viewport, profile, workareaBox);
+    const auto pageBox = ScrollerCore::project_box_to_workarea_page(logical, fullBox, workareaBox);
     return {
         .key = item.key,
-        .logicalBox = logical,
-        .committedBox = avoid_reserved_edges_for_hidden_box(logical, fullBox, workareaBox),
-        .visible = boxes_intersect(logical, workareaBox),
+        .logicalBox = pageBox.logical,
+        .committedBox = pageBox.committed,
+        .visible = pageBox.visible,
     };
 }
 
@@ -173,13 +146,21 @@ const GridItem* GridModel::active_item() const {
     return activeIndex && *activeIndex < items.size() ? &items[*activeIndex] : nullptr;
 }
 
-bool GridModel::cell_range_occupied(int column, int row, int columnSpan, int rowSpan) const {
-    for (const auto& item : items) {
+std::optional<size_t> GridModel::first_occupied_index(int column, int row, int columnSpan, int rowSpan, std::optional<size_t> ignoredIndex) const {
+    for (size_t index = 0; index < items.size(); ++index) {
+        if (ignoredIndex && *ignoredIndex == index)
+            continue;
+
+        const auto& item = items[index];
         if (ranges_intersect(column, column + columnSpan, item.column, item.column + item.columnSpan) &&
             ranges_intersect(row, row + rowSpan, item.row, item.row + item.rowSpan))
-            return true;
+            return index;
     }
-    return false;
+    return std::nullopt;
+}
+
+bool GridModel::cell_range_occupied(int column, int row, int columnSpan, int rowSpan) const {
+    return first_occupied_index(column, row, columnSpan, rowSpan).has_value();
 }
 
 bool GridModel::add_window(uintptr_t key, const GridProfile& profile) {
@@ -239,6 +220,48 @@ bool GridModel::swap_windows(uintptr_t a, uintptr_t b) {
     std::swap(items[*indexA].columnSpan, items[*indexB].columnSpan);
     std::swap(items[*indexA].rowSpan, items[*indexB].rowSpan);
     return true;
+}
+
+GridMoveResult GridModel::move_active_window(Direction direction,
+                                             const GridProfile& profile,
+                                             GridViewport& viewport) {
+    if (!activeIndex || *activeIndex >= items.size())
+        return GridMoveResult::NoOp;
+
+    int columnDelta = 0;
+    int rowDelta = 0;
+    switch (direction) {
+    case Direction::Left:
+        columnDelta = -1;
+        break;
+    case Direction::Right:
+        columnDelta = 1;
+        break;
+    case Direction::Up:
+        rowDelta = -1;
+        break;
+    case Direction::Down:
+        rowDelta = 1;
+        break;
+    default:
+        return GridMoveResult::NoOp;
+    }
+
+    auto& active = items[*activeIndex];
+    const auto nextColumn = active.column + columnDelta;
+    const auto nextRow = active.row + rowDelta;
+    if (const auto occupied = first_occupied_index(nextColumn, nextRow, active.columnSpan, active.rowSpan, activeIndex)) {
+        std::swap(active.column, items[*occupied].column);
+        std::swap(active.row, items[*occupied].row);
+        std::swap(active.columnSpan, items[*occupied].columnSpan);
+        std::swap(active.rowSpan, items[*occupied].rowSpan);
+    } else {
+        active.column = nextColumn;
+        active.row = nextRow;
+    }
+
+    ensure_active_visible(profile, viewport);
+    return GridMoveResult::Moved;
 }
 
 void GridModel::ensure_active_visible(const GridProfile& profile, GridViewport& viewport) const {
@@ -333,6 +356,49 @@ std::vector<RenderedGridItem> GridModel::render(const GridViewport& viewport,
     for (const auto& item : items)
         rendered.push_back(render_grid_item(item, viewport, profile, fullBox, workareaBox));
     return rendered;
+}
+
+ScrollerSnapshot::GridSnapshot GridModel::capture_snapshot(const GridViewport& viewport) const {
+    ScrollerSnapshot::GridSnapshot snapshot;
+    snapshot.enabled = true;
+    snapshot.activeItemIndex = activeIndex ? static_cast<int>(*activeIndex) : -1;
+    snapshot.viewportColumn = viewport.originColumn;
+    snapshot.viewportRow = viewport.originRow;
+    snapshot.items.reserve(items.size());
+    for (const auto& item : items) {
+        snapshot.items.push_back({
+            .key = item.key,
+            .column = item.column,
+            .row = item.row,
+            .columnSpan = item.columnSpan,
+            .rowSpan = item.rowSpan,
+        });
+    }
+    return snapshot;
+}
+
+void GridModel::restore_snapshot(const ScrollerSnapshot::GridSnapshot& snapshot) {
+    items.clear();
+    items.reserve(snapshot.items.size());
+    for (const auto& item : snapshot.items) {
+        if (item.key == 0)
+            continue;
+
+        items.push_back({
+            .key = item.key,
+            .column = item.column,
+            .row = item.row,
+            .columnSpan = std::max(1, item.columnSpan),
+            .rowSpan = std::max(1, item.rowSpan),
+        });
+    }
+
+    if (snapshot.activeItemIndex >= 0 && static_cast<size_t>(snapshot.activeItemIndex) < items.size())
+        activeIndex = static_cast<size_t>(snapshot.activeItemIndex);
+    else if (!items.empty())
+        activeIndex = 0;
+    else
+        activeIndex.reset();
 }
 
 } // namespace ScrollerGrid

@@ -35,6 +35,7 @@ add_library(hyprscroller SHARED
             src/core/canvas_workspace_snapshot.cpp
             src/core/layout_snapshot.cpp
             src/core/layout_math.cpp
+            src/core/workarea_pager.cpp
             src/core/monitor_geometry.cpp
             src/core/monitor_geometry_runtime.cpp
             src/core/layout_profile.cpp
@@ -139,6 +140,7 @@ if(BUILD_TESTING)
                    src/core/canvas_workspace_snapshot.cpp
                    src/core/layout_snapshot.cpp
                    src/core/layout_math.cpp
+                   src/core/workarea_pager.cpp
                    src/core/monitor_geometry.cpp
                    src/core/layout_profile.cpp
                    src/layout/grid/grid.cpp

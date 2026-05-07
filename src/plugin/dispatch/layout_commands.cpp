@@ -44,14 +44,21 @@ void dispatch_movefocus(std::string arg) {
     }
 
     const auto action = workspaceLayoutForAction();
-    if (!action) {
-        spdlog::warn("dispatch_movefocus: no layout for arg='{}', fallback builtin", arg);
-        CanvasLayoutInternal::dispatch_builtin_movefocus(*direction);
+    if (action) {
+        spdlog::info("dispatch_movefocus: arg='{}' workspace={}", arg, action.workspace);
+        action.layout->move_focus(action.workspace, *direction);
         return;
     }
 
-    spdlog::info("dispatch_movefocus: arg='{}' workspace={}", arg, action.workspace);
-    action.layout->move_focus(action.workspace, *direction);
+    const auto gridAction = workspaceGridLayoutForAction();
+    if (gridAction) {
+        spdlog::info("dispatch_movefocus: grid arg='{}' workspace={}", arg, gridAction.workspace);
+        gridAction.layout->move_focus(gridAction.workspace, *direction);
+        return;
+    }
+
+    spdlog::warn("dispatch_movefocus: no layout for arg='{}', fallback builtin", arg);
+    CanvasLayoutInternal::dispatch_builtin_movefocus(*direction);
 }
 
 // focusmonitor <dir>: move monitor focus in normal mode, or move between
@@ -104,9 +111,25 @@ void dispatch_focusmonitor(std::string arg) {
 // This is the top of the window-move path:
 // keybind -> dispatcher parse -> active canvas -> `CanvasLayout::move_window`.
 void dispatch_movewindow(std::string arg) {
-    withWorkspaceDirectionArg(arg, [&](CanvasLayout& layout, int workspace, Direction direction) {
-        layout.move_window(workspace, direction);
-    });
+    const auto direction = parsedDirectionArg(arg);
+    if (!direction) {
+        spdlog::warn("dispatch_movewindow: unsupported arg='{}'", arg);
+        return;
+    }
+
+    const auto action = workspaceLayoutForAction();
+    if (action) {
+        action.layout->move_window(action.workspace, *direction);
+        return;
+    }
+
+    const auto gridAction = workspaceGridLayoutForAction();
+    if (gridAction) {
+        gridAction.layout->move_window(gridAction.workspace, *direction);
+        return;
+    }
+
+    spdlog::warn("dispatch_movewindow: no layout for arg='{}'", arg);
 }
 
 // alignwindow <dir>: align active window/stack against lane/stack geometry.
