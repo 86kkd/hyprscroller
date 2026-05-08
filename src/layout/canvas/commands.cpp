@@ -10,6 +10,8 @@
 #include <utility>
 
 #include <hyprland/src/Compositor.hpp>
+#include <hyprland/src/layout/algorithm/Algorithm.hpp>
+#include <hyprland/src/layout/space/Space.hpp>
 #include <spdlog/spdlog.h>
 
 #include "../../core/direction.h"
@@ -17,9 +19,29 @@
 #include "../../core/monitor_geometry_runtime.h"
 #include "../../core/workspace_selector.h"
 #include "../lane/lane.h"
+#include "../grid/layout.h"
 #include "layout.h"
 #include "internal.h"
 #include "route.h"
+
+namespace {
+
+ScrollerGrid::GridLayout* grid_layout_for_workspace(WORKSPACEID workspaceId) {
+    if (!g_pCompositor)
+        return nullptr;
+
+    const auto workspace = g_pCompositor->getWorkspaceByID(workspaceId);
+    if (!workspace || !workspace->m_space)
+        return nullptr;
+
+    const auto algorithm = workspace->m_space->algorithm();
+    if (!algorithm || !algorithm->tiledAlgo())
+        return nullptr;
+
+    return dynamic_cast<ScrollerGrid::GridLayout*>(algorithm->tiledAlgo().get());
+}
+
+} // namespace
 
 PHLMONITOR CanvasLayout::directionalMoveTargetMonitor(PHLMONITOR sourceMonitor, Direction direction) const {
     return CanvasLayoutInternal::resolve_monitor_in_direction(sourceMonitor, direction);
@@ -41,6 +63,33 @@ bool CanvasLayout::handoffMoveWindowAcrossMonitor(int workspace, Direction direc
         return false;
 
     auto *targetLayout = CanvasLayoutInternal::get_canvas_for_workspace(workspaceId);
+    if (auto *targetGrid = grid_layout_for_workspace(workspaceId); targetGrid && !targetLayout) {
+        const auto restorePlan = sourceLane->capture_active_window_restore_plan(direction);
+        auto payload = sourceLane->extract_active_window_payload();
+        if (!payload)
+            return true;
+
+        if (!CanvasLayoutInternal::invoke_dispatcher("movetoworkspacesilent", selector, "move_window_cross_monitor_grid")) {
+            spdlog::warn("move_window_cross_monitor_grid: dispatcher failed workspace={} direction={} window={}",
+                         workspace,
+                         ScrollerCore::direction_name(direction),
+                         static_cast<const void*>(currentWindow.get()));
+            sourceLane->restore_active_window_payload(std::move(payload), restorePlan);
+            debugVerifyLaneCache();
+            return false;
+        }
+
+        forgetWindowLane(currentWindow);
+        if (!dropEmptyLane(sourceLaneNode, nullptr, sourceMonitor))
+            relayoutVisibleCanvas(sourceMonitor);
+        persistSnapshot();
+
+        targetGrid->adopt_cross_monitor_window(currentWindow, targetMonitor, true);
+        targetGrid->focus_window(currentWindow);
+        (void)CanvasLayoutInternal::switch_to_window(currentWindow, true);
+        debugVerifyLaneCache();
+        return true;
+    }
     if (!targetLayout)
         return false;
 

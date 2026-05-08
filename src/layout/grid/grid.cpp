@@ -55,6 +55,20 @@ void advance_position_for_mode(Mode mode, int& column, int& row) {
         ++column;
 }
 
+int span_from_extent(double extent, double unit, int fallback, int maxSpan) {
+    if (unit <= 0.0)
+        return std::clamp(fallback, 1, std::max(1, maxSpan));
+
+    return std::clamp(static_cast<int>(std::round(extent / unit)), 1, std::max(1, maxSpan));
+}
+
+int span_from_legacy_stack(const ScrollerSnapshot::StackSnapshot& stack, const GridProfile& profile) {
+    if (profile.mode == Mode::Column)
+        return span_from_extent(stack.geom.h, profile.unitHeight, 1, profile.visibleRows);
+
+    return span_from_extent(stack.geom.w, profile.unitWidth, 1, profile.visibleColumns);
+}
+
 } // namespace
 
 GridProfile profile_for_workarea(Mode mode, const ScrollerCore::Box& workarea) {
@@ -106,6 +120,70 @@ RenderedGridItem render_grid_item(const GridItem& item,
         .committedBox = pageBox.committed,
         .visible = pageBox.visible,
     };
+}
+
+ScrollerSnapshot::GridSnapshot migrate_legacy_snapshot_to_grid(const ScrollerSnapshot::CanvasSnapshot& snapshot,
+                                                               const GridProfile& profile) {
+    ScrollerSnapshot::GridSnapshot grid;
+    grid.enabled = true;
+
+    const auto laneStep = profile.mode == Mode::Column ? std::max(1, profile.visibleColumns)
+                                                       : std::max(1, profile.visibleRows);
+    for (size_t laneIndex = 0; laneIndex < snapshot.lanes.size(); ++laneIndex) {
+        const auto& lane = snapshot.lanes[laneIndex];
+        int localPosition = 0;
+        for (size_t stackIndex = 0; stackIndex < lane.stacks.size(); ++stackIndex) {
+            const auto& stack = lane.stacks[stackIndex];
+            const auto span = span_from_legacy_stack(stack, profile);
+            for (const auto& window : stack.windows) {
+                if (window.key == 0)
+                    continue;
+
+                ScrollerSnapshot::GridItemSnapshot item;
+                item.key = window.key;
+                if (profile.mode == Mode::Column) {
+                    item.column = static_cast<int>(laneIndex) * laneStep;
+                    item.row = localPosition;
+                    item.columnSpan = 1;
+                    item.rowSpan = span;
+                    localPosition += item.rowSpan;
+                } else {
+                    item.column = localPosition;
+                    item.row = static_cast<int>(laneIndex) * laneStep;
+                    item.columnSpan = span;
+                    item.rowSpan = 1;
+                    localPosition += item.columnSpan;
+                }
+
+                if (laneIndex == snapshot.activeLaneIndex &&
+                    stackIndex == lane.activeStackIndex &&
+                    (stack.activeWindowKey == 0 || stack.activeWindowKey == window.key)) {
+                    grid.activeItemIndex = static_cast<int>(grid.items.size());
+                }
+                grid.items.push_back(item);
+            }
+        }
+    }
+
+    if (grid.activeItemIndex < 0 && !grid.items.empty())
+        grid.activeItemIndex = 0;
+
+    if (grid.activeItemIndex >= 0 && static_cast<size_t>(grid.activeItemIndex) < grid.items.size()) {
+        const auto& active = grid.items[static_cast<size_t>(grid.activeItemIndex)];
+        if (profile.mode == Mode::Column) {
+            grid.viewportColumn = active.column;
+            grid.viewportRow = active.row + active.rowSpan > profile.visibleRows
+                ? active.row + active.rowSpan - profile.visibleRows
+                : active.row;
+        } else {
+            grid.viewportColumn = active.column + active.columnSpan > profile.visibleColumns
+                ? active.column + active.columnSpan - profile.visibleColumns
+                : active.column;
+            grid.viewportRow = active.row;
+        }
+    }
+
+    return grid;
 }
 
 bool GridModel::empty() const {

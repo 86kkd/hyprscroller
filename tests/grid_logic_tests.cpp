@@ -165,6 +165,39 @@ void test_grid_snapshot_restore_filters_missing_items() {
     expect_eq(restored.active_item()->key, static_cast<uintptr_t>(2), "grid restore normalizes active item");
 }
 
+void test_legacy_snapshot_migrates_to_grid_coordinates() {
+    ScrollerSnapshot::CanvasSnapshot snapshot;
+    snapshot.workspaceId = 9;
+    snapshot.activeLaneIndex = 1;
+
+    ScrollerSnapshot::LaneSnapshot firstLane;
+    ScrollerSnapshot::StackSnapshot firstStack;
+    firstStack.geom = {0.0, 0.0, 600.0, 800.0};
+    firstStack.windows.push_back({.key = 0x11});
+    firstLane.stacks.push_back(firstStack);
+    snapshot.lanes.push_back(firstLane);
+
+    ScrollerSnapshot::LaneSnapshot secondLane;
+    secondLane.activeStackIndex = 0;
+    ScrollerSnapshot::StackSnapshot secondStack;
+    secondStack.geom = {0.0, 0.0, 1200.0, 800.0};
+    secondStack.activeWindowKey = 0x22;
+    secondStack.windows.push_back({.key = 0x22});
+    secondLane.stacks.push_back(secondStack);
+    snapshot.lanes.push_back(secondLane);
+
+    const auto profile = ScrollerGrid::profile_for_workarea(Mode::Row, {0.0, 0.0, 1200.0, 800.0});
+    const auto migrated = ScrollerGrid::migrate_legacy_snapshot_to_grid(snapshot, profile);
+
+    expect_true(migrated.enabled, "legacy snapshot migration enables grid snapshot");
+    expect_eq(migrated.items.size(), static_cast<size_t>(2), "legacy snapshot migration keeps windows");
+    expect_eq(migrated.items[0].columnSpan, 1, "legacy half-width stack migrates to one grid cell");
+    expect_eq(migrated.items[1].columnSpan, 2, "legacy full-width stack migrates to full grid page");
+    expect_eq(migrated.items[1].row, 1, "legacy second lane migrates to next grid page row");
+    expect_eq(migrated.activeItemIndex, 1, "legacy snapshot migration keeps active window");
+    expect_eq(migrated.viewportRow, 1, "legacy snapshot migration scrolls viewport to active lane");
+}
+
 void test_hidden_boxes_keep_waybar_reserved_gap() {
     const ScrollerCore::Box full{0.0, 0.0, 1080.0, 1920.0};
     const ScrollerCore::Box workarea{0.0, 40.0, 1080.0, 1880.0};
@@ -197,5 +230,6 @@ void run_grid_logic_tests() {
     test_grid_reports_directional_edges();
     test_resize_align_and_page_move();
     test_grid_snapshot_restore_filters_missing_items();
+    test_legacy_snapshot_migrates_to_grid_coordinates();
     test_hidden_boxes_keep_waybar_reserved_gap();
 }

@@ -19,6 +19,7 @@ Usage: scripts/repro-layout-persistence.sh [options]
 
 Options:
   --plugin PATH         Plugin .so to load. Default: ./Debug/hyprscroller.so.
+  --layout NAME         Tiled layout to test. Default: scroller.
   --keep-open           Leave the nested Hyprland instance running after setup.
   -h, --help            Show this help text.
 
@@ -193,6 +194,7 @@ assert_equal_snapshot() {
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PLUGIN_PATH="$REPO_ROOT/Debug/hyprscroller.so"
+LAYOUT_NAME="scroller"
 KEEP_OPEN=0
 NESTED_INSTANCE=""
 NESTED_PID=""
@@ -219,6 +221,18 @@ while [[ $# -gt 0 ]]; do
         --plugin)
             [[ $# -ge 2 ]] || die "--plugin requires a path"
             PLUGIN_PATH="$2"
+            shift 2
+            ;;
+        --layout)
+            [[ $# -ge 2 ]] || die "--layout requires a value"
+            case "$2" in
+                scroller|scrollergrid)
+                    LAYOUT_NAME="$2"
+                    ;;
+                *)
+                    die "unsupported layout: $2"
+                    ;;
+            esac
             shift 2
             ;;
         --keep-open)
@@ -259,7 +273,7 @@ plugin = $PLUGIN_PATH
 env = XCURSOR_SIZE,24
 
 general {
-    layout = scroller
+    layout = $LAYOUT_NAME
     gaps_in = 4
     gaps_out = 8
     border_size = 2
@@ -332,12 +346,12 @@ snapshot_runtime_state "$RUN_DIR/before-runtime.state"
 
 hyprctl -i "$NESTED_INSTANCE" keyword general:layout master >/dev/null
 sleep 0.8
-hyprctl -i "$NESTED_INSTANCE" keyword general:layout scroller >/dev/null
+hyprctl -i "$NESTED_INSTANCE" keyword general:layout "$LAYOUT_NAME" >/dev/null
 sleep 1
 capture_clients "$RUN_DIR/after-master-clients.json"
 capture_activewindow "$RUN_DIR/after-master-activewindow.json"
 capture_workspace_state after-master
-assert_equal_snapshot "master->scroller" \
+assert_equal_snapshot "master->$LAYOUT_NAME" \
     "$RUN_DIR/before-clients.json" \
     "$RUN_DIR/after-master-clients.json" \
     "$RUN_DIR/before-activewindow.json" \
@@ -345,12 +359,12 @@ assert_equal_snapshot "master->scroller" \
 
 hyprctl -i "$NESTED_INSTANCE" keyword general:layout dwindle >/dev/null
 sleep 0.8
-hyprctl -i "$NESTED_INSTANCE" keyword general:layout scroller >/dev/null
+hyprctl -i "$NESTED_INSTANCE" keyword general:layout "$LAYOUT_NAME" >/dev/null
 sleep 1
 capture_clients "$RUN_DIR/after-dwindle-clients.json"
 capture_activewindow "$RUN_DIR/after-dwindle-activewindow.json"
 capture_workspace_state after-dwindle
-assert_equal_snapshot "dwindle->scroller" \
+assert_equal_snapshot "dwindle->$LAYOUT_NAME" \
     "$RUN_DIR/before-clients.json" \
     "$RUN_DIR/after-dwindle-clients.json" \
     "$RUN_DIR/before-activewindow.json" \
@@ -360,7 +374,7 @@ hyprctl -i "$NESTED_INSTANCE" plugin unload "$PLUGIN_PATH" >/dev/null
 sleep 0.8
 hyprctl -i "$NESTED_INSTANCE" plugin load "$PLUGIN_PATH" >/dev/null
 sleep 0.8
-hyprctl -i "$NESTED_INSTANCE" keyword general:layout scroller >/dev/null
+hyprctl -i "$NESTED_INSTANCE" keyword general:layout "$LAYOUT_NAME" >/dev/null
 sleep 1
 capture_clients "$RUN_DIR/after-reload-clients.json"
 capture_activewindow "$RUN_DIR/after-reload-activewindow.json"
@@ -377,6 +391,7 @@ tail -n 200 "$HOME/.hyprland/plugins/hyprscroller/hyprscroller.log" >"$RUN_DIR/h
 {
     printf 'nested instance: %s\n' "$NESTED_INSTANCE"
     printf 'plugin path:     %s\n' "$PLUGIN_PATH"
+    printf 'layout:          %s\n' "$LAYOUT_NAME"
     printf 'config:          %s\n' "$CONFIG_PATH"
     printf 'nested log:      %s\n' "$LOG_PATH"
     printf 'run dir:         %s\n' "$RUN_DIR"

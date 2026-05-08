@@ -134,7 +134,8 @@ std::string serialize_repository(const RepositorySnapshot &snapshots) {
             << canvas.grid.activeItemIndex << ' '
             << canvas.grid.viewportColumn << ' '
             << canvas.grid.viewportRow << ' '
-            << canvas.grid.items.size() << '\n';
+            << canvas.grid.items.size() << ' '
+            << canvas.grid.mode << '\n';
         for (const auto &item : canvas.grid.items) {
             out << "GRIDITEM " << item.key << ' '
                 << item.column << ' ' << item.row << ' '
@@ -165,7 +166,7 @@ std::optional<RepositorySnapshot> deserialize_repository(std::string_view data) 
             int version = 0;
             if (tokens.size() != 2 ||
                 !parse_token(tokens[1], version) ||
-                (version != kLegacyFormatVersion && version != kFormatVersion))
+                (version != kLegacyFormatVersion && version != kGridFormatVersion && version != kFormatVersion))
                 return std::nullopt;
             formatVersion = version;
             sawVersion = true;
@@ -251,16 +252,18 @@ std::optional<RepositorySnapshot> deserialize_repository(std::string_view data) 
         }
 
         if (tokens[0] == "GRID") {
-            if (!currentCanvas || formatVersion < kFormatVersion)
+            if (!currentCanvas || formatVersion < kGridFormatVersion)
                 return std::nullopt;
 
             size_t itemCount = 0;
-            if (tokens.size() != 6 ||
+            if ((tokens.size() != 6 && tokens.size() != 7) ||
                 !parse_bool_token(tokens[1], currentCanvas->grid.enabled) ||
                 !parse_token(tokens[2], currentCanvas->grid.activeItemIndex) ||
                 !parse_token(tokens[3], currentCanvas->grid.viewportColumn) ||
                 !parse_token(tokens[4], currentCanvas->grid.viewportRow) ||
                 !parse_size_token(tokens[5], itemCount))
+                return std::nullopt;
+            if (tokens.size() == 7 && !parse_token(tokens[6], currentCanvas->grid.mode))
                 return std::nullopt;
             currentCanvas->grid.items.reserve(itemCount);
             currentLane = nullptr;
@@ -269,7 +272,7 @@ std::optional<RepositorySnapshot> deserialize_repository(std::string_view data) 
         }
 
         if (tokens[0] == "GRIDITEM") {
-            if (!currentCanvas || formatVersion < kFormatVersion)
+            if (!currentCanvas || formatVersion < kGridFormatVersion)
                 return std::nullopt;
 
             GridItemSnapshot item;

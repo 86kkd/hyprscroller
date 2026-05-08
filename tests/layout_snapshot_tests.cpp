@@ -63,6 +63,7 @@ void test_snapshot_round_trip() {
     canvas.grid.activeItemIndex = 1;
     canvas.grid.viewportColumn = 3;
     canvas.grid.viewportRow = -2;
+    canvas.grid.mode = static_cast<int>(Mode::Column);
     canvas.grid.items.push_back({.key = 0x44, .column = 1, .row = 2, .columnSpan = 1, .rowSpan = 1});
     canvas.grid.items.push_back({.key = 0x55, .column = 3, .row = 2, .columnSpan = 2, .rowSpan = 1});
     repository.emplace(canvas.workspaceId, canvas);
@@ -94,6 +95,7 @@ void test_snapshot_round_trip() {
     expect_eq(restored.grid.activeItemIndex, 1, "layout snapshot keeps grid active item");
     expect_eq(restored.grid.viewportColumn, 3, "layout snapshot keeps grid viewport column");
     expect_eq(restored.grid.viewportRow, -2, "layout snapshot keeps grid viewport row");
+    expect_eq(restored.grid.mode, static_cast<int>(Mode::Column), "layout snapshot keeps grid mode");
     expect_eq(restored.grid.items.size(), static_cast<size_t>(2), "layout snapshot keeps grid item count");
     expect_eq(restored.grid.items[1].key, static_cast<uintptr_t>(0x55), "layout snapshot keeps grid item key");
     expect_eq(restored.grid.items[1].columnSpan, 2, "layout snapshot keeps grid item span");
@@ -117,6 +119,26 @@ void test_snapshot_accepts_legacy_lane_format() {
         return;
 
     expect_true(!it->second.grid.enabled, "legacy layout snapshot leaves grid disabled");
+}
+
+void test_snapshot_accepts_v2_grid_without_mode() {
+    const std::string v2 =
+        "VERSION 2\n"
+        "WORKSPACE 4 0 0\n"
+        "GRID 1 0 2 -1 1\n"
+        "GRIDITEM 11 2 0 1 1\n";
+    const auto parsed = ScrollerSnapshot::deserialize_repository(v2);
+    expect_true(parsed.has_value(), "layout snapshot accepts v2 grid without mode field");
+    if (!parsed)
+        return;
+
+    const auto it = parsed->find(4);
+    expect_true(it != parsed->end(), "v2 grid snapshot keeps workspace");
+    if (it == parsed->end())
+        return;
+
+    expect_true(it->second.grid.enabled, "v2 grid snapshot keeps grid enabled");
+    expect_eq(it->second.grid.mode, -1, "v2 grid snapshot defaults missing mode");
 }
 
 void test_snapshot_rejects_invalid_version() {
@@ -176,6 +198,7 @@ void test_canvas_workspace_snapshot_rejects_missing_active_line() {
 void run_layout_snapshot_tests() {
     test_snapshot_round_trip();
     test_snapshot_accepts_legacy_lane_format();
+    test_snapshot_accepts_v2_grid_without_mode();
     test_snapshot_rejects_invalid_version();
     test_snapshot_rejects_malformed_stack_line();
     test_canvas_workspace_snapshot_round_trip();

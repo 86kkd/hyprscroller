@@ -56,6 +56,9 @@ RenderedGridItem render_grid_item(const GridItem& item,
                                   const ScrollerCore::Box& fullBox,
                                   const ScrollerCore::Box& workareaBox);
 
+ScrollerSnapshot::GridSnapshot migrate_legacy_snapshot_to_grid(const ScrollerSnapshot::CanvasSnapshot& snapshot,
+                                                               const GridProfile& profile);
+
 class GridModel {
 public:
     bool empty() const;

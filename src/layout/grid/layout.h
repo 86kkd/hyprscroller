@@ -36,11 +36,14 @@ public:
     void align_window(int workspace, Direction direction);
     void admit_window_left(int workspace);
     void expel_window_right(int workspace);
+    void set_mode(int workspace, Mode mode);
     void fit_size(int workspace, FitSize fitSize);
     void toggle_fullscreen(int workspace);
     void create_lane(int workspace, Direction direction);
     void focus_lane(int workspace, Direction direction);
     void focus_window(PHLWINDOW window);
+    PHLWINDOW preferred_focus_window(PHLMONITOR monitor, WORKSPACEID workspaceId, Direction direction, PHLWINDOW sourceWindow);
+    bool adopt_cross_monitor_window(PHLWINDOW window, PHLMONITOR monitor, bool focusWindow);
     void recalculateMonitor(const int& monitorId);
     void prepareForOverviewSnapshot();
     CanvasOverviewSnapshot buildOverviewSnapshot() const;
@@ -71,6 +74,7 @@ private:
     WORKSPACEID workspaceRuntimeId = WORKSPACE_INVALID;
     bool restoringSnapshot = false;
     bool snapshotRestoreAttempted = false;
+    std::optional<Mode> modeOverride;
     std::optional<uintptr_t> fullscreenKey;
 };
 

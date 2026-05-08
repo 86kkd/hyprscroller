@@ -16,10 +16,13 @@
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/config/ConfigValue.hpp>
 #include <hyprland/src/helpers/Monitor.hpp>
+#include <hyprland/src/layout/algorithm/Algorithm.hpp>
+#include <hyprland/src/layout/space/Space.hpp>
 #include <hyprland/src/plugins/PluginAPI.hpp>
 #include <spdlog/spdlog.h>
 
 #include "../../core/direction.h"
+#include "../grid/layout.h"
 #include "internal.h"
 #include "route.h"
 
@@ -38,6 +41,21 @@ const char* focus_move_result_name(FocusMoveResult result) {
     }
 
     return "unknown";
+}
+
+ScrollerGrid::GridLayout* grid_layout_for_workspace(WORKSPACEID workspaceId) {
+    if (!g_pCompositor)
+        return nullptr;
+
+    const auto workspace = g_pCompositor->getWorkspaceByID(workspaceId);
+    if (!workspace || !workspace->m_space)
+        return nullptr;
+
+    const auto algorithm = workspace->m_space->algorithm();
+    if (!algorithm || !algorithm->tiledAlgo())
+        return nullptr;
+
+    return dynamic_cast<ScrollerGrid::GridLayout*>(algorithm->tiledAlgo().get());
 }
 } // namespace
 
@@ -286,8 +304,15 @@ void CanvasLayout::handoffFocusAcrossMonitor(int workspace, Direction direction,
     // Phase 1: choose the destination workspace/lane/window.
     const char *targetSelection = "geometry";
     auto *targetLayout = CanvasLayoutInternal::get_canvas_for_workspace(workspaceId);
+    auto *targetGrid = grid_layout_for_workspace(workspaceId);
     auto *targetLane = static_cast<Lane *>(nullptr);
-    auto crossMonitorTarget = resolveCrossMonitorFocusTarget(targetLayout, targetMonitor, workspaceId, direction, sourceWindow, &targetLane, &targetSelection);
+    PHLWINDOW crossMonitorTarget = nullptr;
+    if (targetGrid && !targetLayout) {
+        crossMonitorTarget = targetGrid->preferred_focus_window(targetMonitor, workspaceId, direction, sourceWindow);
+        targetSelection = "grid";
+    } else {
+        crossMonitorTarget = resolveCrossMonitorFocusTarget(targetLayout, targetMonitor, workspaceId, direction, sourceWindow, &targetLane, &targetSelection);
+    }
     // Phase 2: if the user left a blank ephemeral lane behind, clean it up
     // before we hand control to another monitor/workspace.
     if (dropEmptyLane(sourceLaneNode, nullptr, sourceMonitor, true)) {
@@ -326,7 +351,9 @@ void CanvasLayout::handoffFocusAcrossMonitor(int workspace, Direction direction,
         crossMonitorTarget ? crossMonitorTarget->m_size.x : 0.0,
         crossMonitorTarget ? crossMonitorTarget->m_size.y : 0.0);
 
-    if (targetLane == nullptr) {
+    if (targetGrid && crossMonitorTarget) {
+        targetGrid->focus_window(crossMonitorTarget);
+    } else if (targetLane == nullptr) {
         spdlog::warn("move_focus: no lane for crossed monitor target window={} workspace={}",
                      static_cast<const void*>(crossMonitorTarget.get()), workspaceId);
     } else {

@@ -94,6 +94,16 @@ std::optional<uintptr_t> snapshot_active_key(const ScrollerSnapshot::GridSnapsho
     return snapshot.items[static_cast<size_t>(snapshot.activeItemIndex)].key;
 }
 
+std::optional<Mode> snapshot_grid_mode(const ScrollerSnapshot::GridSnapshot& snapshot) {
+    switch (static_cast<Mode>(snapshot.mode)) {
+    case Mode::Row:
+    case Mode::Column:
+        return static_cast<Mode>(snapshot.mode);
+    default:
+        return std::nullopt;
+    }
+}
+
 PHLMONITOR monitor_in_direction(PHLMONITOR sourceMonitor, Direction direction) {
     const auto monitorDirection = CanvasLayoutInternal::direction_to_math(direction);
     if (!g_pCompositor || !sourceMonitor || !monitorDirection)
@@ -128,6 +138,7 @@ void GridLayout::ensure_workspace_runtime() {
         windowsByKey.clear();
         model.clear();
         viewport = {};
+        modeOverride.reset();
         fullscreenKey.reset();
     }
 
@@ -181,7 +192,9 @@ GridProfile GridLayout::current_profile(PHLMONITOR monitor) const {
     if (!monitor)
         return {};
 
-    return profile_for_workarea_extent(CanvasLayoutInternal::compute_canvas_bounds(monitor).max);
+    const auto workarea = CanvasLayoutInternal::compute_canvas_bounds(monitor).max;
+    return modeOverride ? profile_for_workarea(*modeOverride, workarea)
+                        : profile_for_workarea_extent(workarea);
 }
 
 bool GridLayout::manage_window(PHLWINDOW window, PHLMONITOR monitor, bool focusNewWindow) {
@@ -243,6 +256,8 @@ std::optional<ScrollerSnapshot::CanvasSnapshot> GridLayout::captureSnapshot() co
     ScrollerSnapshot::CanvasSnapshot snapshot;
     snapshot.workspaceId = currentWorkspace->m_id;
     snapshot.grid = model.capture_snapshot(viewport);
+    if (const auto monitor = resolve_monitor())
+        snapshot.grid.mode = static_cast<int>(current_profile(monitor).mode);
     return snapshot;
 }
 
@@ -285,7 +300,7 @@ void GridLayout::clearPersistedSnapshot() {
 
 bool GridLayout::restoreSnapshot(const ScrollerSnapshot::CanvasSnapshot& snapshot) {
     const auto currentWorkspace = workspace();
-    if (!currentWorkspace || snapshot.workspaceId != currentWorkspace->m_id || !snapshot.grid.enabled)
+    if (!currentWorkspace || snapshot.workspaceId != currentWorkspace->m_id)
         return false;
 
     const auto liveWindows = live_tiled_workspace_windows(currentWorkspace);
@@ -296,17 +311,28 @@ bool GridLayout::restoreSnapshot(const ScrollerSnapshot::CanvasSnapshot& snapsho
     if (!monitor)
         return false;
 
+    if (snapshot.grid.enabled) {
+        if (const auto restoredMode = snapshot_grid_mode(snapshot.grid))
+            modeOverride = *restoredMode;
+    }
+    const auto profile = current_profile(monitor);
+    const auto sourceGrid = snapshot.grid.enabled
+        ? snapshot.grid
+        : migrate_legacy_snapshot_to_grid(snapshot, profile);
+    if (!sourceGrid.enabled || sourceGrid.items.empty())
+        return false;
+
     std::unordered_map<uintptr_t, PHLWINDOW> liveByKey;
     liveByKey.reserve(liveWindows.size());
     for (const auto& window : liveWindows)
         liveByKey.emplace(ScrollerCore::window_key(window), window);
 
-    ScrollerSnapshot::GridSnapshot filtered = snapshot.grid;
+    ScrollerSnapshot::GridSnapshot filtered = sourceGrid;
     filtered.items.clear();
     filtered.activeItemIndex = -1;
 
-    const auto activeKey = snapshot_active_key(snapshot.grid);
-    for (const auto& item : snapshot.grid.items) {
+    const auto activeKey = snapshot_active_key(sourceGrid);
+    for (const auto& item : sourceGrid.items) {
         const auto liveIt = liveByKey.find(item.key);
         if (liveIt == liveByKey.end())
             continue;
@@ -336,7 +362,6 @@ bool GridLayout::restoreSnapshot(const ScrollerSnapshot::CanvasSnapshot& snapsho
     }
 
     model.restore_snapshot(filtered);
-    const auto profile = current_profile(monitor);
     for (const auto& [key, window] : liveByKey) {
         windowsByKey[key] = window;
         (void)model.add_window(key, profile);
@@ -351,10 +376,11 @@ bool GridLayout::restoreSnapshot(const ScrollerSnapshot::CanvasSnapshot& snapsho
     relayout(monitor);
     restoringSnapshot = false;
     persistSnapshot();
-    spdlog::info("grid restore_snapshot: workspace={} restored_items={} live_windows={}",
+    spdlog::info("grid restore_snapshot: workspace={} restored_items={} live_windows={} migrated_legacy={}",
                  currentWorkspace->m_id,
-                 snapshot.grid.items.size(),
-                 liveWindows.size());
+                 sourceGrid.items.size(),
+                 liveWindows.size(),
+                 !snapshot.grid.enabled);
     return true;
 }
 
@@ -369,7 +395,7 @@ bool GridLayout::maybeRestoreWorkspaceSnapshot() {
 
     CanvasLayoutState::repository().initialize();
     const auto snapshot = CanvasLayoutState::repository().find(currentWorkspace->m_id);
-    if (!snapshot || !snapshot->grid.enabled)
+    if (!snapshot || (!snapshot->grid.enabled && snapshot->lanes.empty()))
         return false;
 
     return restoreSnapshot(*snapshot);
@@ -560,6 +586,18 @@ void GridLayout::expel_window_right(int workspace) {
     create_lane(workspace, direction);
 }
 
+void GridLayout::set_mode(int workspace, Mode mode) {
+    (void)workspace;
+    ensure_workspace_runtime();
+    modeOverride = mode;
+
+    const auto monitor = resolve_monitor();
+    const auto profile = current_profile(monitor);
+    model.ensure_active_visible(profile, viewport);
+    relayout(monitor);
+    persistSnapshot();
+}
+
 void GridLayout::fit_size(int workspace, FitSize fitSize) {
     (void)workspace;
     ensure_workspace_runtime();
@@ -672,6 +710,30 @@ void GridLayout::focus_window(PHLWINDOW window) {
     persistSnapshot();
 }
 
+PHLWINDOW GridLayout::preferred_focus_window(PHLMONITOR monitor,
+                                             WORKSPACEID workspaceId,
+                                             Direction direction,
+                                             PHLWINDOW sourceWindow) {
+    ensure_workspace_runtime();
+    (void)maybeRestoreWorkspaceSnapshot();
+
+    if (const auto active = active_window())
+        return active;
+
+    return CanvasLayoutInternal::pick_cross_monitor_target_window(monitor, workspaceId, direction, sourceWindow);
+}
+
+bool GridLayout::adopt_cross_monitor_window(PHLWINDOW window, PHLMONITOR monitor, bool focusWindow) {
+    ensure_workspace_runtime();
+    (void)maybeRestoreWorkspaceSnapshot();
+    if (!manage_window(window, monitor, focusWindow))
+        (void)model.focus_window(ScrollerCore::window_key(window));
+
+    if (focusWindow)
+        focus_active_window("grid_adopt_cross_monitor_window");
+    return window != nullptr;
+}
+
 void GridLayout::recalculateMonitor(const int& monitorId) {
     ensure_workspace_runtime();
     const auto currentWorkspace = workspace();
@@ -733,11 +795,10 @@ bool GridLayout::handoffFocusAcrossMonitor(int workspace,
     const auto workspaceId = CanvasLayoutInternal::preferred_workspace_id(targetMonitor, workspace);
     const auto targetWorkspace = g_pCompositor->getWorkspaceByID(workspaceId);
     auto* targetGrid = grid_for_workspace(workspaceId);
+    auto* targetCanvas = CanvasLayoutInternal::get_canvas_for_workspace(workspaceId);
     PHLWINDOW targetWindow = nullptr;
     if (targetGrid && targetGrid != this) {
-        targetGrid->ensure_workspace_runtime();
-        (void)targetGrid->maybeRestoreWorkspaceSnapshot();
-        targetWindow = targetGrid->active_window();
+        targetWindow = targetGrid->preferred_focus_window(targetMonitor, workspaceId, direction, sourceWindow);
     }
 
     if (!targetWindow)
@@ -754,6 +815,10 @@ bool GridLayout::handoffFocusAcrossMonitor(int workspace,
 
     if (targetGrid && targetGrid != this)
         targetGrid->focus_window(targetWindow);
+    if (targetCanvas) {
+        targetCanvas->onWindowFocusChange(targetWindow);
+        targetCanvas->recalculateMonitor(targetMonitor->m_id);
+    }
 
     return CanvasLayoutInternal::switch_to_window(targetWindow, true);
 }
@@ -769,7 +834,8 @@ bool GridLayout::handoffMoveWindowAcrossMonitor(int workspace,
 
     const auto workspaceId = CanvasLayoutInternal::preferred_workspace_id(targetMonitor, workspace);
     auto* targetGrid = grid_for_workspace(workspaceId);
-    if (!targetGrid || targetGrid == this)
+    auto* targetCanvas = CanvasLayoutInternal::get_canvas_for_workspace(workspaceId);
+    if ((!targetGrid || targetGrid == this) && !targetCanvas)
         return false;
 
     const auto targetWorkspace = g_pCompositor->getWorkspaceByID(workspaceId);
@@ -787,10 +853,16 @@ bool GridLayout::handoffMoveWindowAcrossMonitor(int workspace,
     relayout(sourceMonitor);
     persistSnapshot();
 
-    targetGrid->ensure_workspace_runtime();
-    (void)targetGrid->maybeRestoreWorkspaceSnapshot();
-    (void)targetGrid->manage_window(currentWindow, targetMonitor, true);
-    targetGrid->focus_window(currentWindow);
+    if (targetGrid && targetGrid != this) {
+        targetGrid->adopt_cross_monitor_window(currentWindow, targetMonitor, true);
+        targetGrid->focus_window(currentWindow);
+    }
+    if (targetCanvas) {
+        (void)targetCanvas->onWindowCreatedTiling(currentWindow);
+        targetCanvas->onWindowFocusChange(currentWindow);
+        targetCanvas->recalculateMonitor(targetMonitor->m_id);
+        targetCanvas->persistCurrentSnapshot();
+    }
     return CanvasLayoutInternal::switch_to_window(currentWindow, true);
 }
 

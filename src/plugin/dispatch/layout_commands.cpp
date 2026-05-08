@@ -187,9 +187,15 @@ void dispatch_expelwindow(std::string arg) {
 // setmode row|col: switch between row mode and column mode.
 void dispatch_setmode(std::string arg) {
     withParsedModeArgOrWarn("dispatch_setmode", arg, [&](Mode mode) {
-        withWorkspaceLayout([&](CanvasLayout& layout, int workspace) {
-            layout.set_mode(workspace, mode);
-        });
+        const auto action = workspaceLayoutForAction();
+        if (action) {
+            action.layout->set_mode(action.workspace, mode);
+            return;
+        }
+
+        const auto gridAction = workspaceGridLayoutForAction();
+        if (gridAction)
+            gridAction.layout->set_mode(gridAction.workspace, mode);
     });
 }
 
