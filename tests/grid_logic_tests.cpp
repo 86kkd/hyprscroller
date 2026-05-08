@@ -112,6 +112,59 @@ void test_move_active_window_moves_or_swaps_grid_cells() {
     expect_eq(model.item_for_key(1)->column, 1, "neighbor moves into active item's previous cell");
 }
 
+void test_grid_reports_directional_edges() {
+    ScrollerGrid::GridModel model;
+    const auto profile = ScrollerGrid::profile_for_workarea(Mode::Row, {0.0, 0.0, 1200.0, 800.0});
+
+    model.add_window(1, profile);
+    model.add_window(2, profile);
+    model.focus_window(2);
+
+    expect_true(model.has_focus_candidate(Direction::Left), "grid sees a focus candidate toward occupied cells");
+    expect_true(!model.active_item_at_edge(Direction::Left), "grid is not at an occupied-cell edge when a candidate exists");
+    expect_true(model.active_item_at_edge(Direction::Right), "grid reports an edge when no candidate exists");
+}
+
+void test_resize_align_and_page_move() {
+    ScrollerGrid::GridModel model;
+    const auto profile = ScrollerGrid::profile_for_workarea(Mode::Row, {0.0, 0.0, 1200.0, 800.0});
+    ScrollerGrid::GridViewport viewport;
+
+    model.add_window(1, profile);
+    expect_eq(model.resize_active_item(1, profile, viewport), ScrollerGrid::GridMoveResult::Moved,
+              "grid resize grows active item by one visible unit");
+    expect_eq(model.item_for_key(1)->columnSpan, 2, "grid resize updates row span along columns");
+
+    expect_eq(model.align_active(Direction::Right, profile, viewport), ScrollerGrid::GridMoveResult::Moved,
+              "grid align can pin active item to viewport end");
+    expect_eq(viewport.originColumn, 0, "full-width active item aligns to viewport origin");
+
+    expect_eq(model.move_active_window_to_page(Direction::Right, profile, viewport), ScrollerGrid::GridMoveResult::Moved,
+              "grid page move sends active item by one viewport page");
+    expect_eq(model.item_for_key(1)->column, 2, "grid page move advances by two half-screen cells");
+    expect_eq(viewport.originColumn, 2, "grid viewport follows page-moved active item");
+}
+
+void test_grid_snapshot_restore_filters_missing_items() {
+    ScrollerGrid::GridModel model;
+    const auto profile = ScrollerGrid::profile_for_workarea(Mode::Row, {0.0, 0.0, 1200.0, 800.0});
+    ScrollerGrid::GridViewport viewport{.originColumn = 1, .originRow = 0};
+
+    model.add_window(1, profile);
+    model.add_window(2, profile);
+    const auto snapshot = model.capture_snapshot(viewport);
+
+    ScrollerSnapshot::GridSnapshot filtered = snapshot;
+    filtered.items.erase(filtered.items.begin());
+    filtered.activeItemIndex = 0;
+
+    ScrollerGrid::GridModel restored;
+    restored.restore_snapshot(filtered);
+    expect_true(!restored.contains(1), "grid restore can omit stale snapshot items");
+    expect_true(restored.contains(2), "grid restore keeps live snapshot item");
+    expect_eq(restored.active_item()->key, static_cast<uintptr_t>(2), "grid restore normalizes active item");
+}
+
 void test_hidden_boxes_keep_waybar_reserved_gap() {
     const ScrollerCore::Box full{0.0, 0.0, 1080.0, 1920.0};
     const ScrollerCore::Box workarea{0.0, 40.0, 1080.0, 1880.0};
@@ -141,5 +194,8 @@ void run_grid_logic_tests() {
     test_move_focus_scrolls_viewport_to_active_item();
     test_move_focus_can_move_empty_viewport_space();
     test_move_active_window_moves_or_swaps_grid_cells();
+    test_grid_reports_directional_edges();
+    test_resize_align_and_page_move();
+    test_grid_snapshot_restore_filters_missing_items();
     test_hidden_boxes_keep_waybar_reserved_gap();
 }

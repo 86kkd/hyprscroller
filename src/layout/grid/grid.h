@@ -70,6 +70,8 @@ public:
     const GridItem* active_item() const;
     const GridItem* item_for_key(uintptr_t key) const;
     std::optional<size_t> active_index() const;
+    bool has_focus_candidate(Direction direction) const;
+    bool active_item_at_edge(Direction direction) const;
 
     GridMoveResult move_focus(Direction direction,
                               const GridProfile& profile,
@@ -80,6 +82,19 @@ public:
     GridMoveResult move_active_window(Direction direction,
                                       const GridProfile& profile,
                                       GridViewport& viewport);
+    GridMoveResult move_active_window_to_page(Direction direction,
+                                             const GridProfile& profile,
+                                             GridViewport& viewport);
+    GridMoveResult resize_active_item(int step,
+                                      const GridProfile& profile,
+                                      GridViewport& viewport);
+    GridMoveResult set_active_span(int columnSpan,
+                                   int rowSpan,
+                                   const GridProfile& profile,
+                                   GridViewport& viewport);
+    GridMoveResult align_active(Direction direction,
+                                const GridProfile& profile,
+                                GridViewport& viewport);
     ScrollerSnapshot::GridSnapshot capture_snapshot(const GridViewport& viewport) const;
     void restore_snapshot(const ScrollerSnapshot::GridSnapshot& snapshot);
 
@@ -90,6 +105,7 @@ public:
 
 private:
     std::optional<size_t> index_for_key(uintptr_t key) const;
+    std::optional<size_t> focus_candidate_index(Direction direction) const;
     std::optional<size_t> first_occupied_index(int column, int row, int columnSpan, int rowSpan, std::optional<size_t> ignoredIndex = std::nullopt) const;
     bool cell_range_occupied(int column, int row, int columnSpan, int rowSpan) const;
     bool shift_viewport(Direction direction, GridViewport& viewport) const;

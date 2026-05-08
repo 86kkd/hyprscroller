@@ -129,6 +129,27 @@ std::optional<size_t> GridModel::index_for_key(uintptr_t key) const {
     return std::nullopt;
 }
 
+std::optional<size_t> GridModel::focus_candidate_index(Direction direction) const {
+    if (!activeIndex || *activeIndex >= items.size())
+        return std::nullopt;
+
+    const auto& active = items[*activeIndex];
+    std::optional<size_t> bestIndex;
+    double bestScore = std::numeric_limits<double>::max();
+    for (size_t index = 0; index < items.size(); ++index) {
+        if (index == *activeIndex || !candidate_in_direction(active, items[index], direction))
+            continue;
+
+        const auto score = directional_score(active, items[index], direction);
+        if (score < bestScore) {
+            bestScore = score;
+            bestIndex = index;
+        }
+    }
+
+    return bestIndex;
+}
+
 bool GridModel::contains(uintptr_t key) const {
     return index_for_key(key).has_value();
 }
@@ -144,6 +165,17 @@ std::optional<size_t> GridModel::active_index() const {
 
 const GridItem* GridModel::active_item() const {
     return activeIndex && *activeIndex < items.size() ? &items[*activeIndex] : nullptr;
+}
+
+bool GridModel::has_focus_candidate(Direction direction) const {
+    return focus_candidate_index(direction).has_value();
+}
+
+bool GridModel::active_item_at_edge(Direction direction) const {
+    if (direction == Direction::Begin || direction == Direction::End || direction == Direction::Center)
+        return false;
+
+    return active_item() != nullptr && !has_focus_candidate(direction);
 }
 
 std::optional<size_t> GridModel::first_occupied_index(int column, int row, int columnSpan, int rowSpan, std::optional<size_t> ignoredIndex) const {
@@ -264,6 +296,95 @@ GridMoveResult GridModel::move_active_window(Direction direction,
     return GridMoveResult::Moved;
 }
 
+GridMoveResult GridModel::move_active_window_to_page(Direction direction,
+                                                     const GridProfile& profile,
+                                                     GridViewport& viewport) {
+    if (!activeIndex || *activeIndex >= items.size())
+        return GridMoveResult::NoOp;
+
+    int columnDelta = 0;
+    int rowDelta = 0;
+    switch (direction) {
+    case Direction::Left:
+        columnDelta = -std::max(1, profile.visibleColumns);
+        break;
+    case Direction::Right:
+        columnDelta = std::max(1, profile.visibleColumns);
+        break;
+    case Direction::Up:
+        rowDelta = -std::max(1, profile.visibleRows);
+        break;
+    case Direction::Down:
+        rowDelta = std::max(1, profile.visibleRows);
+        break;
+    default:
+        return GridMoveResult::NoOp;
+    }
+
+    auto& active = items[*activeIndex];
+    auto nextColumn = active.column + columnDelta;
+    auto nextRow = active.row + rowDelta;
+    for (int attempts = 0; attempts < 1024 &&
+         first_occupied_index(nextColumn, nextRow, active.columnSpan, active.rowSpan, activeIndex); ++attempts) {
+        nextColumn += columnDelta == 0 ? 0 : (columnDelta > 0 ? 1 : -1);
+        nextRow += rowDelta == 0 ? 0 : (rowDelta > 0 ? 1 : -1);
+    }
+
+    if (first_occupied_index(nextColumn, nextRow, active.columnSpan, active.rowSpan, activeIndex))
+        return GridMoveResult::NoOp;
+
+    active.column = nextColumn;
+    active.row = nextRow;
+    ensure_active_visible(profile, viewport);
+    return GridMoveResult::Moved;
+}
+
+GridMoveResult GridModel::set_active_span(int columnSpan,
+                                          int rowSpan,
+                                          const GridProfile& profile,
+                                          GridViewport& viewport) {
+    if (!activeIndex || *activeIndex >= items.size())
+        return GridMoveResult::NoOp;
+
+    columnSpan = std::max(1, columnSpan);
+    rowSpan = std::max(1, rowSpan);
+
+    auto& active = items[*activeIndex];
+    if (first_occupied_index(active.column, active.row, columnSpan, rowSpan, activeIndex))
+        return GridMoveResult::NoOp;
+
+    active.columnSpan = columnSpan;
+    active.rowSpan = rowSpan;
+    ensure_active_visible(profile, viewport);
+    return GridMoveResult::Moved;
+}
+
+GridMoveResult GridModel::resize_active_item(int step,
+                                             const GridProfile& profile,
+                                             GridViewport& viewport) {
+    if (!activeIndex || *activeIndex >= items.size() || step == 0)
+        return GridMoveResult::NoOp;
+
+    const auto& active = items[*activeIndex];
+    if (profile.mode == Mode::Column) {
+        const auto maxSpan = std::max(1, profile.visibleRows);
+        auto nextSpan = active.rowSpan + step;
+        if (nextSpan > maxSpan)
+            nextSpan = 1;
+        if (nextSpan < 1)
+            nextSpan = maxSpan;
+        return set_active_span(active.columnSpan, nextSpan, profile, viewport);
+    }
+
+    const auto maxSpan = std::max(1, profile.visibleColumns);
+    auto nextSpan = active.columnSpan + step;
+    if (nextSpan > maxSpan)
+        nextSpan = 1;
+    if (nextSpan < 1)
+        nextSpan = maxSpan;
+    return set_active_span(nextSpan, active.rowSpan, profile, viewport);
+}
+
 void GridModel::ensure_active_visible(const GridProfile& profile, GridViewport& viewport) const {
     const auto* active = active_item();
     if (!active)
@@ -318,21 +439,7 @@ GridMoveResult GridModel::move_focus(Direction direction,
         return GridMoveResult::Moved;
     }
 
-    const auto& active = items[*activeIndex];
-    std::optional<size_t> bestIndex;
-    double bestScore = std::numeric_limits<double>::max();
-    for (size_t index = 0; index < items.size(); ++index) {
-        if (index == *activeIndex || !candidate_in_direction(active, items[index], direction))
-            continue;
-
-        const auto score = directional_score(active, items[index], direction);
-        if (score < bestScore) {
-            bestScore = score;
-            bestIndex = index;
-        }
-    }
-
-    if (bestIndex) {
+    if (const auto bestIndex = focus_candidate_index(direction)) {
         activeIndex = *bestIndex;
         ensure_active_visible(profile, viewport);
         return GridMoveResult::Moved;
@@ -345,6 +452,44 @@ GridMoveResult GridModel::move_focus(Direction direction,
     }
 
     return shift_viewport(direction, viewport) ? GridMoveResult::Moved : GridMoveResult::NoOp;
+}
+
+GridMoveResult GridModel::align_active(Direction direction,
+                                       const GridProfile& profile,
+                                       GridViewport& viewport) {
+    const auto* active = active_item();
+    if (!active)
+        return GridMoveResult::NoOp;
+
+    switch (direction) {
+    case Direction::Left:
+        viewport.originColumn = active->column;
+        break;
+    case Direction::Right:
+        viewport.originColumn = active->column + active->columnSpan - std::max(1, profile.visibleColumns);
+        break;
+    case Direction::Up:
+        viewport.originRow = active->row;
+        break;
+    case Direction::Down:
+        viewport.originRow = active->row + active->rowSpan - std::max(1, profile.visibleRows);
+        break;
+    case Direction::Center:
+        viewport.originColumn = active->column - (std::max(1, profile.visibleColumns) - active->columnSpan) / 2;
+        viewport.originRow = active->row - (std::max(1, profile.visibleRows) - active->rowSpan) / 2;
+        break;
+    case Direction::Begin:
+        viewport.originColumn = 0;
+        viewport.originRow = 0;
+        break;
+    case Direction::End:
+        ensure_active_visible(profile, viewport);
+        break;
+    default:
+        return GridMoveResult::NoOp;
+    }
+
+    return GridMoveResult::Moved;
 }
 
 std::vector<RenderedGridItem> GridModel::render(const GridViewport& viewport,

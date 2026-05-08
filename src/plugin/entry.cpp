@@ -16,6 +16,8 @@
  */
 #include <hyprland/src/config/ConfigManager.hpp>
 #include <hyprland/src/Compositor.hpp>
+#include <hyprland/src/layout/algorithm/Algorithm.hpp>
+#include <hyprland/src/layout/space/Space.hpp>
 #include <hyprland/src/plugins/PluginAPI.hpp>
 #include <cerrno>
 #include <cstring>
@@ -171,6 +173,15 @@ APICALL EXPORT void PLUGIN_EXIT() {
             continue;
         if (auto *layout = CanvasLayoutInternal::get_canvas_for_workspace(workspace->m_id))
             layout->persistCurrentSnapshot();
+        if (workspace->m_space) {
+            if (const auto algorithm = workspace->m_space->algorithm()) {
+                const auto& tiled = algorithm->tiledAlgo();
+                if (!tiled)
+                    continue;
+                if (auto *grid = dynamic_cast<ScrollerGrid::GridLayout*>(tiled.get()))
+                    grid->persistCurrentSnapshot();
+            }
+        }
     }
     CanvasLayoutState::repository().flush();
     CanvasLayoutState::canvasRepository().flush();

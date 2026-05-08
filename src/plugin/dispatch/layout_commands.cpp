@@ -20,9 +20,15 @@ void dispatch_cyclesize(std::string arg) {
         return;
     }
 
-    withWorkspaceLayout([&](CanvasLayout& layout, int workspace) {
-        layout.cycle_window_size(workspace, step);
-    });
+    const auto action = workspaceLayoutForAction();
+    if (action) {
+        action.layout->cycle_window_size(action.workspace, step);
+        return;
+    }
+
+    const auto gridAction = workspaceGridLayoutForAction();
+    if (gridAction)
+        gridAction.layout->cycle_window_size(gridAction.workspace, step);
 }
 
 // movefocus <dir>: move focus inside scroller layout, with optional monitor
@@ -134,26 +140,48 @@ void dispatch_movewindow(std::string arg) {
 
 // alignwindow <dir>: align active window/stack against lane/stack geometry.
 void dispatch_alignwindow(std::string arg) {
-    withWorkspaceDirectionArg(arg, [&](CanvasLayout& layout, int workspace, Direction direction) {
-        layout.align_window(workspace, direction);
-    });
+    const auto direction = parsedDirectionArg(arg);
+    if (!direction)
+        return;
+
+    const auto action = workspaceLayoutForAction();
+    if (action) {
+        action.layout->align_window(action.workspace, *direction);
+        return;
+    }
+
+    const auto gridAction = workspaceGridLayoutForAction();
+    if (gridAction)
+        gridAction.layout->align_window(gridAction.workspace, *direction);
 }
 
 // admitwindow: split active stack and move focused window to the previous stack.
 void dispatch_admitwindow(std::string arg) {
     (void)arg;
-    withWorkspaceLayout([&](CanvasLayout& layout, int workspace) {
-        layout.admit_window_left(workspace);
-    });
+    const auto action = workspaceLayoutForAction();
+    if (action) {
+        action.layout->admit_window_left(action.workspace);
+        return;
+    }
+
+    const auto gridAction = workspaceGridLayoutForAction();
+    if (gridAction)
+        gridAction.layout->admit_window_left(gridAction.workspace);
 }
 
 // expelwindow: remove focused window from current stack into a new one right
 // after it.
 void dispatch_expelwindow(std::string arg) {
     (void)arg;
-    withWorkspaceLayout([&](CanvasLayout& layout, int workspace) {
-        layout.expel_window_right(workspace);
-    });
+    const auto action = workspaceLayoutForAction();
+    if (action) {
+        action.layout->expel_window_right(action.workspace);
+        return;
+    }
+
+    const auto gridAction = workspaceGridLayoutForAction();
+    if (gridAction)
+        gridAction.layout->expel_window_right(gridAction.workspace);
 }
 
 // setmode row|col: switch between row mode and column mode.
@@ -168,33 +196,67 @@ void dispatch_setmode(std::string arg) {
 // fitsize <active|visible|all|toend|tobeg>: resize visible windows so they
 // fit requested range.
 void dispatch_fitsize(std::string arg) {
-    withWorkspaceLayout([&](CanvasLayout& layout, int workspace) {
-        withParsedFitSizeArg(arg, [&](FitSize fitSize) {
-            layout.fit_size(workspace, fitSize);
-        });
-    });
+    const auto fitSize = parsedFitSizeArg(arg);
+    if (!fitSize)
+        return;
+
+    const auto action = workspaceLayoutForAction();
+    if (action) {
+        action.layout->fit_size(action.workspace, *fitSize);
+        return;
+    }
+
+    const auto gridAction = workspaceGridLayoutForAction();
+    if (gridAction)
+        gridAction.layout->fit_size(gridAction.workspace, *fitSize);
 }
 
 // togglefullscreen: expand the active scroller window to the monitor bounds.
 void dispatch_togglefullscreen(std::string arg) {
     (void)arg;
-    withWorkspaceLayout([&](CanvasLayout& layout, int workspace) {
-        layout.toggle_fullscreen(workspace);
-    });
+    const auto action = workspaceLayoutForAction();
+    if (action) {
+        action.layout->toggle_fullscreen(action.workspace);
+        return;
+    }
+
+    const auto gridAction = workspaceGridLayoutForAction();
+    if (gridAction)
+        gridAction.layout->toggle_fullscreen(gridAction.workspace);
 }
 
 // createlane <dir>: move the active stack into a new adjacent lane.
 void dispatch_createlane(std::string arg) {
-    withWorkspaceDirectionArg(arg, [&](CanvasLayout& layout, int workspace, Direction direction) {
-        layout.create_lane(workspace, direction);
-    });
+    const auto direction = parsedDirectionArg(arg);
+    if (!direction)
+        return;
+
+    const auto action = workspaceLayoutForAction();
+    if (action) {
+        action.layout->create_lane(action.workspace, *direction);
+        return;
+    }
+
+    const auto gridAction = workspaceGridLayoutForAction();
+    if (gridAction)
+        gridAction.layout->create_lane(gridAction.workspace, *direction);
 }
 
 // focuslane <dir>: switch the active lane inside the current canvas.
 void dispatch_focuslane(std::string arg) {
-    withWorkspaceDirectionArg(arg, [&](CanvasLayout& layout, int workspace, Direction direction) {
-        layout.focus_lane(workspace, direction);
-    });
+    const auto direction = parsedDirectionArg(arg);
+    if (!direction)
+        return;
+
+    const auto action = workspaceLayoutForAction();
+    if (action) {
+        action.layout->focus_lane(action.workspace, *direction);
+        return;
+    }
+
+    const auto gridAction = workspaceGridLayoutForAction();
+    if (gridAction)
+        gridAction.layout->focus_lane(gridAction.workspace, *direction);
 }
 
 } // namespace
