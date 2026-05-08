@@ -30,6 +30,7 @@ Use this checklist after changing `src/layout/canvas/*`, `src/layout/lane/*`, or
 17. While overview is open, run `scroller:movefocus` across windows, empty workspaces, and between monitors, then confirm the real focused window does not change until accept.
 18. Close overview with `scroller:toggleoverview accept` and `scroller:canceloverview`, confirming accept jumps to the selected target while cancel restores the original workspace/window.
 19. Open overview on a monitor with no tiled workspaces and confirm the monitor still renders a stable empty-state card instead of crashing or drawing stale previews.
+20. For `scrollergrid`, run `./scripts/repro-grid-real-coverage.sh --plugin <hyprscroller.so>` to cover real Waybar reserved area, a portrait nested monitor, grid overview, grid fullscreen/fitsize, and complex grid/Canvas cross-monitor movement.
 
 ## Notes
 

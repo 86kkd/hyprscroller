@@ -293,10 +293,12 @@ TARGET_MONITOR="$(hyprctl -i "$NESTED_INSTANCE" monitors -j | jq -r '.[1].name')
 [[ -n "$SOURCE_MONITOR" && -n "$TARGET_MONITOR" ]] || die "could not resolve nested monitor names"
 
 hyprctl -i "$NESTED_INSTANCE" dispatch focusmonitor "$SOURCE_MONITOR" >/dev/null
+hyprctl -i "$NESTED_INSTANCE" dispatch workspace 1 >/dev/null
 launch_terminal_window "$SOURCE_CLASS" "cross-source"
 wait_for_nested_client_count 1 || die "timed out waiting for source window"
 
 hyprctl -i "$NESTED_INSTANCE" dispatch focusmonitor "$TARGET_MONITOR" >/dev/null
+hyprctl -i "$NESTED_INSTANCE" dispatch workspace 2 >/dev/null
 launch_terminal_window "$TARGET_CLASS" "cross-target"
 wait_for_nested_client_count 2 || die "timed out waiting for target window"
 

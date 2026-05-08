@@ -228,6 +228,22 @@ hyprscroller_apply_five_monitor_cross_layout \
 
 脚本会输出 nested instance、log 路径、run dir，以及每一步的几何对比结论。
 
+如果你要验证 `scrollergrid` 在真实 nested Hyprland 场景下的高风险路径，
+优先跑这条脚本：
+
+```bash
+./scripts/repro-grid-real-coverage.sh --plugin /path/to/hyprscroller.so
+```
+
+它会实际启动 nested Waybar，并覆盖：
+
+- 真实 Waybar reserved area / workarea
+- 竖屏 monitor transform
+- grid 窗口飞出 monitor 后不遮挡 Waybar reserved strip
+- grid overview 打开、导航和 accept
+- grid `togglefullscreen` 和 `fitsize all`
+- 多个 grid 窗口和多个 legacy Canvas 窗口混合跨屏 `movewindow`
+
 ## 3. 手工启动嵌套 Hyprland 测试实例
 
 先写一份最小测试配置，例如 `/tmp/hyprscroller-test.conf`：
