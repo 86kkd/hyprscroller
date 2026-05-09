@@ -23,6 +23,7 @@
 #include "../../core/interval.h"
 #include "../../core/layout_math.h"
 #include "../../core/layout_profile.h"
+#include "../../core/workarea_pager.h"
 #include "../canvas/internal.h"
 
 using ScrollerCore::Box;
@@ -52,6 +53,31 @@ double visible_primary_span(const ScrollerCore::Box &visible_box, Mode mode) {
 
 double visible_primary_end(const ScrollerCore::Box &visible_box, Mode mode) {
     return visible_primary_origin(visible_box, mode) + visible_primary_span(visible_box, mode);
+}
+
+ScrollerCore::Box primary_interval_box(const ScrollerCore::Box &base_box, Mode mode, double start, double end) {
+    auto box = base_box;
+    if (mode == Mode::Column) {
+        box.y = start;
+        box.h = std::max(1.0, end - start);
+    } else {
+        box.x = start;
+        box.w = std::max(1.0, end - start);
+    }
+    return box;
+}
+
+double hidden_reserved_primary_delta(const ScrollerCore::Box &full_box,
+                                     const ScrollerCore::Box &workarea_box,
+                                     Mode mode,
+                                     double rendered_start,
+                                     double rendered_end) {
+    const auto renderedBox = primary_interval_box(workarea_box, mode, rendered_start, rendered_end);
+    const auto projected = ScrollerCore::project_box_to_workarea_page(renderedBox, full_box, workarea_box);
+    if (projected.visible)
+        return 0.0;
+
+    return visible_primary_origin(projected.committed, mode) - visible_primary_origin(renderedBox, mode);
 }
 
 void set_stack_primary_position(Stack *stack, Mode mode, const ScrollerCore::Box &visible_box, double primary_pos) {
@@ -378,30 +404,28 @@ void Lane::adjust_stacks(ListNode<Stack *> *stack) {
 
     const auto viewportStart = visible_primary_origin(max, mode);
     const auto viewportEnd = visible_primary_end(max, mode);
-    const auto fullStart = visible_primary_origin(full, mode);
-    const auto fullEnd = visible_primary_end(full, mode);
-    const auto reservedBefore = std::max(0.0, viewportStart - fullStart);
-    const auto reservedAfter = std::max(0.0, fullEnd - viewportEnd);
+    const auto reservedBefore = std::max(0.0, viewportStart - visible_primary_origin(full, mode));
+    const auto reservedAfter = std::max(0.0, visible_primary_end(full, mode) - viewportEnd);
     size_t shiftedBefore = 0;
     size_t shiftedAfter = 0;
 
     // Stacks that are completely clipped by reserved monitor margins should
-    // stay offset into those margins. Without this extra shift they would be
-    // pulled back to the viewport edge every relayout and appear to jitter.
+    // use the same full-vs-workarea projection as grid pages.
     for (auto col = stacks.first(); col != nullptr; col = col->next()) {
         auto gap0 = col == stacks.first() ? 0.0 : gap;
         auto gap1 = col == stacks.last() ? 0.0 : gap;
         const auto rendered = stack_rendered_primary_interval(col->data(), mode, gap0, gap1);
         const auto primaryPos = stack_primary_origin(col->data(), mode);
+        const auto primaryDelta = hidden_reserved_primary_delta(full, max, mode, rendered.start, rendered.end);
 
-        if (reservedBefore > 0.0 && rendered.end <= viewportStart) {
-            set_stack_primary_position(col->data(), mode, max, primaryPos - reservedBefore);
+        if (primaryDelta < 0.0) {
+            set_stack_primary_position(col->data(), mode, max, primaryPos + primaryDelta);
             shiftedBefore++;
             continue;
         }
 
-        if (reservedAfter > 0.0 && rendered.start >= viewportEnd) {
-            set_stack_primary_position(col->data(), mode, max, primaryPos + reservedAfter);
+        if (primaryDelta > 0.0) {
+            set_stack_primary_position(col->data(), mode, max, primaryPos + primaryDelta);
             shiftedAfter++;
         }
     }

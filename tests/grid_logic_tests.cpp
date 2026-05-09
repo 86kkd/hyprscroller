@@ -180,7 +180,9 @@ void test_legacy_snapshot_migrates_to_grid_coordinates() {
     ScrollerSnapshot::LaneSnapshot secondLane;
     secondLane.activeStackIndex = 0;
     ScrollerSnapshot::StackSnapshot secondStack;
-    secondStack.geom = {0.0, 0.0, 1200.0, 800.0};
+    secondStack.geom = {0.0, 0.0, 600.0, 800.0};
+    secondStack.fullscreened = true;
+    secondStack.maximized = true;
     secondStack.activeWindowKey = 0x22;
     secondStack.windows.push_back({.key = 0x22});
     secondLane.stacks.push_back(secondStack);
@@ -190,11 +192,13 @@ void test_legacy_snapshot_migrates_to_grid_coordinates() {
     const auto migrated = ScrollerGrid::migrate_legacy_snapshot_to_grid(snapshot, profile);
 
     expect_true(migrated.enabled, "legacy snapshot migration enables grid snapshot");
+    expect_eq(migrated.mode, static_cast<int>(Mode::Row), "legacy snapshot migration stores grid mode");
     expect_eq(migrated.items.size(), static_cast<size_t>(2), "legacy snapshot migration keeps windows");
     expect_eq(migrated.items[0].columnSpan, 1, "legacy half-width stack migrates to one grid cell");
-    expect_eq(migrated.items[1].columnSpan, 2, "legacy full-width stack migrates to full grid page");
+    expect_eq(migrated.items[1].columnSpan, 2, "legacy maximized stack migrates to full grid page");
     expect_eq(migrated.items[1].row, 1, "legacy second lane migrates to next grid page row");
     expect_eq(migrated.activeItemIndex, 1, "legacy snapshot migration keeps active window");
+    expect_eq(migrated.fullscreenKey, static_cast<uintptr_t>(0x22), "legacy snapshot migration keeps fullscreen window");
     expect_eq(migrated.viewportRow, 1, "legacy snapshot migration scrolls viewport to active lane");
 }
 

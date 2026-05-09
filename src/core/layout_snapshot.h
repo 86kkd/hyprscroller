@@ -13,7 +13,8 @@ namespace ScrollerSnapshot {
 
 constexpr int kLegacyFormatVersion = 1;
 constexpr int kGridFormatVersion = 2;
-constexpr int kFormatVersion = 3;
+constexpr int kGridModeFormatVersion = 3;
+constexpr int kFormatVersion = 4;
 
 struct WindowSnapshot {
     uintptr_t key = 0;
@@ -57,6 +58,7 @@ struct GridSnapshot {
     int                           viewportColumn = 0;
     int                           viewportRow = 0;
     int                           mode = -1;
+    uintptr_t                     fullscreenKey = 0;
     std::vector<GridItemSnapshot> items;
 };
 

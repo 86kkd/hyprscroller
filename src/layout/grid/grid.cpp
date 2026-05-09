@@ -126,6 +126,7 @@ ScrollerSnapshot::GridSnapshot migrate_legacy_snapshot_to_grid(const ScrollerSna
                                                                const GridProfile& profile) {
     ScrollerSnapshot::GridSnapshot grid;
     grid.enabled = true;
+    grid.mode = static_cast<int>(profile.mode);
 
     const auto laneStep = profile.mode == Mode::Column ? std::max(1, profile.visibleColumns)
                                                        : std::max(1, profile.visibleRows);
@@ -134,7 +135,9 @@ ScrollerSnapshot::GridSnapshot migrate_legacy_snapshot_to_grid(const ScrollerSna
         int localPosition = 0;
         for (size_t stackIndex = 0; stackIndex < lane.stacks.size(); ++stackIndex) {
             const auto& stack = lane.stacks[stackIndex];
-            const auto span = span_from_legacy_stack(stack, profile);
+            const auto span = stack.maximized
+                ? (profile.mode == Mode::Column ? std::max(1, profile.visibleRows) : std::max(1, profile.visibleColumns))
+                : span_from_legacy_stack(stack, profile);
             for (const auto& window : stack.windows) {
                 if (window.key == 0)
                     continue;
@@ -159,6 +162,10 @@ ScrollerSnapshot::GridSnapshot migrate_legacy_snapshot_to_grid(const ScrollerSna
                     stackIndex == lane.activeStackIndex &&
                     (stack.activeWindowKey == 0 || stack.activeWindowKey == window.key)) {
                     grid.activeItemIndex = static_cast<int>(grid.items.size());
+                }
+                if (stack.fullscreened && grid.fullscreenKey == 0 &&
+                    (stack.activeWindowKey == 0 || stack.activeWindowKey == window.key)) {
+                    grid.fullscreenKey = window.key;
                 }
                 grid.items.push_back(item);
             }

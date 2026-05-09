@@ -43,37 +43,33 @@ Box safe_committed_box(const Box &logicalBox, const Box &visibleBox, const Box &
     safeBox.w = std::max(safeBox.w, minSpan);
     safeBox.h = std::max(safeBox.h, minSpan);
 
+    const auto pageBox = ScrollerCore::project_box_to_workarea_page(logicalBox, fullBox, visibleBox);
+    if (pageBox.visible)
+        return safeBox;
+
     const auto visibleRight = visibleBox.x + visibleBox.w;
     const auto visibleBottom = visibleBox.y + visibleBox.h;
     const auto boxRight = logicalBox.x + logicalBox.w;
     const auto boxBottom = logicalBox.y + logicalBox.h;
-    const bool intersectsVisible =
-        boxRight > visibleBox.x &&
-        logicalBox.x < visibleRight &&
-        boxBottom > visibleBox.y &&
-        logicalBox.y < visibleBottom;
-
-    if (intersectsVisible)
-        return safeBox;
 
     if (boxRight <= visibleBox.x) {
         safeBox.x = visibleBox.x - safeBox.w;
-        return ScrollerCore::avoid_reserved_edges_for_hidden_box(safeBox, fullBox, visibleBox);
+        return ScrollerCore::project_box_to_workarea_page(safeBox, fullBox, visibleBox).committed;
     }
 
     if (logicalBox.x >= visibleRight) {
         safeBox.x = visibleRight;
-        return ScrollerCore::avoid_reserved_edges_for_hidden_box(safeBox, fullBox, visibleBox);
+        return ScrollerCore::project_box_to_workarea_page(safeBox, fullBox, visibleBox).committed;
     }
 
     if (boxBottom <= visibleBox.y) {
         safeBox.y = visibleBox.y - safeBox.h;
-        return ScrollerCore::avoid_reserved_edges_for_hidden_box(safeBox, fullBox, visibleBox);
+        return ScrollerCore::project_box_to_workarea_page(safeBox, fullBox, visibleBox).committed;
     }
 
     if (logicalBox.y >= visibleBottom) {
         safeBox.y = visibleBottom;
-        return ScrollerCore::avoid_reserved_edges_for_hidden_box(safeBox, fullBox, visibleBox);
+        return ScrollerCore::project_box_to_workarea_page(safeBox, fullBox, visibleBox).committed;
     }
 
     return safeBox;

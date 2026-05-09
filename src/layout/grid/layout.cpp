@@ -222,7 +222,7 @@ void GridLayout::relayout(PHLMONITOR monitor) {
         return;
 
     const auto bounds = CanvasLayoutInternal::compute_canvas_bounds(monitor);
-    const auto profile = profile_for_workarea_extent(bounds.max);
+    const auto profile = current_profile(monitor);
     if (fullscreenKey && !model.contains(*fullscreenKey))
         fullscreenKey.reset();
 
@@ -256,6 +256,8 @@ std::optional<ScrollerSnapshot::CanvasSnapshot> GridLayout::captureSnapshot() co
     ScrollerSnapshot::CanvasSnapshot snapshot;
     snapshot.workspaceId = currentWorkspace->m_id;
     snapshot.grid = model.capture_snapshot(viewport);
+    if (fullscreenKey && model.contains(*fullscreenKey))
+        snapshot.grid.fullscreenKey = *fullscreenKey;
     if (const auto monitor = resolve_monitor())
         snapshot.grid.mode = static_cast<int>(current_profile(monitor).mode);
     return snapshot;
@@ -362,6 +364,8 @@ bool GridLayout::restoreSnapshot(const ScrollerSnapshot::CanvasSnapshot& snapsho
     }
 
     model.restore_snapshot(filtered);
+    if (filtered.fullscreenKey != 0 && model.contains(filtered.fullscreenKey))
+        fullscreenKey = filtered.fullscreenKey;
     for (const auto& [key, window] : liveByKey) {
         windowsByKey[key] = window;
         (void)model.add_window(key, profile);
@@ -632,6 +636,7 @@ void GridLayout::toggle_fullscreen(int workspace) {
         fullscreenKey = active->key;
 
     relayout(resolve_monitor());
+    persistSnapshot();
 }
 
 void GridLayout::create_lane(int workspace, Direction direction) {
@@ -765,7 +770,7 @@ CanvasOverviewSnapshot GridLayout::buildOverviewSnapshot() const {
         return snapshot;
 
     const auto bounds = CanvasLayoutInternal::compute_canvas_bounds(monitor);
-    const auto profile = profile_for_workarea_extent(bounds.max);
+    const auto profile = current_profile(monitor);
     for (const auto& item : model.render(viewport, profile, bounds.full, bounds.max)) {
         const auto it = windowsByKey.find(item.key);
         if (it == windowsByKey.end() || !it->second)

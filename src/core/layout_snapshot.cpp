@@ -135,7 +135,8 @@ std::string serialize_repository(const RepositorySnapshot &snapshots) {
             << canvas.grid.viewportColumn << ' '
             << canvas.grid.viewportRow << ' '
             << canvas.grid.items.size() << ' '
-            << canvas.grid.mode << '\n';
+            << canvas.grid.mode << ' '
+            << canvas.grid.fullscreenKey << '\n';
         for (const auto &item : canvas.grid.items) {
             out << "GRIDITEM " << item.key << ' '
                 << item.column << ' ' << item.row << ' '
@@ -166,7 +167,10 @@ std::optional<RepositorySnapshot> deserialize_repository(std::string_view data) 
             int version = 0;
             if (tokens.size() != 2 ||
                 !parse_token(tokens[1], version) ||
-                (version != kLegacyFormatVersion && version != kGridFormatVersion && version != kFormatVersion))
+                (version != kLegacyFormatVersion &&
+                 version != kGridFormatVersion &&
+                 version != kGridModeFormatVersion &&
+                 version != kFormatVersion))
                 return std::nullopt;
             formatVersion = version;
             sawVersion = true;
@@ -256,7 +260,7 @@ std::optional<RepositorySnapshot> deserialize_repository(std::string_view data) 
                 return std::nullopt;
 
             size_t itemCount = 0;
-            if ((tokens.size() != 6 && tokens.size() != 7) ||
+            if ((tokens.size() != 6 && tokens.size() != 7 && tokens.size() != 8) ||
                 !parse_bool_token(tokens[1], currentCanvas->grid.enabled) ||
                 !parse_token(tokens[2], currentCanvas->grid.activeItemIndex) ||
                 !parse_token(tokens[3], currentCanvas->grid.viewportColumn) ||
@@ -264,6 +268,10 @@ std::optional<RepositorySnapshot> deserialize_repository(std::string_view data) 
                 !parse_size_token(tokens[5], itemCount))
                 return std::nullopt;
             if (tokens.size() == 7 && !parse_token(tokens[6], currentCanvas->grid.mode))
+                return std::nullopt;
+            if (tokens.size() == 8 &&
+                (!parse_token(tokens[6], currentCanvas->grid.mode) ||
+                 !parse_key_token(tokens[7], currentCanvas->grid.fullscreenKey)))
                 return std::nullopt;
             currentCanvas->grid.items.reserve(itemCount);
             currentLane = nullptr;

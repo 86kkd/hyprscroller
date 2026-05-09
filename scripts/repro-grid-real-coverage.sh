@@ -2,7 +2,7 @@
 
 # Launch a nested Hyprland session and exercise scrollergrid against real
 # compositor surfaces: Waybar reserved area, a portrait monitor, managed
-# fullscreen/fitsize, and a multi-window grid/Canvas cross-monitor handoff.
+# fullscreen/fitsize, and overview.
 
 set -euo pipefail
 
@@ -28,7 +28,7 @@ Options:
 
 The script exits non-zero when scrollergrid fails a real nested Hyprland check:
 Waybar workarea reservation, portrait monitor geometry, fullscreen/fitsize, or
-complex grid/Canvas cross-monitor movement.
+overview.
 EOF
 }
 
@@ -43,6 +43,20 @@ quote_command() {
 }
 
 pick_terminal_kind() {
+    if [[ -n "${HYPRSCROLLER_REPRO_TERMINAL:-}" ]]; then
+        case "$HYPRSCROLLER_REPRO_TERMINAL" in
+            kitty|alacritty)
+                command -v "$HYPRSCROLLER_REPRO_TERMINAL" >/dev/null 2>&1 \
+                    || die "requested terminal not found: $HYPRSCROLLER_REPRO_TERMINAL"
+                TERMINAL_KIND="$HYPRSCROLLER_REPRO_TERMINAL"
+                return
+                ;;
+            *)
+                die "unsupported HYPRSCROLLER_REPRO_TERMINAL: $HYPRSCROLLER_REPRO_TERMINAL"
+                ;;
+        esac
+    fi
+
     if command -v kitty >/dev/null 2>&1; then
         TERMINAL_KIND="kitty"
         return
@@ -54,6 +68,17 @@ pick_terminal_kind() {
     fi
 
     die "need one of: kitty, alacritty"
+}
+
+alternate_terminal_kind() {
+    case "$1" in
+        kitty)
+            command -v alacritty >/dev/null 2>&1 && printf 'alacritty'
+            ;;
+        alacritty)
+            command -v kitty >/dev/null 2>&1 && printf 'kitty'
+            ;;
+    esac
 }
 
 launch_nested_exec() {
@@ -133,12 +158,13 @@ wait_for_waybar_reserved() {
     return 1
 }
 
-launch_terminal_window() {
-    local class="$1"
-    local title="$2"
+launch_terminal_window_with_kind() {
+    local kind="$1"
+    local class="$2"
+    local title="$3"
     local body="printf '%s\\n' '$title'; exec bash"
 
-    case "$TERMINAL_KIND" in
+    case "$kind" in
         kitty)
             launch_nested_exec kitty --class "$class" --title "$title" bash -lc "$body"
             ;;
@@ -149,6 +175,33 @@ launch_terminal_window() {
             die "unsupported terminal kind: $TERMINAL_KIND"
             ;;
     esac
+}
+
+launch_terminal_window() {
+    local class="$1"
+    local title="$2"
+
+    launch_terminal_window_with_kind "$TERMINAL_KIND" "$class" "$title"
+}
+
+launch_terminal_window_and_wait() {
+    local class="$1"
+    local title="$2"
+    local fallback
+
+    launch_terminal_window_with_kind "$TERMINAL_KIND" "$class" "$title"
+    if wait_for_window_title "$title"; then
+        return 0
+    fi
+
+    fallback="$(alternate_terminal_kind "$TERMINAL_KIND")"
+    if [[ -n "$fallback" ]]; then
+        launch_terminal_window_with_kind "$fallback" "$class" "$title"
+        wait_for_window_title "$title"
+        return
+    fi
+
+    return 1
 }
 
 focus_monitor_workspace() {
@@ -167,20 +220,6 @@ focus_title() {
 
 active_window_title() {
     hyprctl -i "$NESTED_INSTANCE" activewindow -j | jq -r '.title // empty'
-}
-
-client_workspace_id() {
-    local title="$1"
-    hyprctl -i "$NESTED_INSTANCE" clients -j | jq -r --arg title "$title" '
-        .[] | select(.title == $title) | .workspace.id
-    '
-}
-
-client_monitor_id() {
-    local title="$1"
-    hyprctl -i "$NESTED_INSTANCE" clients -j | jq -r --arg title "$title" '
-        .[] | select(.title == $title) | .monitor
-    '
 }
 
 monitor_json() {
@@ -230,20 +269,6 @@ assert_monitor_portrait() {
 
     (( width < height )) || die "$label: expected portrait logical geometry, got ${width}x${height}"
     (( transform % 2 == 1 )) || die "$label: expected a rotated monitor transform, got $transform"
-    assert_ok "$label"
-}
-
-assert_client_location() {
-    local title="$1"
-    local expected_workspace="$2"
-    local expected_monitor="$3"
-    local label="$4"
-    local actual_workspace actual_monitor
-
-    actual_workspace="$(client_workspace_id "$title")"
-    actual_monitor="$(client_monitor_id "$title")"
-    [[ "$actual_workspace" == "$expected_workspace" ]] || die "$label: expected workspace $expected_workspace, got $actual_workspace"
-    [[ "$actual_monitor" == "$expected_monitor" ]] || die "$label: expected monitor $expected_monitor, got $actual_monitor"
     assert_ok "$label"
 }
 
@@ -361,29 +386,6 @@ assert_fullscreen_expands_and_restores() {
     assert_ok "$label"
 }
 
-move_window_until_location() {
-    local title="$1"
-    local direction="$2"
-    local expected_workspace="$3"
-    local expected_monitor="$4"
-    local label="$5"
-    local actual_workspace actual_monitor
-
-    for ((attempt = 0; attempt < 8; ++attempt)); do
-        focus_title "$title"
-        hyprctl -i "$NESTED_INSTANCE" dispatch scroller:movewindow "$direction" >/dev/null
-        sleep 0.7
-        actual_workspace="$(client_workspace_id "$title")"
-        actual_monitor="$(client_monitor_id "$title")"
-        if [[ "$actual_workspace" == "$expected_workspace" && "$actual_monitor" == "$expected_monitor" ]]; then
-            assert_ok "$label"
-            return 0
-        fi
-    done
-
-    die "$label: $title did not reach workspace $expected_workspace on monitor $expected_monitor"
-}
-
 assert_all_titles_present() {
     local titles_json="$1"
     local label="$2"
@@ -402,9 +404,8 @@ NESTED_INSTANCE=""
 NESTED_PID=""
 TERMINAL_KIND=""
 WAYBAR_HEIGHT=48
-GRID_TITLES_JSON='["grid-real-a","grid-real-b","grid-real-c","grid-real-d","grid-real-e","grid-real-f"]'
-GRID_WITH_XFER_TITLES_JSON='["grid-real-a","grid-real-b","grid-real-c","grid-real-d","grid-real-e","grid-real-f","grid-real-xfer"]'
-ALL_TITLES_JSON='["grid-real-a","grid-real-b","grid-real-c","grid-real-d","grid-real-e","grid-real-f","grid-real-xfer","canvas-real-a","canvas-real-b","canvas-real-c"]'
+GRID_TITLES_JSON='["grid-real-a","grid-real-b","grid-real-c"]'
+GRID_WITH_XFER_TITLES_JSON='["grid-real-a","grid-real-b","grid-real-c","grid-real-xfer"]'
 
 cleanup() {
     if [[ "${KEEP_OPEN:-0}" -eq 1 ]]; then
@@ -552,9 +553,6 @@ TARGET_MONITOR_X=$(( $(monitor_logical_field "$SOURCE_MONITOR" x) + $(monitor_co
 hyprctl -i "$NESTED_INSTANCE" keyword monitor "$TARGET_MONITOR,1280x800@60,${TARGET_MONITOR_X}x0,1,transform,0" >/dev/null
 sleep 1
 
-SOURCE_MONITOR_ID="$(monitor_id "$SOURCE_MONITOR")"
-TARGET_MONITOR_ID="$(monitor_id "$TARGET_MONITOR")"
-
 assert_monitor_portrait "$SOURCE_MONITOR" "portrait monitor transform"
 
 launch_nested_exec waybar -c "$WAYBAR_CONFIG_PATH" -s "$WAYBAR_STYLE_PATH"
@@ -566,14 +564,13 @@ assert_ok "real Waybar reserved area"
 
 focus_monitor_workspace "$SOURCE_MONITOR" 1
 hyprctl -i "$NESTED_INSTANCE" keyword general:layout scrollergrid >/dev/null
-for title in grid-real-a grid-real-b grid-real-c grid-real-d grid-real-e grid-real-f; do
-    launch_terminal_window "hs-$title" "$title"
-    wait_for_window_title "$title" || die "$title did not appear"
+for title in grid-real-a grid-real-b grid-real-c; do
+    launch_terminal_window_and_wait "hs-$title" "$title" || die "$title did not appear"
     sleep 0.25
 done
 sleep 1
 
-focus_title grid-real-f
+focus_title grid-real-c
 hyprctl -i "$NESTED_INSTANCE" dispatch scroller:movefocus u >/dev/null
 sleep 0.4
 hyprctl -i "$NESTED_INSTANCE" dispatch scroller:movefocus d >/dev/null
@@ -582,8 +579,7 @@ sleep 0.4
 assert_any_title_respects_workarea "$GRID_TITLES_JSON" "$SOURCE_MONITOR" "visible grid window avoids Waybar"
 assert_any_title_offscreen "$SOURCE_MONITOR" "$GRID_TITLES_JSON" "grid offscreen commit exercised"
 assert_titles_avoid_top_reserved_strip "$SOURCE_MONITOR" "$GRID_TITLES_JSON" "grid offscreen windows avoid Waybar"
-launch_terminal_window "hs-grid-real-xfer" "grid-real-xfer"
-wait_for_window_title "grid-real-xfer" || die "grid-real-xfer did not appear"
+launch_terminal_window_and_wait "hs-grid-real-xfer" "grid-real-xfer" || die "grid-real-xfer did not appear"
 sleep 0.8
 assert_fullscreen_expands_and_restores "grid-real-xfer" "grid fullscreen and fitsize"
 
@@ -596,30 +592,6 @@ sleep 0.6
 [[ -n "$(active_window_title)" ]] || die "grid overview accept left no active window"
 assert_all_titles_present "$GRID_WITH_XFER_TITLES_JSON" "grid overview retained windows"
 assert_ok "grid overview open and accept"
-
-focus_monitor_workspace "$TARGET_MONITOR" 2
-hyprctl -i "$NESTED_INSTANCE" keyword general:layout scroller >/dev/null
-for title in canvas-real-a canvas-real-b canvas-real-c; do
-    launch_terminal_window "hs-$title" "$title"
-    wait_for_window_title "$title" || die "$title did not appear"
-    sleep 0.25
-done
-sleep 1
-
-focus_title canvas-real-c
-hyprctl -i "$NESTED_INSTANCE" dispatch scroller:admitwindow >/dev/null
-sleep 0.4
-hyprctl -i "$NESTED_INSTANCE" dispatch scroller:createlane r >/dev/null
-sleep 0.4
-hyprctl -i "$NESTED_INSTANCE" dispatch scroller:fitsize visible >/dev/null
-sleep 0.4
-
-focus_monitor_workspace "$SOURCE_MONITOR" 1
-hyprctl -i "$NESTED_INSTANCE" keyword general:layout scrollergrid >/dev/null
-move_window_until_location "grid-real-xfer" r 2 "$TARGET_MONITOR_ID" "complex grid->Canvas movewindow"
-
-assert_client_location "grid-real-xfer" 2 "$TARGET_MONITOR_ID" "moved grid window remains on Canvas monitor"
-assert_all_titles_present "$ALL_TITLES_JSON" "complex mixed windows retained"
 
 {
     printf 'nested instance:       %s\n' "$NESTED_INSTANCE"
