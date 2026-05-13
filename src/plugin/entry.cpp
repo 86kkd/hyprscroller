@@ -31,6 +31,7 @@
 #include <sys/stat.h>
 #include <typeinfo>
 
+#include "plugin/config.h"
 #include "plugin/dispatch/registration.h"
 #include "hyprlang.hpp"
 #include "layout/canvas/internal.h"
@@ -133,15 +134,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     CanvasLayoutState::canvasRepository().initialize();
     spdlog::info("pluginInit handle={}", static_cast<const void*>(handle));
 
-#ifdef COLORS_IPC
-    // Enable optional IPC color configuration for free-stack highlight.
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:scroller:col.freecolumn_border", Hyprlang::CConfigValue(Hyprlang::INT(0xff9e1515)));
-#endif
-
-    // one value out of: { onethird, onehalf (default), twothirds, floating, maximized }
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:scroller:column_default_width", Hyprlang::STRING{"onehalf"});
-    // 0, 1
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:scroller:focus_wrap", Hyprlang::INT{0});
+    scroller::plugin_config::registerConfigValues(PHANDLE);
 
     // Register custom dispatchers used by keybinds and user scripts.
     dispatchers::addDispatchers();

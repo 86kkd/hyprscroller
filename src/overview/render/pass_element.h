@@ -14,9 +14,10 @@ class OverviewPassElement : public IPassElement {
     explicit OverviewPassElement(PHLMONITOR monitor);
     ~OverviewPassElement() override = default;
 
-    void                draw(const CRegion& damage) override;
+    std::vector<UP<IPassElement>> draw() override;
     bool                needsLiveBlur() override;
     bool                needsPrecomputeBlur() override;
+    ePassElementType    type() override;
     std::optional<CBox> boundingBox() override;
     CRegion             opaqueRegion() override;
 

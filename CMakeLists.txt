@@ -25,6 +25,7 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
 endif()
 add_library(hyprscroller SHARED
             src/plugin/entry.cpp
+            src/plugin/config.h
             src/plugin/dispatch/registration.h
             src/plugin/dispatch/shared.h
             src/plugin/dispatch/registration.cpp

@@ -3,10 +3,8 @@
 #include <algorithm>
 
 #include <hyprland/src/Compositor.hpp>
-#include <hyprland/src/config/ConfigValue.hpp>
 #include <hyprland/src/layout/algorithm/Algorithm.hpp>
 #include <hyprland/src/layout/space/Space.hpp>
-#include <hyprland/src/plugins/PluginAPI.hpp>
 #include <hyprutils/math/Box.hpp>
 #include <spdlog/spdlog.h>
 
@@ -15,8 +13,7 @@
 #include "core/workspace_selector.h"
 #include "layout/canvas/internal.h"
 #include "layout/canvas/layout_repository.h"
-
-extern HANDLE PHANDLE;
+#include "plugin/config.h"
 
 namespace ScrollerGrid {
 namespace {
@@ -81,11 +78,7 @@ GridLayout* grid_for_workspace(WORKSPACEID workspaceId) {
 }
 
 bool focus_wrap_enabled() {
-    if (!PHANDLE)
-        return false;
-
-    static auto* const* focusWrap = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:scroller:focus_wrap")->getDataStaticPtr();
-    return focusWrap && *focusWrap && **focusWrap != 0;
+    return scroller::plugin_config::focusWrap();
 }
 
 std::optional<uintptr_t> snapshot_active_key(const ScrollerSnapshot::GridSnapshot& snapshot) {
@@ -447,15 +440,15 @@ void GridLayout::resizeTarget(const Vector2D&, SP<Layout::ITarget>, Layout::eRec
     relayout(resolve_monitor());
 }
 
-void GridLayout::recalculate() {
+void GridLayout::recalculate(Layout::eRecalculateReason) {
     ensure_workspace_runtime();
     (void)maybeRestoreWorkspaceSnapshot();
     relayout(resolve_monitor());
 }
 
-std::expected<void, std::string> GridLayout::layoutMsg(const std::string_view& message) {
+Config::ErrorResult GridLayout::layoutMsg(const std::string_view& message) {
     spdlog::warn("grid layoutMsg: unsupported message='{}'", message);
-    return std::unexpected("grid layout messages are not supported yet");
+    return Config::configError("grid layout messages are not supported yet", Config::eConfigErrorLevel::ERROR, Config::eConfigErrorCode::INVALID_ARGUMENT);
 }
 
 std::optional<Vector2D> GridLayout::predictSizeForNewTarget() {

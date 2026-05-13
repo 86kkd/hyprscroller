@@ -198,7 +198,7 @@ inline void withLayout(Fn&& fn) {
 }
 
 inline std::string firstDispatchArg(const std::string& arg) {
-    auto args = CVarList(arg);
+    auto args = Hyprutils::String::CVarList(arg);
     return args[0];
 }
 

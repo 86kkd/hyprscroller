@@ -24,6 +24,7 @@
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/config/ConfigManager.hpp>
 #include <hyprland/src/config/ConfigValue.hpp>
+#include <hyprland/src/config/shared/complex/ComplexDataTypes.hpp>
 #include <hyprland/src/event/EventBus.hpp>
 #include <hyprland/src/helpers/Monitor.hpp>
 #include <hyprland/src/layout/algorithm/Algorithm.hpp>
@@ -185,17 +186,17 @@ void CanvasLayout::ensureWorkspaceRuntime() {
 }
 
 CanvasLayoutInternal::CanvasBounds CanvasLayoutInternal::compute_canvas_bounds(PHLMONITOR monitor) {
-    static auto PGAPSINDATA = CConfigValue<Hyprlang::CUSTOMTYPE>("general:gaps_in");
-    static auto PGAPSOUTDATA = CConfigValue<Hyprlang::CUSTOMTYPE>("general:gaps_out");
-    auto *const PGAPSIN = (CCssGapData *)(PGAPSINDATA.ptr())->getData();
-    auto *const PGAPSOUT = (CCssGapData *)(PGAPSOUTDATA.ptr())->getData();
+    static auto PGAPSINDATA = CConfigValue<Config::IComplexConfigValue>("general:gaps_in");
+    static auto PGAPSOUTDATA = CConfigValue<Config::IComplexConfigValue>("general:gaps_out");
+    auto *const PGAPSIN = dynamic_cast<Config::CCssGapData *>(PGAPSINDATA.ptr());
+    auto *const PGAPSOUT = dynamic_cast<Config::CCssGapData *>(PGAPSOUTDATA.ptr());
 
     // Scroller uses one shared interpretation of monitor space. `full` is the
     // logical monitor rectangle and `max` is the workarea after reserved areas
     // and outer gaps are applied. Every lane relayout path should go through
     // this helper so lane and stack code agree on the same coordinate space.
-    const auto gaps_in = PGAPSIN->m_top;
-    const auto gaps_out = PGAPSOUT->m_top;
+    const auto gaps_in = PGAPSIN ? PGAPSIN->m_top : 0;
+    const auto gaps_out = PGAPSOUT ? PGAPSOUT->m_top : 0;
 
     return {
         .full = ScrollerCore::logical_monitor_box(monitor),
@@ -625,8 +626,10 @@ bool CanvasLayout::restoreSnapshot(const ScrollerSnapshot::CanvasSnapshot &snaps
         rememberWindowLane(extraWindow, lane);
     }
 
-    syncActiveStateFromWorkspaceFocus();
+    const auto restoredActiveWindow = activeLane && activeLane->data() ? activeLane->data()->get_active_window() : nullptr;
     relayoutCanvas(fallbackMonitor, !workspace->m_isSpecialWorkspace);
+    if (restoredActiveWindow)
+        focusManagedWindow(restoredActiveWindow, false, "restoreSnapshot");
     debugVerifyLaneCache();
 
     restoringSnapshot = false;
@@ -856,7 +859,7 @@ void CanvasLayout::resizeTarget(const Vector2D &delta, SP<Layout::ITarget> targe
 }
 
 // Hyprland callback: relayout the whole canvas after monitor/workspace changes.
-void CanvasLayout::recalculate()
+void CanvasLayout::recalculate(Layout::eRecalculateReason)
 {
     ensureWorkspaceRuntime();
 
@@ -874,10 +877,10 @@ void CanvasLayout::recalculate()
 }
 
 // Explicitly reject layout messages until the plugin defines a supported protocol.
-std::expected<void, std::string> CanvasLayout::layoutMsg(const std::string_view& message)
+Config::ErrorResult CanvasLayout::layoutMsg(const std::string_view& message)
 {
     spdlog::warn("layoutMsg: unsupported message='{}'", message);
-    return std::unexpected("layout messages are not supported");
+    return Config::configError("layout messages are not supported", Config::eConfigErrorLevel::ERROR, Config::eConfigErrorCode::INVALID_ARGUMENT);
 }
 
 // Predict the size of a new tiled target using the active lane if present.

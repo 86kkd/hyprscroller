@@ -18,16 +18,11 @@
 #include <cmath>
 #include <string>
 
-#include <hyprlang.hpp>
 #include <hyprland/src/Compositor.hpp>
-#include <hyprland/src/config/ConfigManager.hpp>
-#include <hyprland/src/config/ConfigValue.hpp>
 #include <hyprland/src/layout/target/Target.hpp>
-#include <hyprland/src/plugins/PluginAPI.hpp>
 
 #include "core/interval.h"
-
-extern HANDLE PHANDLE;
+#include "plugin/config.h"
 
 namespace ScrollerModel::StackInternal {
 
@@ -94,13 +89,10 @@ double preset_extent(StackWidth width, double max) {
 }
 
 StackWidthPreset parse_stack_width_preset(PHLWINDOW window, double fallback_maxw) {
-    static auto const *column_default_width =
-        (Hyprlang::STRING const *)HyprlandAPI::getConfigValue(PHANDLE, "plugin:scroller:column_default_width")->getDataStaticPtr();
-
     // The "floating" preset means "seed the stack from the window's last known
     // floating size when possible". Every other preset maps directly to one of
     // the proportional width enums.
-    const std::string preset = *column_default_width;
+    const std::string preset = scroller::plugin_config::columnDefaultWidth();
     if (preset == "onehalf")
         return {.width = StackWidth::OneHalf, .maxw = fallback_maxw};
     if (preset == "onethird")
