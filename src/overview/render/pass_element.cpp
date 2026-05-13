@@ -15,10 +15,11 @@ namespace Overview {
 OverviewPassElement::OverviewPassElement(PHLMONITOR monitor) : monitor_(monitor) {
 }
 
-void OverviewPassElement::draw(const CRegion&) {
+std::vector<UP<IPassElement>> OverviewPassElement::draw() {
     // The pass element itself owns no draw logic; it simply forwards to the
     // overview renderer using the monitor it was created for.
     fullRenderMonitor(monitor_);
+    return {};
 }
 
 bool OverviewPassElement::needsLiveBlur() {
@@ -30,6 +31,10 @@ bool OverviewPassElement::needsLiveBlur() {
 bool OverviewPassElement::needsPrecomputeBlur() {
     // Same reasoning as above: no precomputed blur input is needed either.
     return false;
+}
+
+ePassElementType OverviewPassElement::type() {
+    return EK_CUSTOM;
 }
 
 std::optional<CBox> OverviewPassElement::boundingBox() {

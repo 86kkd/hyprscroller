@@ -14,16 +14,13 @@
  *   cross-monitor, or temporary-empty-lane behavior
  */
 #include <hyprland/src/Compositor.hpp>
-#include <hyprland/src/config/ConfigValue.hpp>
 #include <hyprland/src/helpers/Monitor.hpp>
-#include <hyprland/src/plugins/PluginAPI.hpp>
 #include <spdlog/spdlog.h>
 
 #include "../../core/direction.h"
+#include "../../plugin/config.h"
 #include "internal.h"
 #include "route.h"
-
-extern HANDLE PHANDLE;
 
 namespace {
 // Human-readable result names used by logs after a focus route completes.
@@ -441,7 +438,6 @@ void CanvasLayout::finalizeLocalFocusMove(int workspace, Direction direction, La
 // a temporary empty lane that the user can move into.
 void CanvasLayout::move_focus(int workspace, Direction direction)
 {
-    static auto* const *focus_wrap = (Hyprlang::INT* const *)HyprlandAPI::getConfigValue(PHANDLE, "plugin:scroller:focus_wrap")->getDataStaticPtr();
     // Phase 1: snapshot the current lane/window/monitor state before any move.
     // Both local focus changes and cross-monitor handoff decisions depend on
     // the same source state, so keep that snapshot stable for the whole route.
@@ -470,7 +466,7 @@ void CanvasLayout::move_focus(int workspace, Direction direction)
     const auto emptyLaneTargetMonitor = laneEmpty
         ? targetMonitorFromDirection
         : nullptr;
-    const auto moveResult = laneEmpty ? FocusMoveResult::NoOp : lane->move_focus(direction, **focus_wrap != 0);
+    const auto moveResult = laneEmpty ? FocusMoveResult::NoOp : lane->move_focus(direction, scroller::plugin_config::focusWrap());
     if (CanvasLayoutInternal::should_cross_monitor_from_empty_lane(laneEmpty, betweenLanes, emptyLaneTargetMonitor != nullptr)) {
         handoffFocusAcrossMonitor(workspace,
                                   direction,

@@ -12,9 +12,7 @@
 #include <sstream>
 
 #include <hyprland/src/Compositor.hpp>
-#include <hyprland/src/config/ConfigManager.hpp>
 #include <hyprland/src/config/ConfigValue.hpp>
-#include <hyprland/src/plugins/PluginAPI.hpp>
 #include <spdlog/spdlog.h>
 #ifdef COLORS_IPC
 #include <hyprland/src/managers/EventManager.hpp>
@@ -23,6 +21,7 @@
 #include "../../core/interval.h"
 #include "../../core/layout_math.h"
 #include "../../core/layout_profile.h"
+#include "../../plugin/config.h"
 #include "../canvas/internal.h"
 
 using ScrollerCore::Box;
@@ -259,13 +258,12 @@ void Lane::recalculate_lane_geometry() {
         return;
     }
 #ifdef COLORS_IPC
-    static auto *const FREECOLUMN = (CGradientValueData *) HyprlandAPI::getConfigValue(PHANDLE, "plugin:scroller:col.freecolumn_border")->data.get();
-    static auto *const ACTIVECOL = (CGradientValueData *)g_pConfigManager->getConfigValuePtr("general:col.active_border")->data.get();
+    static auto activeBorderData = CConfigValue<Config::IComplexConfigValue>("general:col.active_border");
     if (const auto activeWindow = active->data()->get_active_window()) {
         if (active->data()->get_width() == StackWidth::Free) {
-            activeWindow->m_cRealBorderColor = *FREECOLUMN;
-        } else {
-            activeWindow->m_cRealBorderColor = *ACTIVECOL;
+            activeWindow->m_realBorderColor = scroller::plugin_config::freeColumnBorder();
+        } else if (auto* activeColor = dynamic_cast<Config::CGradientValueData*>(activeBorderData.ptr())) {
+            activeWindow->m_realBorderColor = *activeColor;
         }
     }
     g_pEventManager->postEvent(SHyprIPCEvent{"scroller", active->data()->get_width_name() + "," + active->data()->get_height_name()});

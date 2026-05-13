@@ -279,6 +279,10 @@ input {
     kb_layout = us
 }
 
+cursor {
+    no_hardware_cursors = true
+}
+
 debug {
     disable_logs = false
 }

@@ -60,8 +60,8 @@ class RenderState {
     bool previewAnimationActive(int monitorId) const;
     ScrollerCore::Box animatedPreviewBox(int monitorId, PHLWINDOW window, const ScrollerCore::Box& fallbackBox) const;
 
-    SP<CTexture> findTextTexture(const std::string& key) const;
-    void         storeTextTexture(std::string key, SP<CTexture> texture);
+    SP<Render::ITexture> findTextTexture(const std::string& key) const;
+    void                 storeTextTexture(std::string key, SP<Render::ITexture> texture);
     void         clearTextCache();
 
   private:
@@ -70,7 +70,7 @@ class RenderState {
     std::unordered_map<int, std::vector<PHLLSREF>>  backdropLayers_;
     std::unordered_map<int, SelectionPulse>         selectionPulses_;
     std::unordered_map<std::uintptr_t, PreviewAnimation> previewAnimations_;
-    std::unordered_map<std::string, SP<CTexture>>   textCache_;
+    std::unordered_map<std::string, SP<Render::ITexture>> textCache_;
     bool                                            lastOverviewActive_ = false;
 };
 

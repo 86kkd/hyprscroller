@@ -140,7 +140,7 @@ bool initializeRendererHooksImpl(HANDLE handle) {
             if (stage != RENDER_POST_WINDOWS)
                 return;
 
-            const auto monitor = g_pHyprOpenGL->m_renderData.pMonitor.lock();
+            const auto monitor = g_pHyprRenderer->m_renderData.pMonitor.lock();
             if (!monitor || !session().active())
                 return;
 

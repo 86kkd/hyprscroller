@@ -8,6 +8,7 @@
 
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/config/ConfigManager.hpp>
+#include <hyprland/src/config/shared/animation/AnimationTree.hpp>
 #include <hyprland/src/managers/animation/AnimationManager.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 
@@ -34,7 +35,8 @@ bool valid_preview_box(const ScrollerCore::Box& box) {
 }
 
 SP<Hyprutils::Animation::SAnimationPropertyConfig> preview_animation_config() {
-    if (!g_pConfigManager)
+    auto& animationTree = Config::animationTree();
+    if (!animationTree)
         return nullptr;
 
     static constexpr std::array kCandidates = {
@@ -45,11 +47,11 @@ SP<Hyprutils::Animation::SAnimationPropertyConfig> preview_animation_config() {
     };
 
     for (const auto* name : kCandidates) {
-        if (auto config = g_pConfigManager->getAnimationPropertyConfig(name))
+        if (auto config = animationTree->getAnimationPropertyConfig(name))
             return config;
     }
 
-    for (const auto& [name, config] : g_pConfigManager->getAnimationConfig()) {
+    for (const auto& [name, config] : animationTree->getAnimationConfig()) {
         if (!config)
             continue;
 
@@ -259,12 +261,12 @@ ScrollerCore::Box RenderState::animatedPreviewBox(int monitorId, PHLWINDOW windo
     return valid_preview_box(box) ? box : fallbackBox;
 }
 
-SP<CTexture> RenderState::findTextTexture(const std::string& key) const {
+SP<Render::ITexture> RenderState::findTextTexture(const std::string& key) const {
     const auto it = textCache_.find(key);
     return it == textCache_.end() ? nullptr : it->second;
 }
 
-void RenderState::storeTextTexture(std::string key, SP<CTexture> texture) {
+void RenderState::storeTextTexture(std::string key, SP<Render::ITexture> texture) {
     textCache_[std::move(key)] = std::move(texture);
 }
 

@@ -18,12 +18,11 @@
 #include <cmath>
 #include <cstdint>
 #include <optional>
-#include <span>
 #include <string>
-#include <utility>
 #include <vector>
 
 #include <hyprland/src/Compositor.hpp>
+#include <hyprland/src/config/shared/complex/ComplexDataTypes.hpp>
 #include <hyprland/src/desktop/view/LayerSurface.hpp>
 #include <hyprland/src/protocols/LayerShell.hpp>
 #include <hyprland/src/protocols/XDGShell.hpp>
@@ -38,6 +37,8 @@ namespace Overview {
 namespace {
 
 using ScrollerCore::Box;
+using Render::GL::CHyprOpenGLImpl;
+using Render::GL::g_pHyprOpenGL;
 
 // Render APIs expect integer-ish boxes; overview layout math works in doubles.
 int iround(double value) {
@@ -60,7 +61,7 @@ std::string text_cache_key(const std::string& text, const CHyprColor& color, int
     return text + "|" + std::to_string(color.stripA().getAsHex()) + "|" + std::to_string(pt) + "|" + std::to_string(maxWidth) + "|" + std::to_string(weight);
 }
 
-SP<CTexture> get_text_texture(RenderState& state, const std::string& text, const CHyprColor& color, int pt, int maxWidth = 0, int weight = 400) {
+SP<Render::ITexture> get_text_texture(RenderState& state, const std::string& text, const CHyprColor& color, int pt, int maxWidth = 0, int weight = 400) {
     if (text.empty())
         return nullptr;
 
@@ -68,7 +69,7 @@ SP<CTexture> get_text_texture(RenderState& state, const std::string& text, const
     if (const auto texture = state.findTextTexture(key))
         return texture;
 
-    auto texture = g_pHyprOpenGL->renderText(text, color.stripA(), pt, false, "", maxWidth, weight);
+    auto texture = g_pHyprRenderer->renderText(text, color.stripA(), pt, false, "", maxWidth, weight);
     state.storeTextTexture(key, texture);
     return texture;
 }
@@ -118,7 +119,7 @@ void draw_outline_panel(const Box& box, const Box& bounds, const CHyprColor& col
     if (!clipped || clipped->w <= 2.0 || clipped->h <= 2.0 || borderWidth <= 0.0)
         return;
 
-    CGradientValueData gradient(color);
+    Config::CGradientValueData gradient(color);
     CHyprOpenGLImpl::SBorderRenderData data;
     data.round = std::clamp(round, 0, iround(std::min(clipped->w, clipped->h) * 0.5));
     data.outerRound = data.round;
@@ -147,33 +148,15 @@ struct ScopedRenderDataState {
     PHLWINDOWREF currentWindow;
 
     ScopedRenderDataState()
-        : uvTopLeft(g_pHyprOpenGL->m_renderData.primarySurfaceUVTopLeft)
-        , uvBottomRight(g_pHyprOpenGL->m_renderData.primarySurfaceUVBottomRight)
-        , currentWindow(g_pHyprOpenGL->m_renderData.currentWindow) {
+        : uvTopLeft(g_pHyprRenderer->m_renderData.primarySurfaceUVTopLeft)
+        , uvBottomRight(g_pHyprRenderer->m_renderData.primarySurfaceUVBottomRight)
+        , currentWindow(g_pHyprRenderer->m_renderData.currentWindow) {
     }
 
     ~ScopedRenderDataState() {
-        g_pHyprOpenGL->m_renderData.primarySurfaceUVTopLeft = uvTopLeft;
-        g_pHyprOpenGL->m_renderData.primarySurfaceUVBottomRight = uvBottomRight;
-        g_pHyprOpenGL->m_renderData.currentWindow = currentWindow;
-    }
-};
-
-struct ScopedTextureTransform {
-    using TextureTransform = decltype(std::declval<CTexture>().m_transform);
-
-    SP<CTexture> texture;
-    TextureTransform transform{};
-
-    explicit ScopedTextureTransform(SP<CTexture> tex)
-        : texture(std::move(tex)) {
-        if (texture)
-            transform = texture->m_transform;
-    }
-
-    ~ScopedTextureTransform() {
-        if (texture)
-            texture->m_transform = transform;
+        g_pHyprRenderer->m_renderData.primarySurfaceUVTopLeft = uvTopLeft;
+        g_pHyprRenderer->m_renderData.primarySurfaceUVBottomRight = uvBottomRight;
+        g_pHyprRenderer->m_renderData.currentWindow = currentWindow;
     }
 };
 
@@ -216,11 +199,9 @@ SP<CWLSurfaceResource> resolve_window_main_surface(PHLWINDOW window) {
     return window->getSolitaryResource();
 }
 
-// For the live-surface fallback we only need the main content box. Using the
-// window's real main-surface box lets Hyprland's own UV calculation apply the
-// xdg geometry crop exactly once. Using `surfaceLogicalBox()` here causes
-// xdg-shell windows to get cropped twice, which is what made Firefox go blank
-// and Cursor/KiCad previews look over-zoomed.
+// For live-surface previews, use the window's real main-surface box as the
+// source aspect ratio. `surfaceLogicalBox()` describes already-cropped content
+// and can over-zoom xdg-shell windows when the preview is scaled down.
 CBox preview_surface_source_box(PHLWINDOW window) {
     if (!window)
         return {};
@@ -244,102 +225,9 @@ Vector2D surface_uv_bottom_right(SP<CWLSurfaceResource> surface) {
                     (surface->m_current.viewport.source.y + surface->m_current.viewport.source.height) / surface->m_current.bufferSize.y);
 }
 
-// Draw one window preview directly from Hyprland's window framebuffer snapshot.
-// This path temporarily overrides a few OpenGL render-state fields so the
-// preview samples the correct UV rectangle from the source monitor texture.
-bool draw_window_snapshot(const SceneTarget& target, const Box& box, const Box& bounds) {
-    if (!target.window)
-        return false;
-
-    const auto clipped = intersectBox(box, bounds);
-    if (!clipped || clipped->w <= 4.0 || clipped->h <= 4.0)
-        return false;
-
-    const auto monitor = g_pHyprOpenGL->m_renderData.pMonitor.lock();
-    const auto sourceMonitor = target.window->m_monitor.lock();
-    if (!monitor || !sourceMonitor || sourceMonitor->m_id != monitor->m_id)
-        return false;
-
-    PHLWINDOWREF ref{target.window};
-    const auto framebufferIt = g_pHyprOpenGL->m_windowFramebuffers.find(ref);
-    if (framebufferIt == g_pHyprOpenGL->m_windowFramebuffers.end())
-        return false;
-
-    const auto texture = framebufferIt->second.getTexture();
-    if (!texture)
-        return false;
-
-    const auto sourceBox = CBox{
-        target.window->m_position.x - sourceMonitor->m_position.x,
-        target.window->m_position.y - sourceMonitor->m_position.y,
-        target.window->m_size.x,
-        target.window->m_size.y,
-    };
-    if (sourceBox.width <= 1.0 || sourceBox.height <= 1.0)
-        return false;
-
-    // Snapshot previews sample from the monitor framebuffer. That only works
-    // when the entire window lives inside that framebuffer. Once the window is
-    // pushed outside the visible monitor area, the sampled UVs just pick up
-    // wallpaper/neighbor pixels, so overview should fall back to the live
-    // surface texture instead.
-    const bool fullyInsideMonitor = sourceBox.x >= 0.0 && sourceBox.y >= 0.0 &&
-        sourceBox.x + sourceBox.width <= sourceMonitor->m_size.x &&
-        sourceBox.y + sourceBox.height <= sourceMonitor->m_size.y;
-    if (!fullyInsideMonitor)
-        return false;
-
-    const auto scale = std::min(clipped->w / std::max(1.0, sourceBox.width),
-                                clipped->h / std::max(1.0, sourceBox.height));
-    if (!std::isfinite(scale) || scale <= 0.0)
-        return false;
-
-    const auto centeredTarget = CBox{
-        clipped->x + (clipped->w - sourceBox.width * scale) * 0.5,
-        clipped->y + (clipped->h - sourceBox.height * scale) * 0.5,
-        sourceBox.width * scale,
-        sourceBox.height * scale,
-    };
-
-    auto uvBox = CBox{
-        sourceBox.x / std::max(1.0, sourceMonitor->m_size.x),
-        sourceBox.y / std::max(1.0, sourceMonitor->m_size.y),
-        sourceBox.width / std::max(1.0, sourceMonitor->m_size.x),
-        sourceBox.height / std::max(1.0, sourceMonitor->m_size.y),
-    };
-    uvBox.transform(Math::wlTransformToHyprutils(Math::invertTransform(sourceMonitor->m_transform)), 1.0, 1.0);
-
-    // Save every mutable render-state field we touch so overview drawing leaves
-    // the surrounding render pass exactly as it found it.
-    const ScopedRenderDataState renderStateGuard;
-    const ScopedTextureTransform textureTransformGuard(texture);
-    auto uvTopLeft = Vector2D(uvBox.x, uvBox.y);
-    auto uvBottomRight = Vector2D(uvBox.x + uvBox.width, uvBox.y + uvBox.height);
-    if (sourceMonitor->m_transform % 2 == 1) {
-        std::swap(uvTopLeft.x, uvBottomRight.x);
-        std::swap(uvTopLeft.y, uvBottomRight.y);
-    }
-    g_pHyprOpenGL->m_renderData.primarySurfaceUVTopLeft = uvTopLeft;
-    g_pHyprOpenGL->m_renderData.primarySurfaceUVBottomRight = uvBottomRight;
-    g_pHyprOpenGL->m_renderData.currentWindow = nullptr;
-    texture->m_transform = Math::wlTransformToHyprutils(sourceMonitor->m_transform);
-
-    const auto shape = preview_shape_for_window(target, {centeredTarget.x, centeredTarget.y, centeredTarget.width, centeredTarget.height});
-    CHyprOpenGLImpl::STextureRenderData data;
-    data.a = 1.0F;
-    data.round = shape.round;
-    data.roundingPower = shape.roundingPower;
-    data.allowCustomUV = true;
-    data.blockBlurOptimization = true;
-    g_pHyprOpenGL->renderTexture(texture, centeredTarget, data);
-    return true;
-}
-
-// Off-screen windows often do not get a compositor snapshot at all because
-// Hyprland only snapshots windows that are part of the normal render pass.
-// When that happens, overview falls back to the window's live wl_surface tree
-// so Firefox-style multi-surface windows still show their real content instead
-// of just the narrow title-bar surface.
+// Overview draws directly from the window's live wl_surface tree. This avoids
+// depending on Hyprland's private snapshot framebuffer cache, which is no
+// longer exposed through the 0.55 render API.
 bool draw_window_surface_tree(const SceneTarget& target, const Box& box, const Box& bounds) {
     if (!target.window)
         return false;
@@ -348,7 +236,7 @@ bool draw_window_surface_tree(const SceneTarget& target, const Box& box, const B
     if (!clipped || clipped->w <= 4.0 || clipped->h <= 4.0)
         return false;
 
-    const auto monitor = g_pHyprOpenGL->m_renderData.pMonitor.lock();
+    const auto monitor = g_pHyprRenderer->m_renderData.pMonitor.lock();
     const auto sourceMonitor = target.window->m_monitor.lock();
     if (!monitor || !sourceMonitor || sourceMonitor->m_id != monitor->m_id)
         return false;
@@ -379,24 +267,24 @@ bool draw_window_surface_tree(const SceneTarget& target, const Box& box, const B
         sourceBox.height * scale,
     };
 
-    // Save every mutable render-state field we touch so the fallback path is as
-    // self-contained as the snapshot path above.
+    // Save every mutable render-state field we touch so overview drawing leaves
+    // the surrounding render pass exactly as it found it.
     const ScopedRenderDataState renderStateGuard;
 
-    // Hyprland's UV helper expects the surface's on-monitor size, not the
-    // shrunken overview preview size. If we pass `centeredTarget` here it
-    // interprets the smaller quad as "crop the source surface", which is what
-    // makes some overview previews look zoomed into the top-left corner.
-    const auto sourceProjectedSize = Vector2D(sourceBox.width, sourceBox.height) * monitor->m_scale;
-    g_pHyprRenderer->calculateUVForSurface(target.window, mainSurface, sourceMonitor, true, sourceProjectedSize);
-    g_pHyprOpenGL->m_renderData.currentWindow = nullptr;
+    // Use explicit viewport UVs when the surface has a source crop; otherwise
+    // leave custom UV disabled so Hyprland samples the full texture.
+    const auto surfaceUVTL = surface_uv_top_left(mainSurface);
+    const auto surfaceUVBR = surface_uv_bottom_right(mainSurface);
+    g_pHyprRenderer->m_renderData.primarySurfaceUVTopLeft = surfaceUVTL;
+    g_pHyprRenderer->m_renderData.primarySurfaceUVBottomRight = surfaceUVBR;
+    g_pHyprRenderer->m_renderData.currentWindow = nullptr;
 
     const auto shape = preview_shape_for_window(target, {centeredTarget.x, centeredTarget.y, centeredTarget.width, centeredTarget.height});
     CHyprOpenGLImpl::STextureRenderData data;
     data.a = 1.0F;
     data.round = shape.round;
     data.roundingPower = shape.roundingPower;
-    data.allowCustomUV = true;
+    data.allowCustomUV = surfaceUVTL.x >= 0.0 && surfaceUVBR.x >= 0.0;
     data.blockBlurOptimization = true;
     g_pHyprOpenGL->renderTexture(texture, centeredTarget, data);
 
@@ -421,9 +309,9 @@ bool draw_window_surface_tree(const SceneTarget& target, const Box& box, const B
 
             const auto surfaceUVTL = surface_uv_top_left(surface);
             const auto surfaceUVBR = surface_uv_bottom_right(surface);
-            g_pHyprOpenGL->m_renderData.primarySurfaceUVTopLeft = surfaceUVTL;
-            g_pHyprOpenGL->m_renderData.primarySurfaceUVBottomRight = surfaceUVBR;
-            g_pHyprOpenGL->m_renderData.currentWindow = nullptr;
+            g_pHyprRenderer->m_renderData.primarySurfaceUVTopLeft = surfaceUVTL;
+            g_pHyprRenderer->m_renderData.primarySurfaceUVBottomRight = surfaceUVBR;
+            g_pHyprRenderer->m_renderData.currentWindow = nullptr;
 
             CHyprOpenGLImpl::STextureRenderData subsurfaceData;
             subsurfaceData.a = 1.0F;
@@ -439,7 +327,7 @@ bool draw_window_surface_tree(const SceneTarget& target, const Box& box, const B
 void draw_window_preview(RenderState& state, const SceneTarget& target, const Box& drawBox, const Box& bounds, double overlayAlpha) {
     // The preview draw order is:
     // 1. shadow
-    // 2. live snapshot, then live surface fallback, then matte fallback
+    // 2. live surface, then matte fallback
     // 3. outline
     // 4. title backdrop + text
     const auto previewBox = insetBox(drawBox, Style::kPreviewInset, Style::kPreviewInset);
@@ -451,7 +339,7 @@ void draw_window_preview(RenderState& state, const SceneTarget& target, const Bo
                                            Style::previewShadow(shadowAlpha * overlayAlpha), 1.0F);
     }
 
-    if (!draw_window_snapshot(target, previewBox, bounds) && !draw_window_surface_tree(target, previewBox, bounds)) {
+    if (!draw_window_surface_tree(target, previewBox, bounds)) {
         draw_rect(previewBox,
                   bounds,
                   Style::previewFallbackFill(target.selected, static_cast<float>((target.selected ? 0.82 : 0.74) * overlayAlpha)),

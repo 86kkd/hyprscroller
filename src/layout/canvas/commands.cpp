@@ -291,6 +291,7 @@ void CanvasLayout::set_mode(int workspace, Mode mode) {
     withActiveLane(ActiveLaneSyncPolicy::WorkspaceFocus, [mode](Lane *lane) {
         lane->set_mode(mode);
     });
+    relayoutVisibleCanvas();
     persistSnapshot();
 }
 
