@@ -82,6 +82,12 @@ bool spans_full_visible_page(const GridItem& item, const GridProfile& profile) {
            item.rowSpan == full_page_rows(profile);
 }
 
+void clamp_viewport_axis_to_occupied_range(int minStart, int maxEnd, int visibleCells, int& origin) {
+    visibleCells = std::max(1, visibleCells);
+    const auto maxOrigin = std::max(minStart, maxEnd - visibleCells);
+    origin = std::clamp(origin, minStart, maxOrigin);
+}
+
 } // namespace
 
 GridProfile profile_for_workarea(Mode mode, const ScrollerCore::Box& workarea) {
@@ -352,6 +358,33 @@ void GridModel::expand_single_item_to_page(const GridProfile& profile, GridViewp
     if (!activeIndex || *activeIndex >= items.size())
         activeIndex = 0;
     ensure_active_visible(profile, viewport);
+}
+
+void GridModel::settle_after_removal(const GridProfile& profile, GridViewport& viewport) {
+    if (items.empty())
+        return;
+
+    if (items.size() == 1)
+        expand_single_item_to_page(profile, viewport);
+
+    if (!activeIndex || *activeIndex >= items.size())
+        activeIndex = 0;
+
+    ensure_active_visible(profile, viewport);
+
+    auto minColumn = items.front().column;
+    auto maxColumnEnd = items.front().column + items.front().columnSpan;
+    auto minRow = items.front().row;
+    auto maxRowEnd = items.front().row + items.front().rowSpan;
+    for (const auto& item : items) {
+        minColumn = std::min(minColumn, item.column);
+        maxColumnEnd = std::max(maxColumnEnd, item.column + item.columnSpan);
+        minRow = std::min(minRow, item.row);
+        maxRowEnd = std::max(maxRowEnd, item.row + item.rowSpan);
+    }
+
+    clamp_viewport_axis_to_occupied_range(minColumn, maxColumnEnd, profile.visibleColumns, viewport.originColumn);
+    clamp_viewport_axis_to_occupied_range(minRow, maxRowEnd, profile.visibleRows, viewport.originRow);
 }
 
 bool GridModel::focus_window(uintptr_t key) {

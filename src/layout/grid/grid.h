@@ -70,6 +70,7 @@ public:
     bool focus_window(uintptr_t key);
     bool contains(uintptr_t key) const;
     void expand_single_item_to_page(const GridProfile& profile, GridViewport& viewport);
+    void settle_after_removal(const GridProfile& profile, GridViewport& viewport);
 
     const GridItem* active_item() const;
     const GridItem* item_for_key(uintptr_t key) const;

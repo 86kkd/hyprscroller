@@ -101,6 +101,34 @@ void test_grid_restores_single_remaining_item_to_full_page() {
     expect_eq(portraitViewport.originRow, 0, "column viewport returns to full-page origin");
 }
 
+void test_grid_settles_viewport_to_remaining_items_after_removal() {
+    ScrollerGrid::GridModel model;
+    const auto row = ScrollerGrid::profile_for_workarea(Mode::Row, {0.0, 0.0, 1200.0, 800.0});
+    ScrollerGrid::GridViewport viewport{.originColumn = 1, .originRow = 0};
+
+    model.add_window(1, row);
+    model.add_window(2, row);
+    model.add_window(3, row);
+    expect_true(model.remove_window(3), "grid removes trailing row item");
+    model.settle_after_removal(row, viewport);
+    expect_eq(viewport.originColumn, 0, "row viewport shifts back to show both remaining windows");
+    expect_eq(model.item_for_key(1)->columnSpan, 1, "row settle keeps first remaining item one unit wide");
+    expect_eq(model.item_for_key(2)->columnSpan, 1, "row settle keeps second remaining item one unit wide");
+
+    ScrollerGrid::GridModel portraitModel;
+    const auto column = ScrollerGrid::profile_for_workarea(Mode::Column, {0.0, 0.0, 800.0, 1200.0});
+    ScrollerGrid::GridViewport portraitViewport{.originColumn = 0, .originRow = 1};
+
+    portraitModel.add_window(10, column);
+    portraitModel.add_window(11, column);
+    portraitModel.add_window(12, column);
+    expect_true(portraitModel.remove_window(12), "grid removes trailing column item");
+    portraitModel.settle_after_removal(column, portraitViewport);
+    expect_eq(portraitViewport.originRow, 0, "column viewport shifts back to show both remaining windows");
+    expect_eq(portraitModel.item_for_key(10)->rowSpan, 1, "column settle keeps first remaining item one unit tall");
+    expect_eq(portraitModel.item_for_key(11)->rowSpan, 1, "column settle keeps second remaining item one unit tall");
+}
+
 void test_move_focus_scrolls_viewport_to_active_item() {
     ScrollerGrid::GridModel model;
     const auto profile = ScrollerGrid::profile_for_workarea(Mode::Row, {0.0, 0.0, 1200.0, 800.0});
@@ -273,6 +301,7 @@ void run_grid_logic_tests() {
     test_grid_profiles_use_half_screen_units();
     test_grid_inserts_along_orientation_axis();
     test_grid_restores_single_remaining_item_to_full_page();
+    test_grid_settles_viewport_to_remaining_items_after_removal();
     test_move_focus_scrolls_viewport_to_active_item();
     test_move_focus_can_move_empty_viewport_space();
     test_move_active_window_moves_or_swaps_grid_cells();

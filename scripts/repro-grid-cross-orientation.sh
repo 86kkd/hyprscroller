@@ -438,6 +438,39 @@ assert_client_fills_monitor() {
     assert_ok "$label"
 }
 
+assert_titles_visible_on_monitor() {
+    local monitor="$1"
+    local label="$2"
+    shift 2
+
+    local monitor_id monitor_x monitor_y monitor_w monitor_h
+    monitor_id="$(hyprctl -i "$NESTED_INSTANCE" monitors -j | jq -r --arg name "$monitor" '.[] | select(.name == $name) | .id')"
+    monitor_x="$(monitor_json "$monitor" | jq -r '.x')"
+    monitor_y="$(monitor_json "$monitor" | jq -r '.y')"
+    monitor_w="$(monitor_coordinate_width "$monitor")"
+    monitor_h="$(monitor_coordinate_height "$monitor")"
+
+    local title
+    for title in "$@"; do
+        hyprctl -i "$NESTED_INSTANCE" clients -j | jq -e \
+            --arg title "$title" \
+            --argjson monitorId "$monitor_id" \
+            --argjson monitorX "$monitor_x" \
+            --argjson monitorY "$monitor_y" \
+            --argjson monitorW "$monitor_w" \
+            --argjson monitorH "$monitor_h" '
+                any(.[]; .title == $title
+                    and .monitor == $monitorId
+                    and (.at[0] < ($monitorX + $monitorW))
+                    and ((.at[0] + .size[0]) > $monitorX)
+                    and (.at[1] < ($monitorY + $monitorH))
+                    and ((.at[1] + .size[1]) > $monitorY))
+            ' >/dev/null || die "$label: expected visible '$title' on $monitor"
+    done
+
+    assert_ok "$label"
+}
+
 assert_active_monitor() {
     local expected_monitor="$1"
     local label="$2"
@@ -515,13 +548,17 @@ LANDSCAPE_MONITOR="WAYLAND-1"
 PORTRAIT_MONITOR="WAYLAND-2"
 LANDSCAPE_TITLE="grid-landscape"
 LANDSCAPE_EXTRA_TITLE="grid-landscape-extra"
+LANDSCAPE_TAIL_TITLE="grid-landscape-tail"
 PORTRAIT_TITLE="grid-portrait"
 PORTRAIT_EXTRA_TITLE="grid-portrait-extra"
+PORTRAIT_TAIL_TITLE="grid-portrait-tail"
 LANDSCAPE_CLASS="hs-grid-landscape"
 LANDSCAPE_EXTRA_CLASS="hs-grid-landscape-extra"
+LANDSCAPE_TAIL_CLASS="hs-grid-landscape-tail"
 PORTRAIT_CLASS="hs-grid-portrait"
 PORTRAIT_EXTRA_CLASS="hs-grid-portrait-extra"
-ALL_GRID_TITLES_JSON='["grid-landscape","grid-landscape-extra","grid-portrait","grid-portrait-extra"]'
+PORTRAIT_TAIL_CLASS="hs-grid-portrait-tail"
+ALL_GRID_TITLES_JSON='["grid-landscape","grid-landscape-extra","grid-landscape-tail","grid-portrait","grid-portrait-extra","grid-portrait-tail"]'
 OUTER_MONITOR_X=0
 OUTER_MONITOR_Y=0
 OUTER_MONITOR_WIDTH=0
@@ -801,7 +838,25 @@ sleep 0.6
 assert_client_above "$PORTRAIT_TITLE" "$PORTRAIT_EXTRA_TITLE" "portrait same-monitor movewindow up"
 
 focus_monitor_workspace "$LANDSCAPE_MONITOR" 1
-focus_title "$LANDSCAPE_EXTRA_TITLE" || die "$LANDSCAPE_EXTRA_TITLE did not become active before movefocus r"
+focus_title "$LANDSCAPE_EXTRA_TITLE" || die "$LANDSCAPE_EXTRA_TITLE did not become active before launching landscape tail"
+log_step "launch third landscape grid window"
+launch_terminal_window_and_wait "$LANDSCAPE_TAIL_CLASS" "$LANDSCAPE_TAIL_TITLE" "[workspace 1 silent]" \
+    || die "$LANDSCAPE_TAIL_TITLE did not appear"
+repair_client_workspace "$LANDSCAPE_TAIL_TITLE" 1 || die "could not place $LANDSCAPE_TAIL_TITLE on workspace 1"
+sleep 0.8
+assert_client_location "$LANDSCAPE_TAIL_TITLE" 1 "$LANDSCAPE_MONITOR_ID" "landscape tail placement"
+
+focus_monitor_workspace "$PORTRAIT_MONITOR" 2
+focus_title "$PORTRAIT_EXTRA_TITLE" || die "$PORTRAIT_EXTRA_TITLE did not become active before launching portrait tail"
+log_step "launch third portrait grid window"
+launch_terminal_window_and_wait "$PORTRAIT_TAIL_CLASS" "$PORTRAIT_TAIL_TITLE" "[workspace 2 silent]" \
+    || die "$PORTRAIT_TAIL_TITLE did not appear"
+repair_client_workspace "$PORTRAIT_TAIL_TITLE" 2 || die "could not place $PORTRAIT_TAIL_TITLE on workspace 2"
+sleep 0.8
+assert_client_location "$PORTRAIT_TAIL_TITLE" 2 "$PORTRAIT_MONITOR_ID" "portrait tail placement"
+
+focus_monitor_workspace "$LANDSCAPE_MONITOR" 1
+focus_title "$LANDSCAPE_TAIL_TITLE" || die "$LANDSCAPE_TAIL_TITLE did not become active before movefocus r"
 log_step "dispatch landscape->portrait movefocus"
 hyprctl -i "$NESTED_INSTANCE" dispatch scroller:movefocus r >/dev/null
 sleep 0.6
@@ -815,19 +870,29 @@ sleep 0.6
 assert_active_monitor "$LANDSCAPE_MONITOR_ID" "portrait->landscape movefocus"
 
 focus_monitor_workspace "$LANDSCAPE_MONITOR" 1
-focus_title "$LANDSCAPE_EXTRA_TITLE" || die "$LANDSCAPE_EXTRA_TITLE did not become active before movewindow r"
+focus_title "$LANDSCAPE_TAIL_TITLE" || die "$LANDSCAPE_TAIL_TITLE did not become active before movewindow r"
 log_step "dispatch landscape->portrait movewindow"
 hyprctl -i "$NESTED_INSTANCE" dispatch scroller:movewindow r >/dev/null
 sleep 0.8
-assert_client_location "$LANDSCAPE_EXTRA_TITLE" 2 "$PORTRAIT_MONITOR_ID" "landscape->portrait movewindow"
-assert_client_fills_monitor "$LANDSCAPE_TITLE" "$LANDSCAPE_MONITOR" "landscape remaining window restores full page"
+assert_client_location "$LANDSCAPE_TAIL_TITLE" 2 "$PORTRAIT_MONITOR_ID" "landscape->portrait movewindow"
+assert_titles_visible_on_monitor "$LANDSCAPE_MONITOR" "landscape remaining pair stays visible after movewindow" \
+    "$LANDSCAPE_TITLE" "$LANDSCAPE_EXTRA_TITLE"
 
 focus_monitor_workspace "$PORTRAIT_MONITOR" 2
-focus_title "$LANDSCAPE_EXTRA_TITLE" || die "$LANDSCAPE_EXTRA_TITLE did not become active before movewindow l"
+focus_title "$LANDSCAPE_TAIL_TITLE" || die "$LANDSCAPE_TAIL_TITLE did not become active before movewindow l"
 log_step "dispatch portrait->landscape movewindow"
 hyprctl -i "$NESTED_INSTANCE" dispatch scroller:movewindow l >/dev/null
 sleep 0.8
-assert_client_location "$LANDSCAPE_EXTRA_TITLE" 1 "$LANDSCAPE_MONITOR_ID" "portrait->landscape movewindow"
+assert_client_location "$LANDSCAPE_TAIL_TITLE" 1 "$LANDSCAPE_MONITOR_ID" "portrait->landscape movewindow"
+
+focus_monitor_workspace "$PORTRAIT_MONITOR" 2
+focus_title "$PORTRAIT_TAIL_TITLE" || die "$PORTRAIT_TAIL_TITLE did not become active before portrait pair movewindow l"
+log_step "dispatch portrait tail out to validate portrait viewport settle"
+hyprctl -i "$NESTED_INSTANCE" dispatch scroller:movewindow l >/dev/null
+sleep 0.8
+assert_client_location "$PORTRAIT_TAIL_TITLE" 1 "$LANDSCAPE_MONITOR_ID" "portrait tail movewindow to landscape"
+assert_titles_visible_on_monitor "$PORTRAIT_MONITOR" "portrait remaining pair stays visible after movewindow" \
+    "$PORTRAIT_TITLE" "$PORTRAIT_EXTRA_TITLE"
 
 focus_monitor_workspace "$PORTRAIT_MONITOR" 2
 focus_title "$PORTRAIT_EXTRA_TITLE" || die "$PORTRAIT_EXTRA_TITLE did not become active before portrait restore movewindow l"

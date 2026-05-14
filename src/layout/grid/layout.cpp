@@ -448,7 +448,7 @@ void GridLayout::removeTarget(SP<Layout::ITarget> target) {
     windowsByKey.erase(key);
     model.remove_window(key);
     if (const auto profileMonitor = monitor ? monitor : resolve_monitor())
-        model.expand_single_item_to_page(current_profile(profileMonitor), viewport);
+        model.settle_after_removal(current_profile(profileMonitor), viewport);
     if (fullscreenKey && *fullscreenKey == key)
         fullscreenKey.reset();
     relayout(monitor ? monitor : resolve_monitor());
@@ -873,7 +873,7 @@ bool GridLayout::handoffMoveWindowAcrossMonitor(int workspace,
     const auto key = ScrollerCore::window_key(currentWindow);
     windowsByKey.erase(key);
     model.remove_window(key);
-    model.expand_single_item_to_page(current_profile(sourceMonitor), viewport);
+    model.settle_after_removal(current_profile(sourceMonitor), viewport);
     if (fullscreenKey && *fullscreenKey == key)
         fullscreenKey.reset();
     relayout(sourceMonitor);
