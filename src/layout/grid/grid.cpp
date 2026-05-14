@@ -69,6 +69,19 @@ int span_from_legacy_stack(const ScrollerSnapshot::StackSnapshot& stack, const G
     return span_from_extent(stack.geom.w, profile.unitWidth, 1, profile.visibleColumns);
 }
 
+int full_page_columns(const GridProfile& profile) {
+    return std::max(1, profile.visibleColumns);
+}
+
+int full_page_rows(const GridProfile& profile) {
+    return std::max(1, profile.visibleRows);
+}
+
+bool spans_full_visible_page(const GridItem& item, const GridProfile& profile) {
+    return item.columnSpan == full_page_columns(profile) &&
+           item.rowSpan == full_page_rows(profile);
+}
+
 } // namespace
 
 GridProfile profile_for_workarea(Mode mode, const ScrollerCore::Box& workarea) {
@@ -285,10 +298,22 @@ bool GridModel::add_window(uintptr_t key, const GridProfile& profile) {
         return false;
 
     GridItem item{.key = key};
-    if (const auto* active = active_item()) {
-        item.column = active->column;
-        item.row = active->row;
+    if (items.empty()) {
+        item.columnSpan = full_page_columns(profile);
+        item.rowSpan = full_page_rows(profile);
+    } else if (activeIndex && *activeIndex < items.size()) {
+        auto& active = items[*activeIndex];
+        if (items.size() == 1 && spans_full_visible_page(active, profile)) {
+            active.columnSpan = 1;
+            active.rowSpan = 1;
+        }
+
+        item.column = active.column;
+        item.row = active.row;
         advance_position_for_mode(profile.mode, item.column, item.row);
+        while (cell_range_occupied(item.column, item.row, item.columnSpan, item.rowSpan))
+            advance_position_for_mode(profile.mode, item.column, item.row);
+    } else {
         while (cell_range_occupied(item.column, item.row, item.columnSpan, item.rowSpan))
             advance_position_for_mode(profile.mode, item.column, item.row);
     }
@@ -315,6 +340,18 @@ bool GridModel::remove_window(uintptr_t key) {
         activeIndex = *activeIndex - 1;
     }
     return true;
+}
+
+void GridModel::expand_single_item_to_page(const GridProfile& profile, GridViewport& viewport) {
+    if (items.size() != 1)
+        return;
+
+    auto& item = items.front();
+    item.columnSpan = full_page_columns(profile);
+    item.rowSpan = full_page_rows(profile);
+    if (!activeIndex || *activeIndex >= items.size())
+        activeIndex = 0;
+    ensure_active_visible(profile, viewport);
 }
 
 bool GridModel::focus_window(uintptr_t key) {

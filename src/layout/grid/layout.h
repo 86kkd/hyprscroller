@@ -55,6 +55,7 @@ private:
     PHLMONITOR visible_monitor(PHLMONITOR fallback = nullptr) const;
     PHLWINDOW reference_window() const;
     PHLWINDOW active_window() const;
+    void sync_active_from_workspace_focus(PHLMONITOR fallbackMonitor);
     GridProfile current_profile(PHLMONITOR monitor) const;
     bool manage_window(PHLWINDOW window, PHLMONITOR monitor, bool focusNewWindow);
     void relayout(PHLMONITOR monitor);

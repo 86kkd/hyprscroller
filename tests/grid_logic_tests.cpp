@@ -36,7 +36,15 @@ void test_grid_inserts_along_orientation_axis() {
     ScrollerGrid::GridModel model;
     const auto row = ScrollerGrid::profile_for_workarea(Mode::Row, {0.0, 0.0, 1200.0, 800.0});
     expect_true(model.add_window(1, row), "grid inserts first row item");
+    const auto* rowFirstOnly = model.item_for_key(1);
+    expect_true(rowFirstOnly != nullptr, "grid stores first row item");
+    expect_eq(rowFirstOnly->columnSpan, 2, "first row item fills visible page width");
+    expect_eq(rowFirstOnly->rowSpan, 1, "first row item keeps visible page height");
+
     expect_true(model.add_window(2, row), "grid inserts second row item");
+    expect_eq(model.item_for_key(1)->columnSpan, 1, "second row item shrinks first row item to one unit");
+    expect_eq(model.item_for_key(1)->rowSpan, 1, "second row item keeps first row item one unit tall");
+
     expect_true(model.add_window(3, row), "grid inserts third row item");
 
     const auto* first = model.item_for_key(1);
@@ -50,11 +58,47 @@ void test_grid_inserts_along_orientation_axis() {
     ScrollerGrid::GridModel portraitModel;
     const auto column = ScrollerGrid::profile_for_workarea(Mode::Column, {0.0, 0.0, 800.0, 1200.0});
     expect_true(portraitModel.add_window(10, column), "grid inserts first column item");
+    const auto* portraitFirstOnly = portraitModel.item_for_key(10);
+    expect_true(portraitFirstOnly != nullptr, "grid stores first column item");
+    expect_eq(portraitFirstOnly->columnSpan, 1, "first column item keeps visible page width");
+    expect_eq(portraitFirstOnly->rowSpan, 2, "first column item fills visible page height");
+
     expect_true(portraitModel.add_window(11, column), "grid inserts second column item");
+    expect_eq(portraitModel.item_for_key(10)->columnSpan, 1, "second column item keeps first column item one unit wide");
+    expect_eq(portraitModel.item_for_key(10)->rowSpan, 1, "second column item shrinks first column item to one unit");
+
     const auto* portraitSecond = portraitModel.item_for_key(11);
     expect_true(portraitSecond != nullptr, "grid stores second column item");
     expect_eq(portraitSecond->column, 0, "column grid keeps same column");
     expect_eq(portraitSecond->row, 1, "column grid advances rows");
+}
+
+void test_grid_restores_single_remaining_item_to_full_page() {
+    ScrollerGrid::GridModel model;
+    const auto row = ScrollerGrid::profile_for_workarea(Mode::Row, {0.0, 0.0, 1200.0, 800.0});
+    ScrollerGrid::GridViewport viewport;
+
+    model.add_window(1, row);
+    model.add_window(2, row);
+    expect_eq(model.item_for_key(1)->columnSpan, 1, "second row window shrinks first row item before removal");
+    expect_true(model.remove_window(2), "grid removes second row item");
+    model.expand_single_item_to_page(row, viewport);
+    expect_eq(model.item_for_key(1)->columnSpan, 2, "remaining row item restores full page width");
+    expect_eq(model.item_for_key(1)->rowSpan, 1, "remaining row item keeps full page height");
+    expect_eq(viewport.originColumn, 0, "row viewport returns to full-page origin");
+
+    ScrollerGrid::GridModel portraitModel;
+    const auto column = ScrollerGrid::profile_for_workarea(Mode::Column, {0.0, 0.0, 800.0, 1200.0});
+    ScrollerGrid::GridViewport portraitViewport;
+
+    portraitModel.add_window(10, column);
+    portraitModel.add_window(11, column);
+    expect_eq(portraitModel.item_for_key(10)->rowSpan, 1, "second column window shrinks first column item before removal");
+    expect_true(portraitModel.remove_window(11), "grid removes second column item");
+    portraitModel.expand_single_item_to_page(column, portraitViewport);
+    expect_eq(portraitModel.item_for_key(10)->columnSpan, 1, "remaining column item keeps full page width");
+    expect_eq(portraitModel.item_for_key(10)->rowSpan, 2, "remaining column item restores full page height");
+    expect_eq(portraitViewport.originRow, 0, "column viewport returns to full-page origin");
 }
 
 void test_move_focus_scrolls_viewport_to_active_item() {
@@ -132,17 +176,17 @@ void test_resize_align_and_page_move() {
 
     model.add_window(1, profile);
     expect_eq(model.resize_active_item(1, profile, viewport), ScrollerGrid::GridMoveResult::Moved,
-              "grid resize grows active item by one visible unit");
-    expect_eq(model.item_for_key(1)->columnSpan, 2, "grid resize updates row span along columns");
+              "grid resize cycles full-page active item to one visible unit");
+    expect_eq(model.item_for_key(1)->columnSpan, 1, "grid resize wraps row span along columns");
 
     expect_eq(model.align_active(Direction::Right, profile, viewport), ScrollerGrid::GridMoveResult::Moved,
               "grid align can pin active item to viewport end");
-    expect_eq(viewport.originColumn, 0, "full-width active item aligns to viewport origin");
+    expect_eq(viewport.originColumn, -1, "one-unit active item aligns to viewport end");
 
     expect_eq(model.move_active_window_to_page(Direction::Right, profile, viewport), ScrollerGrid::GridMoveResult::Moved,
               "grid page move sends active item by one viewport page");
     expect_eq(model.item_for_key(1)->column, 2, "grid page move advances by two half-screen cells");
-    expect_eq(viewport.originColumn, 2, "grid viewport follows page-moved active item");
+    expect_eq(viewport.originColumn, 1, "grid viewport keeps page-moved active item visible");
 }
 
 void test_grid_snapshot_restore_filters_missing_items() {
@@ -228,6 +272,7 @@ void test_hidden_boxes_keep_waybar_reserved_gap() {
 void run_grid_logic_tests() {
     test_grid_profiles_use_half_screen_units();
     test_grid_inserts_along_orientation_axis();
+    test_grid_restores_single_remaining_item_to_full_page();
     test_move_focus_scrolls_viewport_to_active_item();
     test_move_focus_can_move_empty_viewport_space();
     test_move_active_window_moves_or_swaps_grid_cells();

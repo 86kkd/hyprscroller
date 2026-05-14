@@ -181,6 +181,23 @@ PHLWINDOW GridLayout::active_window() const {
     return it == windowsByKey.end() ? nullptr : it->second;
 }
 
+void GridLayout::sync_active_from_workspace_focus(PHLMONITOR fallbackMonitor) {
+    const auto currentWorkspace = workspace();
+    if (!currentWorkspace)
+        return;
+
+    const auto focusedWindow = currentWorkspace->getLastFocusedWindow();
+    if (!focusedWindow || focusedWindow->workspaceID() != currentWorkspace->m_id)
+        return;
+
+    const auto key = ScrollerCore::window_key(focusedWindow);
+    if (!model.contains(key) || !model.focus_window(key))
+        return;
+
+    const auto monitor = visible_monitor(g_pCompositor->getMonitorFromID(focusedWindow->monitorID()));
+    model.ensure_active_visible(current_profile(monitor ? monitor : fallbackMonitor), viewport);
+}
+
 GridProfile GridLayout::current_profile(PHLMONITOR monitor) const {
     if (!monitor)
         return {};
@@ -430,6 +447,8 @@ void GridLayout::removeTarget(SP<Layout::ITarget> target) {
     const auto key = ScrollerCore::window_key(window);
     windowsByKey.erase(key);
     model.remove_window(key);
+    if (const auto profileMonitor = monitor ? monitor : resolve_monitor())
+        model.expand_single_item_to_page(current_profile(profileMonitor), viewport);
     if (fullscreenKey && *fullscreenKey == key)
         fullscreenKey.reset();
     relayout(monitor ? monitor : resolve_monitor());
@@ -491,6 +510,7 @@ void GridLayout::moveTargetInDirection(SP<Layout::ITarget> target, Math::eDirect
         (void)model.focus_window(ScrollerCore::window_key(window));
 
     const auto monitor = resolve_monitor();
+    sync_active_from_workspace_focus(monitor);
     const auto profile = current_profile(monitor);
     (void)model.move_focus(*parsed, profile, viewport, focus_wrap_enabled());
     relayout(monitor);
@@ -502,6 +522,7 @@ void GridLayout::move_focus(int workspace, Direction direction) {
     (void)maybeRestoreWorkspaceSnapshot();
 
     const auto monitor = resolve_monitor();
+    sync_active_from_workspace_focus(monitor);
     const auto profile = current_profile(monitor);
     const auto before = active_window();
     const auto sourceMonitor = before ? g_pCompositor->getMonitorFromID(before->monitorID()) : monitor;
@@ -528,6 +549,7 @@ void GridLayout::move_window(int workspace, Direction direction) {
     (void)maybeRestoreWorkspaceSnapshot();
 
     const auto monitor = resolve_monitor();
+    sync_active_from_workspace_focus(monitor);
     const auto profile = current_profile(monitor);
     const auto currentWindow = active_window();
     const auto sourceMonitor = currentWindow ? g_pCompositor->getMonitorFromID(currentWindow->monitorID()) : monitor;
@@ -550,6 +572,7 @@ void GridLayout::cycle_window_size(int workspace, int step) {
     ensure_workspace_runtime();
 
     const auto monitor = resolve_monitor();
+    sync_active_from_workspace_focus(monitor);
     const auto profile = current_profile(monitor);
     if (model.resize_active_item(step, profile, viewport) != GridMoveResult::Moved)
         return;
@@ -563,6 +586,7 @@ void GridLayout::align_window(int workspace, Direction direction) {
     ensure_workspace_runtime();
 
     const auto monitor = resolve_monitor();
+    sync_active_from_workspace_focus(monitor);
     const auto profile = current_profile(monitor);
     if (model.align_active(direction, profile, viewport) != GridMoveResult::Moved)
         return;
@@ -600,6 +624,7 @@ void GridLayout::fit_size(int workspace, FitSize fitSize) {
     ensure_workspace_runtime();
 
     const auto monitor = resolve_monitor();
+    sync_active_from_workspace_focus(monitor);
     const auto profile = current_profile(monitor);
     auto columnSpan = 1;
     auto rowSpan = 1;
@@ -618,6 +643,7 @@ void GridLayout::fit_size(int workspace, FitSize fitSize) {
 void GridLayout::toggle_fullscreen(int workspace) {
     (void)workspace;
     ensure_workspace_runtime();
+    sync_active_from_workspace_focus(resolve_monitor());
 
     const auto* active = model.active_item();
     if (!active)
@@ -637,6 +663,7 @@ void GridLayout::create_lane(int workspace, Direction direction) {
     ensure_workspace_runtime();
 
     const auto monitor = resolve_monitor();
+    sync_active_from_workspace_focus(monitor);
     const auto profile = current_profile(monitor);
     if (model.move_active_window_to_page(direction, profile, viewport) != GridMoveResult::Moved)
         return;
@@ -846,6 +873,7 @@ bool GridLayout::handoffMoveWindowAcrossMonitor(int workspace,
     const auto key = ScrollerCore::window_key(currentWindow);
     windowsByKey.erase(key);
     model.remove_window(key);
+    model.expand_single_item_to_page(current_profile(sourceMonitor), viewport);
     if (fullscreenKey && *fullscreenKey == key)
         fullscreenKey.reset();
     relayout(sourceMonitor);

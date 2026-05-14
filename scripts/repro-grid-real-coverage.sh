@@ -22,6 +22,8 @@ usage() {
 Usage: scripts/repro-grid-real-coverage.sh [options]
 
 Options:
+  --outer-monitor NAME   Place the floating nested Hyprland window on NAME.
+  --window-size WxH      Outer floating window size. Default: 1800x1400.
   --plugin PATH    Plugin .so to load. Default: ./Debug/hyprscroller.so.
   --keep-open      Leave the nested Hyprland instance running after setup.
   -h, --help       Show this help text.
@@ -40,6 +42,14 @@ quote_command() {
     local quoted
     printf -v quoted '%q ' "$@"
     printf '%s' "${quoted% }"
+}
+
+detect_outer_monitor() {
+    hyprctl monitors -j | jq -r '
+        (map(select((.transform % 2) == 1)) | .[0].name) //
+        (map(select(.focused)) | .[0].name) //
+        empty
+    '
 }
 
 pick_terminal_kind() {
@@ -115,6 +125,21 @@ wait_for_nested_monitor_count() {
         fi
         sleep 0.25
     done
+    return 1
+}
+
+wait_for_monitor_usable() {
+    local monitor="$1"
+
+    for ((attempt = 0; attempt < 100; ++attempt)); do
+        if hyprctl -i "$NESTED_INSTANCE" monitors -j | jq -e --arg monitor "$monitor" '
+            any(.[]; .name == $monitor and ((.width // 0) > 0) and ((.height // 0) > 0))
+        ' >/dev/null; then
+            return 0
+        fi
+        sleep 0.25
+    done
+
     return 1
 }
 
@@ -215,7 +240,13 @@ focus_monitor_workspace() {
 focus_title() {
     local title="$1"
     hyprctl -i "$NESTED_INSTANCE" dispatch focuswindow "title:^${title}$" >/dev/null
-    sleep 0.25
+    for ((attempt = 0; attempt < 40; ++attempt)); do
+        if [[ "$(active_window_title)" == "$title" ]]; then
+            return 0
+        fi
+        sleep 0.1
+    done
+    return 1
 }
 
 active_window_title() {
@@ -240,8 +271,8 @@ monitor_logical_field() {
     monitor_json "$monitor" | jq -r --arg field "$field" '
         if $field == "x" then .x
         elif $field == "y" then .y
-        elif $field == "w" then (if (.transform % 2) == 1 then ([.width, .height] | min) else .width end)
-        elif $field == "h" then (if (.transform % 2) == 1 then ([.width, .height] | max) else .height end)
+        elif $field == "w" then (if (.transform % 2) == 1 then .height else .width end)
+        elif $field == "h" then (if (.transform % 2) == 1 then .width else .height end)
         else empty end
     '
 }
@@ -249,7 +280,7 @@ monitor_logical_field() {
 monitor_coordinate_width() {
     local monitor="$1"
     monitor_json "$monitor" | jq -r '
-        if (.transform % 2) == 1 then ([.width, .height] | max) else .width end
+        if (.transform % 2) == 1 then .height else .width end
     '
 }
 
@@ -364,7 +395,7 @@ assert_fullscreen_expands_and_restores() {
     local label="$2"
     local before_title fullscreen_title restored_title fit_title
 
-    focus_title "$title"
+    focus_title "$title" || die "$label: could not focus '$title'"
     before_title="$(active_window_title)"
     [[ -n "$before_title" ]] || die "$label: active window was empty before fullscreen"
 
@@ -399,7 +430,10 @@ assert_all_titles_present() {
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PLUGIN_PATH="$REPO_ROOT/Debug/hyprscroller.so"
+WINDOW_WIDTH=1800
+WINDOW_HEIGHT=1400
 KEEP_OPEN=0
+OUTER_MONITOR=""
 NESTED_INSTANCE=""
 NESTED_PID=""
 TERMINAL_KIND=""
@@ -426,6 +460,18 @@ trap cleanup EXIT INT TERM
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --outer-monitor)
+            [[ $# -ge 2 ]] || die "--outer-monitor requires a value"
+            OUTER_MONITOR="$2"
+            shift 2
+            ;;
+        --window-size)
+            [[ $# -ge 2 ]] || die "--window-size requires a value like 1800x1400"
+            WINDOW_WIDTH="${2%x*}"
+            WINDOW_HEIGHT="${2#*x}"
+            [[ "$WINDOW_WIDTH" =~ ^[0-9]+$ && "$WINDOW_HEIGHT" =~ ^[0-9]+$ ]] || die "invalid --window-size: $2"
+            shift 2
+            ;;
         --plugin)
             [[ $# -ge 2 ]] || die "--plugin requires a path"
             PLUGIN_PATH="$2"
@@ -449,17 +495,24 @@ require_cmd Hyprland
 require_cmd hyprctl
 require_cmd jq
 require_cmd waybar
+require_cmd realpath
 
 [[ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]] || die "run this inside an existing Hyprland session"
 [[ -f "$PLUGIN_PATH" ]] || die "plugin not found: $PLUGIN_PATH"
+PLUGIN_PATH="$(realpath "$PLUGIN_PATH")"
 
 pick_terminal_kind
+if [[ -z "$OUTER_MONITOR" ]]; then
+    OUTER_MONITOR="$(detect_outer_monitor)"
+    [[ -n "$OUTER_MONITOR" ]] || die "could not auto-detect an outer monitor"
+fi
 
 RUN_DIR="$(mktemp -d /tmp/hyprscroller-grid-real-coverage.XXXXXX)"
 CONFIG_PATH="$RUN_DIR/hyprland.conf"
 WAYBAR_CONFIG_PATH="$RUN_DIR/waybar.json"
 WAYBAR_STYLE_PATH="$RUN_DIR/waybar.css"
 LOG_PATH="$RUN_DIR/hyprland.log"
+LAUNCHER_PATH="$RUN_DIR/launch-nested.sh"
 SUMMARY_PATH="$RUN_DIR/summary.txt"
 RESULT_PATH="$RUN_DIR/result.txt"
 
@@ -489,6 +542,10 @@ misc {
 
 input {
     kb_layout = us
+}
+
+cursor {
+    no_hardware_cursors = true
 }
 
 debug {
@@ -525,9 +582,15 @@ window#waybar {
 }
 EOF
 
+cat >"$LAUNCHER_PATH" <<EOF
+#!/usr/bin/env bash
+exec Hyprland -c "$CONFIG_PATH" >"$LOG_PATH" 2>&1
+EOF
+chmod +x "$LAUNCHER_PATH"
+
 BEFORE_MAX_TIME="$(hyprctl instances -j | jq '[.[].time] | max // 0')"
-Hyprland -c "$CONFIG_PATH" >"$LOG_PATH" 2>&1 &
-NESTED_PID=$!
+LAUNCH_RULES="[monitor $OUTER_MONITOR; float; size $WINDOW_WIDTH $WINDOW_HEIGHT; center]"
+hyprctl dispatch exec "$LAUNCH_RULES $LAUNCHER_PATH" >/dev/null
 
 for ((attempt = 0; attempt < 80; ++attempt)); do
     NESTED_INSTANCE="$(hyprctl instances -j | jq -r --argjson before "$BEFORE_MAX_TIME" '
@@ -540,26 +603,19 @@ done
 [[ -n "$NESTED_INSTANCE" ]] || die "failed to detect nested instance"
 wait_for_nested_ready || die "nested Hyprland never became ready"
 
-hyprctl -i "$NESTED_INSTANCE" output create wayland >/dev/null
-wait_for_nested_monitor_count 2 || die "timed out waiting for second nested monitor"
-
 SOURCE_MONITOR="$(hyprctl -i "$NESTED_INSTANCE" monitors -j | jq -r 'sort_by(.id) | .[0].name')"
-TARGET_MONITOR="$(hyprctl -i "$NESTED_INSTANCE" monitors -j | jq -r 'sort_by(.id) | .[1].name')"
-[[ -n "$SOURCE_MONITOR" && -n "$TARGET_MONITOR" ]] || die "could not resolve nested monitor names"
+[[ -n "$SOURCE_MONITOR" ]] || die "could not resolve nested monitor name"
+wait_for_monitor_usable "$SOURCE_MONITOR" || die "nested monitor never reported non-zero geometry"
 
-hyprctl -i "$NESTED_INSTANCE" keyword monitor "$SOURCE_MONITOR,1280x800@60,0x0,1,transform,1" >/dev/null
+hyprctl -i "$NESTED_INSTANCE" keyword monitor "$SOURCE_MONITOR,${WINDOW_WIDTH}x${WINDOW_HEIGHT}@60,0x0,1,transform,1" >/dev/null
+wait_for_monitor_usable "$SOURCE_MONITOR" || die "portrait monitor never reported non-zero geometry"
 sleep 0.5
-TARGET_MONITOR_X=$(( $(monitor_logical_field "$SOURCE_MONITOR" x) + $(monitor_coordinate_width "$SOURCE_MONITOR") + 20 ))
-hyprctl -i "$NESTED_INSTANCE" keyword monitor "$TARGET_MONITOR,1280x800@60,${TARGET_MONITOR_X}x0,1,transform,0" >/dev/null
-sleep 1
 
 assert_monitor_portrait "$SOURCE_MONITOR" "portrait monitor transform"
 
 launch_nested_exec waybar -c "$WAYBAR_CONFIG_PATH" -s "$WAYBAR_STYLE_PATH"
 wait_for_waybar_reserved "$SOURCE_MONITOR" $(( WAYBAR_HEIGHT - 8 )) \
     || die "Waybar did not reserve the portrait monitor workarea"
-wait_for_waybar_reserved "$TARGET_MONITOR" $(( WAYBAR_HEIGHT - 8 )) \
-    || die "Waybar did not reserve the target monitor workarea"
 assert_ok "real Waybar reserved area"
 
 focus_monitor_workspace "$SOURCE_MONITOR" 1
@@ -570,7 +626,7 @@ for title in grid-real-a grid-real-b grid-real-c; do
 done
 sleep 1
 
-focus_title grid-real-c
+focus_title grid-real-c || die "could not focus grid-real-c"
 hyprctl -i "$NESTED_INSTANCE" dispatch scroller:movefocus u >/dev/null
 sleep 0.4
 hyprctl -i "$NESTED_INSTANCE" dispatch scroller:movefocus d >/dev/null
@@ -601,10 +657,9 @@ assert_ok "grid overview open and accept"
     printf 'waybar style:          %s\n' "$WAYBAR_STYLE_PATH"
     printf 'nested log:            %s\n' "$LOG_PATH"
     printf 'run dir:               %s\n' "$RUN_DIR"
+    printf 'outer monitor:         %s\n' "$OUTER_MONITOR"
     printf 'portrait monitor:      %s\n' "$SOURCE_MONITOR"
-    printf 'target monitor:        %s\n' "$TARGET_MONITOR"
     printf 'portrait reserved max: %s\n' "$(monitor_reserved_max "$SOURCE_MONITOR")"
-    printf 'target reserved max:   %s\n' "$(monitor_reserved_max "$TARGET_MONITOR")"
 } >"$RESULT_PATH"
 
 cat "$RESULT_PATH"

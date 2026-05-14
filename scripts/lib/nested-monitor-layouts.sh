@@ -22,6 +22,22 @@ hyprscroller_five_outer_titles() {
     )
 }
 
+hyprscroller_two_orientation_monitor_names() {
+    local -n out_ref="$1"
+    out_ref=(
+        "WAYLAND-1"
+        "WAYLAND-2"
+    )
+}
+
+hyprscroller_two_orientation_outer_titles() {
+    local -n out_ref="$1"
+    out_ref=(
+        "aquamarine - WAYLAND-1"
+        "aquamarine - WAYLAND-2"
+    )
+}
+
 hyprscroller_monitor_logical_geometry() {
     local monitor_json="$1"
     local -n out_x_ref="$2"
@@ -98,6 +114,84 @@ hyprscroller_compute_five_monitor_outer_layout() {
 
     local available_width=$(( outer_monitor_width - (2 * layout_margin) ))
     local available_height=$(( outer_monitor_height - (2 * layout_margin) - layout_gap ))
+
+    (( available_width > 0 && available_height > 0 )) || return 1
+
+    local scale_num="$available_width"
+    local scale_den="$total_base_width"
+    if (( available_height * scale_den < scale_num * total_base_height )); then
+        scale_num="$available_height"
+        scale_den="$total_base_height"
+    fi
+
+    scale_num=$(( scale_num * layout_scale_percent ))
+    scale_den=$(( scale_den * 100 ))
+
+    local total_scaled_width=$(( (total_base_width * scale_num) / scale_den ))
+    local total_scaled_height=$(( (total_base_height * scale_num) / scale_den ))
+    local outer_origin_x=$(( (outer_monitor_width - total_scaled_width) / 2 ))
+    local outer_origin_y=$(( (outer_monitor_height - total_scaled_height) / 2 ))
+    local index
+
+    out_xs_ref=()
+    out_ys_ref=()
+    out_widths_ref=()
+    out_heights_ref=()
+
+    for index in "${!base_widths[@]}"; do
+        out_widths_ref[$index]=$(( (base_widths[$index] * scale_num) / scale_den ))
+        out_heights_ref[$index]=$(( (base_heights[$index] * scale_num) / scale_den ))
+        out_xs_ref[$index]=$(( outer_origin_x + ((base_xs[$index] * scale_num) / scale_den) ))
+        out_ys_ref[$index]=$(( outer_origin_y + ((base_ys[$index] * scale_num) / scale_den) ))
+
+        (( out_widths_ref[$index] > 0 && out_heights_ref[$index] > 0 )) || return 1
+    done
+}
+
+hyprscroller_compute_two_orientation_outer_layout() {
+    local outer_monitor_json="$1"
+    local landscape_width="$2"
+    local landscape_height="$3"
+    local layout_margin="$4"
+    local layout_gap="$5"
+    local layout_scale_percent="$6"
+    local -n out_xs_ref="$7"
+    local -n out_ys_ref="$8"
+    local -n out_widths_ref="$9"
+    local -n out_heights_ref="${10}"
+
+    local outer_monitor_x=0
+    local outer_monitor_y=0
+    local outer_monitor_width=0
+    local outer_monitor_height=0
+    local total_base_width=$(( landscape_width + layout_gap + landscape_width ))
+    local total_base_height="$landscape_height"
+    local base_widths=(
+        "$landscape_width"
+        "$landscape_width"
+    )
+    local base_heights=(
+        "$landscape_height"
+        "$landscape_height"
+    )
+    local base_xs=(
+        0
+        "$(( landscape_width + layout_gap ))"
+    )
+    local base_ys=(
+        0
+        0
+    )
+
+    hyprscroller_monitor_logical_geometry \
+        "$outer_monitor_json" \
+        outer_monitor_x \
+        outer_monitor_y \
+        outer_monitor_width \
+        outer_monitor_height
+
+    local available_width=$(( outer_monitor_width - (2 * layout_margin) ))
+    local available_height=$(( outer_monitor_height - (2 * layout_margin) ))
 
     (( available_width > 0 && available_height > 0 )) || return 1
 
@@ -445,4 +539,17 @@ hyprscroller_apply_five_monitor_cross_layout() {
         "WAYLAND-4,${landscape_width}x${landscape_height}@60,${right_x}x${side_y},1,transform,1" >/dev/null
     hyprctl -i "$instance" keyword monitor \
         "WAYLAND-5,${landscape_width}x${landscape_height}@60,${middle_x}x${bottom_y},1,transform,0" >/dev/null
+}
+
+hyprscroller_apply_two_orientation_layout() {
+    local instance="$1"
+    local landscape_width="$2"
+    local landscape_height="$3"
+    local gap="${4:-20}"
+    local right_x=$(( landscape_width + gap ))
+
+    hyprctl -i "$instance" keyword monitor \
+        "WAYLAND-1,${landscape_width}x${landscape_height}@60,0x0,1,transform,0" >/dev/null
+    hyprctl -i "$instance" keyword monitor \
+        "WAYLAND-2,${landscape_width}x${landscape_height}@60,${right_x}x0,1,transform,1" >/dev/null
 }
