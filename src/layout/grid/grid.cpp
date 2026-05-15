@@ -152,6 +152,18 @@ ScrollerCore::Box grid_item_logical_box(const GridItem& item,
     };
 }
 
+ScrollerCore::Box apply_window_border_inset(const ScrollerCore::Box& box, double border) {
+    if (border <= 0.0)
+        return box;
+
+    return {
+        box.x + border,
+        box.y + border,
+        std::max(1.0, box.w - 2.0 * border),
+        std::max(1.0, box.h - 2.0 * border),
+    };
+}
+
 RenderedGridItem render_grid_item(const GridItem& item,
                                   const GridViewport& viewport,
                                   const GridProfile& profile,

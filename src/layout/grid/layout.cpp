@@ -251,7 +251,9 @@ void GridLayout::relayout(PHLMONITOR monitor) {
         if (it == windowsByKey.end() || !it->second)
             continue;
 
-        const auto box = fullscreenKey && *fullscreenKey == item.key ? bounds.max : item.committedBox;
+        const auto box = fullscreenKey && *fullscreenKey == item.key
+            ? bounds.max
+            : apply_window_border_inset(item.committedBox, it->second->getRealBorderSize());
         it->second->m_position = {box.x, box.y};
         it->second->m_size = {box.w, box.h};
         sync_window_target_geometry(it->second);
@@ -796,9 +798,12 @@ CanvasOverviewSnapshot GridLayout::buildOverviewSnapshot() const {
         if (it == windowsByKey.end() || !it->second)
             continue;
 
+        const auto box = fullscreenKey && *fullscreenKey == item.key
+            ? bounds.max
+            : apply_window_border_inset(item.logicalBox, it->second->getRealBorderSize());
         snapshot.windows.push_back({
             .window = it->second,
-            .box = item.logicalBox,
+            .box = box,
         });
     }
 

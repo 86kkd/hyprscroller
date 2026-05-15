@@ -307,6 +307,12 @@ void test_grid_render_applies_inner_gaps() {
     expect_eq(rowRendered.size(), static_cast<size_t>(2), "row grid renders both windows with gaps");
     expect_box_near(rowRendered[0].committedBox, {0.0, 0.0, 592.0, 800.0}, "row first item keeps left page edge");
     expect_box_near(rowRendered[1].committedBox, {608.0, 0.0, 592.0, 800.0}, "row second item keeps right page edge");
+    expect_box_near(ScrollerGrid::apply_window_border_inset(rowRendered[0].committedBox, 2.0),
+                    {2.0, 2.0, 588.0, 796.0},
+                    "row first item applies border inset");
+    expect_box_near(ScrollerGrid::apply_window_border_inset(rowRendered[1].committedBox, 2.0),
+                    {610.0, 2.0, 588.0, 796.0},
+                    "row second item applies border inset");
 
     ScrollerGrid::GridModel singleRowModel;
     singleRowModel.add_window(3, rowProfile);
@@ -323,6 +329,12 @@ void test_grid_render_applies_inner_gaps() {
     expect_eq(columnRendered.size(), static_cast<size_t>(2), "column grid renders both windows with gaps");
     expect_box_near(columnRendered[0].committedBox, {0.0, 0.0, 800.0, 592.0}, "column first item keeps top page edge");
     expect_box_near(columnRendered[1].committedBox, {0.0, 608.0, 800.0, 592.0}, "column second item keeps bottom page edge");
+    expect_box_near(ScrollerGrid::apply_window_border_inset(columnRendered[0].committedBox, 2.0),
+                    {2.0, 2.0, 796.0, 588.0},
+                    "column first item applies border inset");
+    expect_box_near(ScrollerGrid::apply_window_border_inset(columnRendered[1].committedBox, 2.0),
+                    {2.0, 610.0, 796.0, 588.0},
+                    "column second item applies border inset");
 }
 
 } // namespace

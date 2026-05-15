@@ -662,7 +662,7 @@ sleep 0.4
 hyprctl -i "$NESTED_INSTANCE" dispatch scroller:movefocus d >/dev/null
 sleep 0.4
 
-assert_column_grid_inner_gap "$GRID_VISIBLE_GAP_TITLES_JSON" "$SOURCE_MONITOR" 6 "grid honors gaps_in between visible windows"
+assert_column_grid_inner_gap "$GRID_VISIBLE_GAP_TITLES_JSON" "$SOURCE_MONITOR" 10 "grid honors gaps_in and borders between visible windows"
 assert_any_title_respects_workarea "$GRID_TITLES_JSON" "$SOURCE_MONITOR" "visible grid window avoids Waybar"
 assert_any_title_offscreen "$SOURCE_MONITOR" "$GRID_TITLES_JSON" "grid offscreen commit exercised"
 assert_titles_avoid_top_reserved_strip "$SOURCE_MONITOR" "$GRID_TITLES_JSON" "grid offscreen windows avoid Waybar"

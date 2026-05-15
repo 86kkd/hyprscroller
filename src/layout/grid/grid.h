@@ -50,6 +50,8 @@ ScrollerCore::Box grid_item_logical_box(const GridItem& item,
                                         const GridProfile& profile,
                                         const ScrollerCore::Box& workarea);
 
+ScrollerCore::Box apply_window_border_inset(const ScrollerCore::Box& box, double border);
+
 RenderedGridItem render_grid_item(const GridItem& item,
                                   const GridViewport& viewport,
                                   const GridProfile& profile,
