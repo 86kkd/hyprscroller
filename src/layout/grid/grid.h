@@ -54,7 +54,8 @@ RenderedGridItem render_grid_item(const GridItem& item,
                                   const GridViewport& viewport,
                                   const GridProfile& profile,
                                   const ScrollerCore::Box& fullBox,
-                                  const ScrollerCore::Box& workareaBox);
+                                  const ScrollerCore::Box& workareaBox,
+                                  double gap = 0.0);
 
 ScrollerSnapshot::GridSnapshot migrate_legacy_snapshot_to_grid(const ScrollerSnapshot::CanvasSnapshot& snapshot,
                                                                const GridProfile& profile);
@@ -106,7 +107,8 @@ public:
     std::vector<RenderedGridItem> render(const GridViewport& viewport,
                                          const GridProfile& profile,
                                          const ScrollerCore::Box& fullBox,
-                                         const ScrollerCore::Box& workareaBox) const;
+                                         const ScrollerCore::Box& workareaBox,
+                                         double gap = 0.0) const;
 
 private:
     std::optional<size_t> index_for_key(uintptr_t key) const;

@@ -82,6 +82,32 @@ bool spans_full_visible_page(const GridItem& item, const GridProfile& profile) {
            item.rowSpan == full_page_rows(profile);
 }
 
+ScrollerCore::Box apply_viewport_gaps(const ScrollerCore::Box& box,
+                                      const GridItem& item,
+                                      const GridViewport& viewport,
+                                      const GridProfile& profile,
+                                      double gap) {
+    if (gap <= 0.0)
+        return box;
+
+    const auto viewportColumnEnd = viewport.originColumn + std::max(1, profile.visibleColumns);
+    const auto viewportRowEnd = viewport.originRow + std::max(1, profile.visibleRows);
+    const auto itemColumnEnd = item.column + std::max(1, item.columnSpan);
+    const auto itemRowEnd = item.row + std::max(1, item.rowSpan);
+
+    const auto leftGap = item.column > viewport.originColumn ? gap : 0.0;
+    const auto rightGap = itemColumnEnd < viewportColumnEnd ? gap : 0.0;
+    const auto topGap = item.row > viewport.originRow ? gap : 0.0;
+    const auto bottomGap = itemRowEnd < viewportRowEnd ? gap : 0.0;
+
+    return {
+        box.x + leftGap,
+        box.y + topGap,
+        std::max(1.0, box.w - leftGap - rightGap),
+        std::max(1.0, box.h - topGap - bottomGap),
+    };
+}
+
 void clamp_viewport_axis_to_occupied_range(int minStart, int maxEnd, int visibleCells, int& origin) {
     visibleCells = std::max(1, visibleCells);
     const auto maxOrigin = std::max(minStart, maxEnd - visibleCells);
@@ -130,8 +156,13 @@ RenderedGridItem render_grid_item(const GridItem& item,
                                   const GridViewport& viewport,
                                   const GridProfile& profile,
                                   const ScrollerCore::Box& fullBox,
-                                  const ScrollerCore::Box& workareaBox) {
-    const auto logical = grid_item_logical_box(item, viewport, profile, workareaBox);
+                                  const ScrollerCore::Box& workareaBox,
+                                  double gap) {
+    const auto logical = apply_viewport_gaps(grid_item_logical_box(item, viewport, profile, workareaBox),
+                                             item,
+                                             viewport,
+                                             profile,
+                                             gap);
     const auto pageBox = ScrollerCore::project_box_to_workarea_page(logical, fullBox, workareaBox);
     return {
         .key = item.key,
@@ -650,11 +681,12 @@ GridMoveResult GridModel::align_active(Direction direction,
 std::vector<RenderedGridItem> GridModel::render(const GridViewport& viewport,
                                                 const GridProfile& profile,
                                                 const ScrollerCore::Box& fullBox,
-                                                const ScrollerCore::Box& workareaBox) const {
+                                                const ScrollerCore::Box& workareaBox,
+                                                double gap) const {
     std::vector<RenderedGridItem> rendered;
     rendered.reserve(items.size());
     for (const auto& item : items)
-        rendered.push_back(render_grid_item(item, viewport, profile, fullBox, workareaBox));
+        rendered.push_back(render_grid_item(item, viewport, profile, fullBox, workareaBox, gap));
     return rendered;
 }
 

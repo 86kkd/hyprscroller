@@ -295,6 +295,36 @@ void test_hidden_boxes_keep_waybar_reserved_gap() {
     expect_box_near(leftRendered.committedBox, {-936.0, 0.0, 936.0, 1080.0}, "committed hidden left box");
 }
 
+void test_grid_render_applies_inner_gaps() {
+    const ScrollerCore::Box landscape{0.0, 0.0, 1200.0, 800.0};
+    const auto rowProfile = ScrollerGrid::profile_for_workarea(Mode::Row, landscape);
+    ScrollerGrid::GridViewport viewport;
+    ScrollerGrid::GridModel rowModel;
+    rowModel.add_window(1, rowProfile);
+    rowModel.add_window(2, rowProfile);
+
+    const auto rowRendered = rowModel.render(viewport, rowProfile, landscape, landscape, 8.0);
+    expect_eq(rowRendered.size(), static_cast<size_t>(2), "row grid renders both windows with gaps");
+    expect_box_near(rowRendered[0].committedBox, {0.0, 0.0, 592.0, 800.0}, "row first item keeps left page edge");
+    expect_box_near(rowRendered[1].committedBox, {608.0, 0.0, 592.0, 800.0}, "row second item keeps right page edge");
+
+    ScrollerGrid::GridModel singleRowModel;
+    singleRowModel.add_window(3, rowProfile);
+    const auto singleRendered = singleRowModel.render(viewport, rowProfile, landscape, landscape, 8.0);
+    expect_box_near(singleRendered[0].committedBox, landscape, "single full-page row item keeps full workarea");
+
+    const ScrollerCore::Box portrait{0.0, 0.0, 800.0, 1200.0};
+    const auto columnProfile = ScrollerGrid::profile_for_workarea(Mode::Column, portrait);
+    ScrollerGrid::GridModel columnModel;
+    columnModel.add_window(10, columnProfile);
+    columnModel.add_window(11, columnProfile);
+
+    const auto columnRendered = columnModel.render(viewport, columnProfile, portrait, portrait, 8.0);
+    expect_eq(columnRendered.size(), static_cast<size_t>(2), "column grid renders both windows with gaps");
+    expect_box_near(columnRendered[0].committedBox, {0.0, 0.0, 800.0, 592.0}, "column first item keeps top page edge");
+    expect_box_near(columnRendered[1].committedBox, {0.0, 608.0, 800.0, 592.0}, "column second item keeps bottom page edge");
+}
+
 } // namespace
 
 void run_grid_logic_tests() {
@@ -310,4 +340,5 @@ void run_grid_logic_tests() {
     test_grid_snapshot_restore_filters_missing_items();
     test_legacy_snapshot_migrates_to_grid_coordinates();
     test_hidden_boxes_keep_waybar_reserved_gap();
+    test_grid_render_applies_inner_gaps();
 }

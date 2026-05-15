@@ -246,7 +246,7 @@ void GridLayout::relayout(PHLMONITOR monitor) {
         return;
     }
 
-    for (const auto& item : model.render(viewport, profile, bounds.full, bounds.max)) {
+    for (const auto& item : model.render(viewport, profile, bounds.full, bounds.max, bounds.gap)) {
         const auto it = windowsByKey.find(item.key);
         if (it == windowsByKey.end() || !it->second)
             continue;
@@ -791,7 +791,7 @@ CanvasOverviewSnapshot GridLayout::buildOverviewSnapshot() const {
 
     const auto bounds = CanvasLayoutInternal::compute_canvas_bounds(monitor);
     const auto profile = current_profile(monitor);
-    for (const auto& item : model.render(viewport, profile, bounds.full, bounds.max)) {
+    for (const auto& item : model.render(viewport, profile, bounds.full, bounds.max, bounds.gap)) {
         const auto it = windowsByKey.find(item.key);
         if (it == windowsByKey.end() || !it->second)
             continue;

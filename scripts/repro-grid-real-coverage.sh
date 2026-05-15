@@ -29,8 +29,8 @@ Options:
   -h, --help       Show this help text.
 
 The script exits non-zero when scrollergrid fails a real nested Hyprland check:
-Waybar workarea reservation, portrait monitor geometry, fullscreen/fitsize, or
-overview.
+Waybar workarea reservation, portrait monitor geometry, gaps_in, fullscreen/fitsize,
+or overview.
 EOF
 }
 
@@ -390,6 +390,35 @@ assert_any_title_offscreen() {
     assert_ok "$label"
 }
 
+assert_column_grid_inner_gap() {
+    local titles_json="$1"
+    local monitor="$2"
+    local minimum_gap="$3"
+    local label="$4"
+    local mon_id
+
+    mon_id="$(monitor_id "$monitor")"
+
+    hyprctl -i "$NESTED_INSTANCE" clients -j | jq -e \
+      --argjson titles "$titles_json" \
+      --argjson monId "$mon_id" \
+      --argjson minimumGap "$minimum_gap" '
+        [
+          .[]
+          | select(.title as $title | $titles | index($title))
+          | select(.monitor == $monId)
+        ]
+        | sort_by(.at[1])
+        | if length < 2 then
+            false
+          else
+            (.[1].at[1] - (.[0].at[1] + .[0].size[1])) >= $minimumGap
+          end
+    ' >/dev/null || die "$label: visible grid windows did not keep gaps_in spacing"
+
+    assert_ok "$label"
+}
+
 assert_fullscreen_expands_and_restores() {
     local title="$1"
     local label="$2"
@@ -439,6 +468,7 @@ NESTED_PID=""
 TERMINAL_KIND=""
 WAYBAR_HEIGHT=48
 GRID_TITLES_JSON='["grid-real-a","grid-real-b","grid-real-c"]'
+GRID_VISIBLE_GAP_TITLES_JSON='["grid-real-b","grid-real-c"]'
 GRID_WITH_XFER_TITLES_JSON='["grid-real-a","grid-real-b","grid-real-c","grid-real-xfer"]'
 
 cleanup() {
@@ -632,6 +662,7 @@ sleep 0.4
 hyprctl -i "$NESTED_INSTANCE" dispatch scroller:movefocus d >/dev/null
 sleep 0.4
 
+assert_column_grid_inner_gap "$GRID_VISIBLE_GAP_TITLES_JSON" "$SOURCE_MONITOR" 6 "grid honors gaps_in between visible windows"
 assert_any_title_respects_workarea "$GRID_TITLES_JSON" "$SOURCE_MONITOR" "visible grid window avoids Waybar"
 assert_any_title_offscreen "$SOURCE_MONITOR" "$GRID_TITLES_JSON" "grid offscreen commit exercised"
 assert_titles_avoid_top_reserved_strip "$SOURCE_MONITOR" "$GRID_TITLES_JSON" "grid offscreen windows avoid Waybar"
