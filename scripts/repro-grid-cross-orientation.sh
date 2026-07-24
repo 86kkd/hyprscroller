@@ -631,7 +631,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-require_cmd Hyprland
+require_cmd start-hyprland
 require_cmd hyprctl
 require_cmd jq
 require_cmd python3
@@ -699,7 +699,7 @@ EOF
 
 cat >"$LAUNCHER_PATH" <<EOF
 #!/usr/bin/env bash
-exec Hyprland -c "$CONFIG_PATH" >"$LOG_PATH" 2>&1
+exec env -u HYPRLAND_INSTANCE_SIGNATURE start-hyprland -- -c "$CONFIG_PATH" >"$LOG_PATH" 2>&1
 EOF
 chmod +x "$LAUNCHER_PATH"
 
@@ -720,14 +720,14 @@ hyprscroller_start_outer_output_event_watcher \
 hyprscroller_wait_for_outer_output_event_watcher_ready "$OUTER_OUTPUT_EVENT_READY" \
     || die "timed out waiting for outer output event watcher"
 
-BEFORE_MAX_TIME="$(hyprctl instances -j | jq '[.[].time] | max // 0')"
+BEFORE_INSTANCES="$(hyprctl instances -j | jq -c 'map(.instance)')"
 LAUNCH_RULES="[monitor $OUTER_MONITOR; float; size ${OUTER_OUTPUT_WIDTHS[0]} ${OUTER_OUTPUT_HEIGHTS[0]}; center]"
 log_step "launch nested Hyprland on $OUTER_MONITOR"
 hyprctl dispatch exec "$LAUNCH_RULES $LAUNCHER_PATH" >/dev/null
 
 for ((attempt = 0; attempt < 80; ++attempt)); do
-    NESTED_INSTANCE="$(hyprctl instances -j | jq -r --argjson before "$BEFORE_MAX_TIME" '
-        (map(select(.time > $before)) | max_by(.time)? | .instance) // empty
+    NESTED_INSTANCE="$(hyprctl instances -j | jq -r --argjson before "$BEFORE_INSTANCES" '
+        (map(select(.instance as $id | ($before | index($id) | not))) | max_by(.time)? | .instance) // empty
     ')"
     [[ -n "$NESTED_INSTANCE" ]] && break
     sleep 0.25

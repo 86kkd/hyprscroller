@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-#include <hyprland/src/helpers/Monitor.hpp>
+#include <hyprland/src/output/Monitor.hpp>
 
 #include "core/types.h"
 #include "overview/model/model.h"

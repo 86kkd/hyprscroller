@@ -2,7 +2,7 @@
 
 debug:
 	cmake -B ./Debug -DCMAKE_BUILD_TYPE=Debug -DCMAKE_PREFIX_PATH=$(PREFIX)
-	cmake --build ./Debug -j
+	cmake --build ./Debug --clean-first -j
 	rm -rf ./compile_commands.json
 	rm -rf ./hyprscroller.so
 	ln -s ./Debug/compile_commands.json .
@@ -10,7 +10,7 @@ debug:
 
 release:
 	cmake -B ./Release -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=$(PREFIX)
-	cmake --build ./Release -j
+	cmake --build ./Release --clean-first -j
 	rm -rf ./compile_commands.json
 	rm -rf ./hyprscroller.so
 	ln -s ./Release/compile_commands.json .

@@ -11,8 +11,9 @@
 
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/desktop/Workspace.hpp>
-#include <hyprland/src/helpers/Monitor.hpp>
+#include <hyprland/src/output/Monitor.hpp>
 
+#include "core/hyprland_runtime.h"
 #include "internal.h"
 
 namespace CanvasLayoutState {
@@ -104,7 +105,7 @@ WORKSPACEID next_workspace_id(const ScrollerCanvasSnapshot::RepositorySnapshot& 
                               const std::vector<SyntheticCanvasWorkspace>& synthetics = {}) {
     WORKSPACEID maxWorkspaceId = 0;
     if (g_pCompositor) {
-        for (const auto& workspaceRef : g_pCompositor->getWorkspaces()) {
+        for (const auto& workspaceRef : ScrollerCore::HyprlandRuntime::workspaces()) {
             const auto workspace = workspaceRef.lock();
             if (!workspace)
                 continue;
@@ -139,7 +140,7 @@ std::vector<CanvasWorkspaceMember> blank_members_for_visible_monitors(const Scro
         return members;
 
     auto workspaceId = next_workspace_id(snapshot, synthetics);
-    for (const auto& monitor : g_pCompositor->m_monitors) {
+    for (const auto& monitor : ScrollerCore::HyprlandRuntime::monitors()) {
         if (!monitor)
             continue;
         members.push_back({
@@ -251,12 +252,12 @@ std::vector<CanvasWorkspaceMember> CanvasWorkspaceRepository::currentVisibleMemb
     if (!g_pCompositor)
         return members;
 
-    for (const auto& monitor : g_pCompositor->m_monitors) {
+    for (const auto& monitor : ScrollerCore::HyprlandRuntime::monitors()) {
         if (!monitor)
             continue;
 
         const auto workspaceId = CanvasLayoutInternal::preferred_workspace_id(monitor, monitor->activeWorkspaceID());
-        const auto workspace = g_pCompositor->getWorkspaceByID(workspaceId);
+        const auto workspace = ScrollerCore::HyprlandRuntime::workspaceById(workspaceId);
         members.push_back({
             .monitorId = static_cast<int>(monitor->m_id),
             .workspaceId = workspaceId,

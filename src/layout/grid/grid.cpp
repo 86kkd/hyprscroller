@@ -82,6 +82,17 @@ bool spans_full_visible_page(const GridItem& item, const GridProfile& profile) {
            item.rowSpan == full_page_rows(profile);
 }
 
+bool item_intersects_viewport(const GridItem& item, const GridProfile& profile, const GridViewport& viewport) {
+    return ranges_intersect(item.column,
+                            item.column + std::max(1, item.columnSpan),
+                            viewport.originColumn,
+                            viewport.originColumn + std::max(1, profile.visibleColumns)) &&
+           ranges_intersect(item.row,
+                            item.row + std::max(1, item.rowSpan),
+                            viewport.originRow,
+                            viewport.originRow + std::max(1, profile.visibleRows));
+}
+
 ScrollerCore::Box apply_viewport_gaps(const ScrollerCore::Box& box,
                                       const GridItem& item,
                                       const GridViewport& viewport,
@@ -342,7 +353,7 @@ bool GridModel::cell_range_occupied(int column, int row, int columnSpan, int row
     return first_occupied_index(column, row, columnSpan, rowSpan).has_value();
 }
 
-bool GridModel::add_window(uintptr_t key, const GridProfile& profile) {
+bool GridModel::add_window(uintptr_t key, const GridProfile& profile, const GridViewport* viewport) {
     if (key == 0 || contains(key))
         return false;
 
@@ -350,6 +361,13 @@ bool GridModel::add_window(uintptr_t key, const GridProfile& profile) {
     if (items.empty()) {
         item.columnSpan = full_page_columns(profile);
         item.rowSpan = full_page_rows(profile);
+    } else if (viewport &&
+               (!activeIndex || *activeIndex >= items.size() ||
+                !item_intersects_viewport(items[*activeIndex], profile, *viewport))) {
+        item.column = viewport->originColumn;
+        item.row = viewport->originRow;
+        while (cell_range_occupied(item.column, item.row, item.columnSpan, item.rowSpan))
+            advance_position_for_mode(profile.mode, item.column, item.row);
     } else if (activeIndex && *activeIndex < items.size()) {
         auto& active = items[*activeIndex];
         if (items.size() == 1 && spans_full_visible_page(active, profile)) {

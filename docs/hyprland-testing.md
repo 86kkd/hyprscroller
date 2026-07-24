@@ -284,12 +284,14 @@ debug {
 然后直接启动一个嵌套测试实例：
 
 ```bash
-Hyprland -c /tmp/hyprscroller-test.conf
+env -u HYPRLAND_INSTANCE_SIGNATURE start-hyprland -- -c /tmp/hyprscroller-test.conf
 ```
 
 说明：
 
 - 这个命令会在你当前 Wayland 会话里再起一个 Hyprland
+- `start-hyprland` 为 Hyprland 0.56+ 建立 watchdog 和独立 Wayland socket
+- `env -u HYPRLAND_INSTANCE_SIGNATURE` 避免嵌套实例继承外层 Hyprland 的实例标识
 - 它适合做插件 debug
 - 不建议拿它替代日常登录会话
 
@@ -426,7 +428,7 @@ hyprctl -i <instance-signature> dispatch scroller:focuslane r
 如果你是直接在终端里运行：
 
 ```bash
-Hyprland -c /tmp/hyprscroller-test.conf
+env -u HYPRLAND_INSTANCE_SIGNATURE start-hyprland -- -c /tmp/hyprscroller-test.conf
 ```
 
 那么这个终端里的 stdout/stderr 就是测试实例的 `Hyprland` 日志。
@@ -434,7 +436,7 @@ Hyprland -c /tmp/hyprscroller-test.conf
 如果要落盘：
 
 ```bash
-Hyprland -c /tmp/hyprscroller-test.conf > /tmp/hyprland-test.log 2>&1
+env -u HYPRLAND_INSTANCE_SIGNATURE start-hyprland -- -c /tmp/hyprland-test.conf > /tmp/hyprland-test.log 2>&1
 ```
 
 重点关注：
@@ -487,7 +489,7 @@ hyprctl -i <instance-signature> dispatch exit
 
 1. `make debug`
 2. 优先运行 `./scripts/repro-overview.sh --outer-monitor <monitor>`
-3. 如果脚本不适用，再手工启动嵌套 `Hyprland -c /tmp/hyprscroller-test.conf`
+3. 如果脚本不适用，再手工启动嵌套 `env -u HYPRLAND_INSTANCE_SIGNATURE start-hyprland -- -c /tmp/hyprscroller-test.conf`
 4. 用 `hyprctl instances -j` 找到测试实例
 5. 在测试实例里创建目标窗口
 6. 跑目标场景

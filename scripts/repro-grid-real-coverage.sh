@@ -30,7 +30,7 @@ Options:
 
 The script exits non-zero when scrollergrid fails a real nested Hyprland check:
 Waybar workarea reservation, portrait monitor geometry, gaps_in, fullscreen/fitsize,
-or overview.
+overview, or blank-page window insertion.
 EOF
 }
 
@@ -303,6 +303,18 @@ assert_monitor_portrait() {
     assert_ok "$label"
 }
 
+assert_monitor_landscape() {
+    local monitor="$1"
+    local label="$2"
+    local width height
+
+    width="$(monitor_logical_field "$monitor" w)"
+    height="$(monitor_logical_field "$monitor" h)"
+
+    (( width > height )) || die "$label: expected landscape logical geometry, got ${width}x${height}"
+    assert_ok "$label"
+}
+
 assert_any_title_respects_workarea() {
     local titles_json="$1"
     local monitor="$2"
@@ -390,6 +402,39 @@ assert_any_title_offscreen() {
     assert_ok "$label"
 }
 
+assert_all_titles_offscreen() {
+    local monitor="$1"
+    local titles_json="$2"
+    local label="$3"
+    local mon_x mon_y mon_w mon_h
+
+    mon_x="$(monitor_logical_field "$monitor" x)"
+    mon_y="$(monitor_logical_field "$monitor" y)"
+    mon_w="$(monitor_logical_field "$monitor" w)"
+    mon_h="$(monitor_logical_field "$monitor" h)"
+
+    hyprctl -i "$NESTED_INSTANCE" clients -j | jq -e \
+      --argjson titles "$titles_json" \
+      --argjson monX "$mon_x" \
+      --argjson monY "$mon_y" \
+      --argjson monW "$mon_w" \
+      --argjson monH "$mon_h" '
+        [
+          .[]
+          | select(.title as $title | $titles | index($title))
+          | select(
+              ((.at[0] + .size[0]) <= $monX)
+              or (.at[0] >= ($monX + $monW))
+              or ((.at[1] + .size[1]) <= $monY)
+              or (.at[1] >= ($monY + $monH))
+            )
+        ]
+        | length == ($titles | length)
+    ' >/dev/null || die "$label: expected every previous-row grid client outside the landscape monitor"
+
+    assert_ok "$label"
+}
+
 assert_column_grid_inner_gap() {
     local titles_json="$1"
     local monitor="$2"
@@ -470,6 +515,8 @@ WAYBAR_HEIGHT=48
 GRID_TITLES_JSON='["grid-real-a","grid-real-b","grid-real-c"]'
 GRID_VISIBLE_GAP_TITLES_JSON='["grid-real-b","grid-real-c"]'
 GRID_WITH_XFER_TITLES_JSON='["grid-real-a","grid-real-b","grid-real-c","grid-real-xfer"]'
+GRID_LANDSCAPE_PREVIOUS_ROW_TITLES_JSON='["grid-land-a","grid-land-b"]'
+GRID_LANDSCAPE_INSERT_TITLES_JSON='["grid-land-new"]'
 
 cleanup() {
     if [[ "${KEEP_OPEN:-0}" -eq 1 ]]; then
@@ -521,7 +568,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-require_cmd Hyprland
+require_cmd start-hyprland
 require_cmd hyprctl
 require_cmd jq
 require_cmd waybar
@@ -614,17 +661,17 @@ EOF
 
 cat >"$LAUNCHER_PATH" <<EOF
 #!/usr/bin/env bash
-exec Hyprland -c "$CONFIG_PATH" >"$LOG_PATH" 2>&1
+exec env -u HYPRLAND_INSTANCE_SIGNATURE start-hyprland -- -c "$CONFIG_PATH" >"$LOG_PATH" 2>&1
 EOF
 chmod +x "$LAUNCHER_PATH"
 
-BEFORE_MAX_TIME="$(hyprctl instances -j | jq '[.[].time] | max // 0')"
+BEFORE_INSTANCES="$(hyprctl instances -j | jq -c 'map(.instance)')"
 LAUNCH_RULES="[monitor $OUTER_MONITOR; float; size $WINDOW_WIDTH $WINDOW_HEIGHT; center]"
 hyprctl dispatch exec "$LAUNCH_RULES $LAUNCHER_PATH" >/dev/null
 
 for ((attempt = 0; attempt < 80; ++attempt)); do
-    NESTED_INSTANCE="$(hyprctl instances -j | jq -r --argjson before "$BEFORE_MAX_TIME" '
-        (map(select(.time > $before)) | max_by(.time)? | .instance) // empty
+    NESTED_INSTANCE="$(hyprctl instances -j | jq -r --argjson before "$BEFORE_INSTANCES" '
+        (map(select(.instance as $id | ($before | index($id) | not))) | max_by(.time)? | .instance) // empty
     ')"
     [[ -n "$NESTED_INSTANCE" ]] && break
     sleep 0.25
@@ -679,6 +726,32 @@ sleep 0.6
 [[ -n "$(active_window_title)" ]] || die "grid overview accept left no active window"
 assert_all_titles_present "$GRID_WITH_XFER_TITLES_JSON" "grid overview retained windows"
 assert_ok "grid overview open and accept"
+
+hyprctl -i "$NESTED_INSTANCE" keyword monitor "$SOURCE_MONITOR,${WINDOW_WIDTH}x${WINDOW_HEIGHT}@60,0x0,1,transform,0" >/dev/null
+wait_for_monitor_usable "$SOURCE_MONITOR" || die "landscape monitor never reported non-zero geometry"
+wait_for_waybar_reserved "$SOURCE_MONITOR" $(( WAYBAR_HEIGHT - 8 )) \
+    || die "Waybar did not reserve the landscape monitor workarea"
+sleep 0.5
+assert_monitor_landscape "$SOURCE_MONITOR" "landscape monitor transform"
+
+focus_monitor_workspace "$SOURCE_MONITOR" 4
+hyprctl -i "$NESTED_INSTANCE" keyword general:layout scrollergrid >/dev/null
+hyprctl -i "$NESTED_INSTANCE" dispatch scroller:setmode row >/dev/null
+for title in grid-land-a grid-land-b; do
+    launch_terminal_window_and_wait "hs-$title" "$title" || die "$title did not appear"
+    sleep 0.25
+done
+sleep 0.8
+
+focus_title grid-land-b || die "could not focus grid-land-b"
+hyprctl -i "$NESTED_INSTANCE" dispatch scroller:movefocus d >/dev/null
+sleep 0.4
+launch_terminal_window_and_wait "hs-grid-land-new" "grid-land-new" || die "grid-land-new did not appear"
+sleep 0.8
+
+assert_any_title_respects_workarea "$GRID_LANDSCAPE_INSERT_TITLES_JSON" "$SOURCE_MONITOR" "landscape blank-page insert keeps new window visible"
+assert_all_titles_offscreen "$SOURCE_MONITOR" "$GRID_LANDSCAPE_PREVIOUS_ROW_TITLES_JSON" "landscape blank-page insert leaves previous row offscreen"
+assert_ok "grid landscape blank-page insertion"
 
 {
     printf 'nested instance:       %s\n' "$NESTED_INSTANCE"

@@ -13,6 +13,7 @@
 #include <hyprland/src/layout/algorithm/Algorithm.hpp>
 #include <hyprland/src/layout/space/Space.hpp>
 
+#include "core/hyprland_runtime.h"
 #include "layout/canvas/internal.h"
 #include "layout/grid/layout.h"
 #include "overview/session/effects_runtime.h"
@@ -40,7 +41,7 @@ class HyprlandSessionEffectsRuntime final : public Runtime {
     }
 
     PHLWORKSPACE getWorkspaceByID(WORKSPACEID workspaceId) const override {
-        return g_pCompositor ? g_pCompositor->getWorkspaceByID(workspaceId) : nullptr;
+        return g_pCompositor ? ScrollerCore::HyprlandRuntime::workspaceById(workspaceId) : nullptr;
     }
 
     std::vector<PHLWORKSPACE> getWorkspaces() const override {
@@ -48,7 +49,7 @@ class HyprlandSessionEffectsRuntime final : public Runtime {
         if (!g_pCompositor)
             return workspaces;
 
-        for (const auto& workspaceRef : g_pCompositor->getWorkspaces()) {
+        for (const auto& workspaceRef : ScrollerCore::HyprlandRuntime::workspaces()) {
             const auto workspace = workspaceRef.lock();
             if (workspace)
                 workspaces.push_back(workspace);
@@ -58,11 +59,11 @@ class HyprlandSessionEffectsRuntime final : public Runtime {
     }
 
     PHLMONITOR getMonitorFromID(MONITORID monitorId) const override {
-        return g_pCompositor ? g_pCompositor->getMonitorFromID(monitorId) : nullptr;
+        return g_pCompositor ? ScrollerCore::HyprlandRuntime::monitorById(monitorId) : nullptr;
     }
 
     PHLMONITOR getMonitorFromCursor() const override {
-        return g_pCompositor ? g_pCompositor->getMonitorFromCursor() : nullptr;
+        return g_pCompositor ? ScrollerCore::HyprlandRuntime::monitorFromCursor() : nullptr;
     }
 
     MONITORID monitorId(PHLMONITOR monitor) const override {

@@ -19,6 +19,7 @@
 #include <hyprland/src/render/Renderer.hpp>
 #include <spdlog/spdlog.h>
 
+#include "core/hyprland_runtime.h"
 #include "layout/canvas/internal.h"
 #include "overview/render/state.h"
 #include "overview/navigation/logic.h"
@@ -35,7 +36,7 @@ const MonitorRegion* initial_empty_region(const Model& model) {
     if (model.monitors().empty())
         return nullptr;
 
-    const auto cursorMonitor = g_pCompositor->getMonitorFromCursor();
+    const auto cursorMonitor = ScrollerCore::HyprlandRuntime::monitorFromCursor();
     if (!cursorMonitor)
         return &model.monitors().front();
 
@@ -325,7 +326,7 @@ bool Session::activateCanvas(int canvasId, int selectedMonitorId, bool requireSe
         return false;
 
     std::vector<CanvasLayoutState::CanvasWorkspaceMember> members;
-    for (const auto& monitor : g_pCompositor->m_monitors) {
+    for (const auto& monitor : ScrollerCore::HyprlandRuntime::monitors()) {
         if (!monitor)
             continue;
 
@@ -348,11 +349,11 @@ bool Session::activateCanvas(int canvasId, int selectedMonitorId, bool requireSe
 
     auto visitedSelectedMonitor = false;
     for (const auto& member : members) {
-        const auto monitor = g_pCompositor->getMonitorFromID(member.monitorId);
+        const auto monitor = ScrollerCore::HyprlandRuntime::monitorById(member.monitorId);
         if (!monitor)
             continue;
 
-        const auto workspace = g_pCompositor->getWorkspaceByID(member.workspaceId);
+        const auto workspace = ScrollerCore::HyprlandRuntime::workspaceById(member.workspaceId);
         const auto selectedMember = member.monitorId == selectedMonitorId;
         const auto requireMonitorFocus = selectedMember && requireSelectedMonitorFocus;
         visitedSelectedMonitor = visitedSelectedMonitor || selectedMember;
@@ -368,11 +369,11 @@ bool Session::activateCanvas(int canvasId, int selectedMonitorId, bool requireSe
         return true;
 
     const auto fallbackMember = members.front();
-    const auto fallbackMonitor = g_pCompositor->getMonitorFromID(fallbackMember.monitorId);
+    const auto fallbackMonitor = ScrollerCore::HyprlandRuntime::monitorById(fallbackMember.monitorId);
     if (!fallbackMonitor)
         return false;
 
-    const auto fallbackWorkspace = g_pCompositor->getWorkspaceByID(fallbackMember.workspaceId);
+    const auto fallbackWorkspace = ScrollerCore::HyprlandRuntime::workspaceById(fallbackMember.workspaceId);
     return CanvasLayoutInternal::focus_monitor_workspace(fallbackMonitor,
                                                          fallbackWorkspace,
                                                          fallbackMember.workspaceId,

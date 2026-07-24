@@ -10,6 +10,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <unordered_set>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -165,7 +166,7 @@ private:
     // Relayout this canvas on its visible monitor.
     void relayoutVisibleCanvas(PHLMONITOR fallbackMonitor = nullptr);
     // Recalculate all lanes inside the canvas against one monitor.
-    void relayoutCanvas(PHLMONITOR monitor, bool honor_fullscreen);
+    void relayoutCanvas(PHLMONITOR monitor, bool honor_fullscreen, bool preserve_restored_geometry = false);
     // Sweep all hidden special canvases so stale empty-lane state gets marked even when the hidden canvas is not ticking.
     void syncHiddenSpecialWorkspaceCanvases();
     // Track hidden/visible transitions for special-workspace empty lanes and restore focus when they reappear.
@@ -247,6 +248,8 @@ private:
     List<Lane *> lanes;
     // Cached window -> lane index used to avoid repeated whole-canvas scans.
     ScrollerCore::OwnerIndex<uintptr_t, Lane> laneByWindow;
+    std::unordered_set<uintptr_t> restoredTargetsAwaitingCallback;
+    bool restoredGeometryActive = false;
     // Concentrated one-shot focus and cross-monitor handoff state.
     HandoffState handoffState;
     // Remember whether a hidden special workspace needs to restore from a stale empty lane when shown again.

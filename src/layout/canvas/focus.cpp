@@ -14,7 +14,7 @@
  *   cross-monitor, or temporary-empty-lane behavior
  */
 #include <hyprland/src/Compositor.hpp>
-#include <hyprland/src/helpers/Monitor.hpp>
+#include <hyprland/src/output/Monitor.hpp>
 #include <hyprland/src/layout/algorithm/Algorithm.hpp>
 #include <hyprland/src/layout/space/Space.hpp>
 #include <spdlog/spdlog.h>
@@ -44,7 +44,7 @@ ScrollerGrid::GridLayout* grid_layout_for_workspace(WORKSPACEID workspaceId) {
     if (!g_pCompositor)
         return nullptr;
 
-    const auto workspace = g_pCompositor->getWorkspaceByID(workspaceId);
+    const auto workspace = ScrollerCore::HyprlandRuntime::workspaceById(workspaceId);
     if (!workspace || !workspace->m_space)
         return nullptr;
 
@@ -321,7 +321,7 @@ void CanvasLayout::handoffFocusAcrossMonitor(int workspace, Direction direction,
     // Phase 3: either focus an empty target workspace or activate the chosen
     // destination window and let Hyprland follow that focus.
     if (!crossMonitorTarget) {
-        const auto targetWorkspace = g_pCompositor->getWorkspaceByID(workspaceId);
+        const auto targetWorkspace = ScrollerCore::HyprlandRuntime::workspaceById(workspaceId);
         spdlog::info("move_focus: no target window for crossed monitor workspace={} target_monitor={} target_workspace_found={}",
                      workspaceId,
                      targetMonitor->m_id,
@@ -343,10 +343,10 @@ void CanvasLayout::handoffFocusAcrossMonitor(int workspace, Direction direction,
         targetLayout != nullptr,
         targetLane != nullptr,
         targetSelection,
-        crossMonitorTarget ? crossMonitorTarget->m_position.x : 0.0,
-        crossMonitorTarget ? crossMonitorTarget->m_position.y : 0.0,
-        crossMonitorTarget ? crossMonitorTarget->m_size.x : 0.0,
-        crossMonitorTarget ? crossMonitorTarget->m_size.y : 0.0);
+        ScrollerCore::HyprlandRuntime::windowPosition(crossMonitorTarget).x,
+        ScrollerCore::HyprlandRuntime::windowPosition(crossMonitorTarget).y,
+        ScrollerCore::HyprlandRuntime::windowSize(crossMonitorTarget).x,
+        ScrollerCore::HyprlandRuntime::windowSize(crossMonitorTarget).y);
 
     if (targetGrid && crossMonitorTarget) {
         targetGrid->focus_window(crossMonitorTarget);
@@ -473,7 +473,7 @@ void CanvasLayout::move_focus(int workspace, Direction direction)
     auto lane = getActiveLane();
     const auto before = lane ? lane->get_active_window() : nullptr;
     const auto activeCanvasMonitor = getVisibleCanvasMonitor();
-    const auto sourceMonitor = before ? g_pCompositor->getMonitorFromID(before->monitorID())
+    const auto sourceMonitor = before ? ScrollerCore::HyprlandRuntime::monitorById(before->monitorID())
                                      : (activeCanvasMonitor ? activeCanvasMonitor : ScrollerCore::monitorFromPointingOrCursor());
     const auto beforeActiveWorkspaceId = sourceMonitor ? sourceMonitor->activeWorkspaceID() : WORKSPACE_INVALID;
     const auto beforeSpecialWorkspaceId = sourceMonitor ? sourceMonitor->activeSpecialWorkspaceID() : WORKSPACE_INVALID;

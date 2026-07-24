@@ -140,7 +140,9 @@ void sync_window_target_geometry(PHLWINDOW window) {
     if (!target)
         return;
 
-    target->setPositionGlobal(Hyprutils::Math::CBox(window->m_position, window->m_size));
+    target->setPositionGlobal(Hyprutils::Math::CBox(
+        ScrollerCore::HyprlandRuntime::windowPosition(window),
+        ScrollerCore::HyprlandRuntime::windowSize(window)));
 }
 
 } // namespace ScrollerModel::StackInternal
@@ -241,7 +243,7 @@ bool Stack::fullscreen() const {
         return false;
 
     auto window = active->data()->ptr().lock();
-    return window ? window->isFullscreen() : false;
+    return ScrollerCore::HyprlandRuntime::windowIsFullscreen(window);
 }
 
 bool Stack::expanded() const {

@@ -382,19 +382,10 @@ void draw_empty_target(const SceneTarget& target, const Box& bounds, double over
 } // namespace
 
 void snapshotWindowTargets(const Model& model) {
-    // Window previews prefer cached snapshots over re-rendering live window
-    // trees during overview draw. Snapshot the participating windows up front at
-    // session transition time so later draw passes are simple and stable.
-    for (const auto& region : model.monitors()) {
-        for (const auto& workspace : region.workspaces) {
-            for (const auto& target : workspace.targets) {
-                if (target.type != TargetType::Window || !target.window)
-                    continue;
-
-                g_pHyprRenderer->makeSnapshot(target.window);
-            }
-        }
-    }
+    // Window previews are drawn from live surface textures. Keep this lifecycle
+    // hook so session setup remains explicit even though 0.56 no longer exposes
+    // the old renderer snapshot cache.
+    (void)model;
 }
 
 void snapshotBackdropLayers(const Model& model, RenderState& state) {
@@ -414,7 +405,6 @@ void snapshotBackdropLayers(const Model& model, RenderState& state) {
                 if (!layer || !layer->aliveAndVisible())
                     continue;
 
-                g_pHyprRenderer->makeSnapshot(layer);
                 state.appendBackdropLayer(monitor->m_id, layer);
             }
         };
@@ -444,7 +434,18 @@ void enqueueMonitorBackdrop(PHLMONITOR monitor, const RenderState& state) {
         if (!layer || !layer->aliveAndVisible())
             continue;
 
-        g_pHyprRenderer->renderSnapshot(layer);
+        const auto surface = layer->resource();
+        const auto box = layer->logicalBox();
+        if (!surface || !surface->m_current.texture || !box)
+            continue;
+
+        CHyprOpenGLImpl::STextureRenderData data;
+        data.a = 1.0F;
+        data.blockBlurOptimization = true;
+        g_pHyprOpenGL->renderTexture(
+            surface->m_current.texture,
+            CBox{box->x - monitor->m_position.x, box->y - monitor->m_position.y, box->width, box->height},
+            data);
     }
 }
 

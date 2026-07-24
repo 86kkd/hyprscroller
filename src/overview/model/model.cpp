@@ -16,6 +16,7 @@
 #include <hyprland/src/layout/algorithm/Algorithm.hpp>
 #include <hyprland/src/layout/space/Space.hpp>
 
+#include "core/hyprland_runtime.h"
 #include "layout/canvas/internal.h"
 #include "layout/grid/layout.h"
 #include "overview/navigation/logic.h"
@@ -64,7 +65,7 @@ const CanvasLayoutState::CanvasWorkspaceRecord* find_canvas_record(const std::ve
 }
 
 ScrollerGrid::GridLayout* grid_layout_for_workspace(WORKSPACEID workspaceId) {
-    const auto workspace = g_pCompositor->getWorkspaceByID(workspaceId);
+    const auto workspace = ScrollerCore::HyprlandRuntime::workspaceById(workspaceId);
     if (!workspace || !workspace->m_space)
         return nullptr;
 
@@ -458,7 +459,7 @@ void Model::rebuild(const std::vector<CanvasLayoutState::SyntheticCanvasWorkspac
     const auto anchorTileX = anchorCanvas ? anchorCanvas->tileX : 0;
     const auto anchorTileY = anchorCanvas ? anchorCanvas->tileY : 0;
 
-    for (const auto& monitor : g_pCompositor->m_monitors) {
+    for (const auto& monitor : ScrollerCore::HyprlandRuntime::monitors()) {
         if (!monitor)
             continue;
 

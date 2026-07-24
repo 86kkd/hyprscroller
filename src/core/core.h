@@ -11,9 +11,11 @@
 #include <string>
 #include <unordered_map>
 
-#include <hyprland/src/helpers/Monitor.hpp>
+#include <hyprland/src/output/Monitor.hpp>
 #include <hyprland/src/layout/target/Target.hpp>
 #include <hyprland/src/desktop/view/Window.hpp>
+
+#include "core/hyprland_runtime.h"
 
 namespace ScrollerCore {
 

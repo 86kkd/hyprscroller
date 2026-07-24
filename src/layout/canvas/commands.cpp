@@ -30,7 +30,7 @@ ScrollerGrid::GridLayout* grid_layout_for_workspace(WORKSPACEID workspaceId) {
     if (!g_pCompositor)
         return nullptr;
 
-    const auto workspace = g_pCompositor->getWorkspaceByID(workspaceId);
+    const auto workspace = ScrollerCore::HyprlandRuntime::workspaceById(workspaceId);
     if (!workspace || !workspace->m_space)
         return nullptr;
 
@@ -57,7 +57,7 @@ bool CanvasLayout::handoffMoveWindowAcrossMonitor(int workspace, Direction direc
         return false;
 
     const auto workspaceId = CanvasLayoutInternal::preferred_workspace_id(targetMonitor, workspace);
-    const auto targetWorkspace = g_pCompositor->getWorkspaceByID(workspaceId);
+    const auto targetWorkspace = ScrollerCore::HyprlandRuntime::workspaceById(workspaceId);
     const auto selector = ScrollerCore::workspace_selector(targetWorkspace);
     if (!CanvasLayoutInternal::can_invoke_dispatcher("movetoworkspacesilent", selector, "move_window_cross_monitor"))
         return false;
@@ -295,7 +295,7 @@ void CanvasLayout::move_window(int workspace, Direction direction) {
     withActiveLane(ActiveLaneSyncPolicy::WorkspaceFocus, [&](Lane *lane) {
         const auto mode = lane->get_mode();
         const auto currentWindow = lane->get_active_window();
-        const auto sourceMonitor = currentWindow ? g_pCompositor->getMonitorFromID(currentWindow->monitorID()) : getVisibleCanvasMonitor();
+        const auto sourceMonitor = currentWindow ? ScrollerCore::HyprlandRuntime::monitorById(currentWindow->monitorID()) : getVisibleCanvasMonitor();
 
         if (CanvasLayoutInternal::direction_moves_between_lanes(mode, direction)) {
             handleMoveWindowAcrossLanes(workspace, direction, lane, currentWindow, sourceMonitor, mode);

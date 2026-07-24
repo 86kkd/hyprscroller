@@ -153,7 +153,7 @@ struct FakeSessionEffectsRuntime final : Overview::SessionEffects::Runtime {
     }
 
     PHLMONITOR addMonitor(MONITORID id) {
-        auto monitor = make_opaque_handle<CMonitor>();
+        auto monitor = make_opaque_handle<Monitor::CMonitor>();
         monitors.emplace(monitor.get(), MonitorState{.id = id});
         monitorsById.emplace(id, monitor);
         return monitor;

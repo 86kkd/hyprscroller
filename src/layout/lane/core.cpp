@@ -30,7 +30,7 @@ using ScrollerModel::StackWidth;
 
 Lane::Lane(PHLWINDOW window)
     : ephemeral(false), gap(0), reorder(Reorder::Auto), mode(Mode::Row), active(nullptr) {
-    const auto monitor = g_pCompositor->getMonitorFromID(window->monitorID());
+    const auto monitor = ScrollerCore::HyprlandRuntime::monitorById(window->monitorID());
     if (!monitor)
         return;
 
@@ -50,7 +50,7 @@ Lane::Lane(Stack *stack)
     // a fresh lane. Derive mode/sizes from the stack's active window so the new
     // lane starts in a monitor-consistent coordinate space.
     const auto window = stack ? stack->get_active_window() : nullptr;
-    const auto monitor = window ? g_pCompositor->getMonitorFromID(window->monitorID()) : nullptr;
+    const auto monitor = window ? ScrollerCore::HyprlandRuntime::monitorById(window->monitorID()) : nullptr;
     if (monitor) {
         mode = ScrollerCore::default_mode_for_monitor(monitor);
         update_sizes(monitor);
@@ -445,6 +445,12 @@ void Lane::set_canvas_geometry(const Box &full_box, const Box &max_box, int gap_
             stack->data()->shift_local_geometry(localDelta);
     }
 
+    full = full_box;
+    max = max_box;
+    gap = gap_size;
+}
+
+void Lane::set_restored_canvas_geometry(const Box &full_box, const Box &max_box, int gap_size) {
     full = full_box;
     max = max_box;
     gap = gap_size;

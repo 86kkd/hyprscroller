@@ -162,6 +162,20 @@ void test_move_focus_can_move_empty_viewport_space() {
     expect_eq(model.active_item()->key, static_cast<uintptr_t>(1), "active item is preserved while viewport moves");
 }
 
+void test_new_window_after_empty_viewport_shift_stays_on_viewport() {
+    ScrollerGrid::GridModel model;
+    const auto profile = ScrollerGrid::profile_for_workarea(Mode::Row, {0.0, 0.0, 1200.0, 800.0});
+    ScrollerGrid::GridViewport viewport;
+
+    model.add_window(1, profile);
+    expect_eq(model.move_focus(Direction::Down, profile, viewport, false), ScrollerGrid::GridMoveResult::Moved,
+              "row grid can shift viewport to an empty vertical page");
+    expect_eq(viewport.originRow, 1, "row grid viewport moves to the blank page");
+
+    model.add_window(2, profile, &viewport);
+    expect_eq(model.item_for_key(2)->row, viewport.originRow, "new window lands on the shifted blank page");
+}
+
 void test_move_active_window_moves_or_swaps_grid_cells() {
     ScrollerGrid::GridModel model;
     const auto profile = ScrollerGrid::profile_for_workarea(Mode::Row, {0.0, 0.0, 1200.0, 800.0});
@@ -346,6 +360,7 @@ void run_grid_logic_tests() {
     test_grid_settles_viewport_to_remaining_items_after_removal();
     test_move_focus_scrolls_viewport_to_active_item();
     test_move_focus_can_move_empty_viewport_space();
+    test_new_window_after_empty_viewport_shift_stays_on_viewport();
     test_move_active_window_moves_or_swaps_grid_cells();
     test_grid_reports_directional_edges();
     test_resize_align_and_page_move();

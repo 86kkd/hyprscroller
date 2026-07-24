@@ -17,6 +17,7 @@
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/desktop/Workspace.hpp>
 
+#include "core/hyprland_runtime.h"
 #include "overview/scene/geometry_utils.h"
 #include "overview/scene/layout.h"
 #include "overview/render/style.h"
@@ -110,7 +111,7 @@ std::optional<SceneMonitor> buildSceneForMonitor(PHLMONITOR monitor, const Model
         sceneWorkspace.box = localize_box(monitor, workspace.box);
         sceneWorkspace.contentBox = sceneWorkspace.box;
 
-        const auto workspaceRef = g_pCompositor->getWorkspaceByID(workspace.workspaceId);
+        const auto workspaceRef = ScrollerCore::HyprlandRuntime::workspaceById(workspace.workspaceId);
         sceneWorkspace.special = workspaceRef ? workspaceRef->m_isSpecialWorkspace : false;
         sceneWorkspace.label = workspace_label(workspaceRef, workspace.workspaceId);
 

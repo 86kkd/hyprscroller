@@ -9,7 +9,7 @@
 #include "lane.h"
 
 #include <hyprland/src/Compositor.hpp>
-#include <hyprland/src/helpers/Monitor.hpp>
+#include <hyprland/src/output/Monitor.hpp>
 
 #include "../../core/fit_size.h"
 #include "../../core/interval.h"
@@ -153,7 +153,7 @@ FocusMoveResult Lane::move_focus(Direction dir, bool focus_wrap) {
 // Move focus to the previous stack, wrapping or crossing monitor when needed.
 FocusMoveResult Lane::move_focus_backward_stack(Direction direction, bool focus_wrap) {
     if (active == stacks.first()) {
-        const auto monitor = g_pCompositor->getMonitorInDirection(
+        const auto monitor = ScrollerCore::HyprlandRuntime::monitorInDirection(
             direction == Direction::Up ? Math::fromChar('u') : Math::fromChar('l'));
         if (monitor == nullptr) {
             auto previous = active;
@@ -170,7 +170,7 @@ FocusMoveResult Lane::move_focus_backward_stack(Direction direction, bool focus_
 // Move focus to the next stack, wrapping or crossing monitor when needed.
 FocusMoveResult Lane::move_focus_forward_stack(Direction direction, bool focus_wrap) {
     if (active == stacks.last()) {
-        const auto monitor = g_pCompositor->getMonitorInDirection(
+        const auto monitor = ScrollerCore::HyprlandRuntime::monitorInDirection(
             direction == Direction::Down ? Math::fromChar('d') : Math::fromChar('r'));
         if (monitor == nullptr) {
             auto previous = active;

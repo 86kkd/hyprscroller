@@ -10,10 +10,11 @@
 #include <string>
 
 #include <hyprland/src/Compositor.hpp>
-#include <hyprland/src/helpers/Monitor.hpp>
+#include <hyprland/src/output/Monitor.hpp>
 #include <spdlog/spdlog.h>
 
 #include "../../core/direction.h"
+#include "core/hyprland_runtime.h"
 #include "../../core/workspace_selector.h"
 #include "internal.h"
 
@@ -47,15 +48,15 @@ public:
     }
 
     PHLMONITOR getMonitorFromID(int monitorId) const override {
-        return g_pCompositor ? g_pCompositor->getMonitorFromID(monitorId) : nullptr;
+        return g_pCompositor ? ScrollerCore::HyprlandRuntime::monitorById(monitorId) : nullptr;
     }
 
     PHLMONITOR getMonitorFromCursor() const override {
-        return g_pCompositor ? g_pCompositor->getMonitorFromCursor() : nullptr;
+        return g_pCompositor ? ScrollerCore::HyprlandRuntime::monitorFromCursor() : nullptr;
     }
 
     bool isWindowActive(PHLWINDOW window) const override {
-        return g_pCompositor && window && g_pCompositor->isWindowActive(window);
+        return g_pCompositor && window && ScrollerCore::HyprlandRuntime::isWindowActive(window);
     }
 
     std::string monitorName(PHLMONITOR monitor) const override {

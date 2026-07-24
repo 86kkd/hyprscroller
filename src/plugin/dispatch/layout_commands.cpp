@@ -91,7 +91,7 @@ void dispatch_focusmonitor(std::string arg) {
         return;
     }
 
-    const auto targetMonitor = g_pCompositor->getMonitorInDirection(sourceMonitor, *monitorDirection);
+    const auto targetMonitor = ScrollerCore::HyprlandRuntime::monitorInDirection(sourceMonitor, *monitorDirection);
     if (!targetMonitor) {
         spdlog::info("dispatch_focusmonitor: no adjacent monitor direction={} source_monitor={}",
                      ScrollerCore::direction_name(*direction),
@@ -100,7 +100,7 @@ void dispatch_focusmonitor(std::string arg) {
     }
 
     const auto targetWorkspaceId = CanvasLayoutInternal::preferred_workspace_id(targetMonitor, targetMonitor->activeWorkspaceID());
-    const auto targetWorkspace = g_pCompositor->getWorkspaceByID(targetWorkspaceId);
+    const auto targetWorkspace = ScrollerCore::HyprlandRuntime::workspaceById(targetWorkspaceId);
     if (!CanvasLayoutInternal::focus_monitor_workspace(targetMonitor,
                                                        targetWorkspace,
                                                        targetWorkspaceId,

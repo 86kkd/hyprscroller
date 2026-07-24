@@ -11,7 +11,7 @@ PHLWINDOW windowFromTarget(SP<Layout::ITarget> target) {
 
 // Use cursor monitor first as action context when available.
 PHLMONITOR monitorFromPointingOrCursor() {
-    if (auto monitor = g_pCompositor->getMonitorFromCursor(); monitor)
+    if (auto monitor = ScrollerCore::HyprlandRuntime::monitorFromCursor(); monitor)
         return monitor;
     return nullptr;
 }

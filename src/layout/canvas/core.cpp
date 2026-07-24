@@ -26,7 +26,7 @@
 #include <hyprland/src/config/ConfigValue.hpp>
 #include <hyprland/src/config/shared/complex/ComplexDataTypes.hpp>
 #include <hyprland/src/event/EventBus.hpp>
-#include <hyprland/src/helpers/Monitor.hpp>
+#include <hyprland/src/output/Monitor.hpp>
 #include <hyprland/src/layout/algorithm/Algorithm.hpp>
 #include <hyprland/src/layout/space/Space.hpp>
 #include <spdlog/spdlog.h>
@@ -106,8 +106,8 @@ std::vector<PHLWINDOW> live_tiled_workspace_windows(PHLWORKSPACE workspace) {
     if (!workspace)
         return windows;
 
-    windows.reserve(g_pCompositor->m_windows.size());
-    for (const auto &window : g_pCompositor->m_windows) {
+    windows.reserve(ScrollerCore::HyprlandRuntime::windows().size());
+    for (const auto &window : ScrollerCore::HyprlandRuntime::windows()) {
         if (!window || window->workspaceID() != workspace->m_id || window->m_isFloating || !window->m_isMapped || window->isHidden())
             continue;
         windows.push_back(window);
@@ -539,9 +539,14 @@ bool CanvasLayout::restoreSnapshot(const ScrollerSnapshot::CanvasSnapshot &snaps
         windowsByKey.emplace(ScrollerCore::window_key(window), window);
 
     const auto visibleMonitor = getVisibleCanvasMonitor();
-    const auto fallbackMonitor = visibleMonitor ? visibleMonitor : g_pCompositor->getMonitorFromID(liveWindows.front()->monitorID());
+    const auto fallbackMonitor = visibleMonitor ? visibleMonitor : ScrollerCore::HyprlandRuntime::monitorById(liveWindows.front()->monitorID());
     if (!fallbackMonitor)
         return false;
+
+    restoredTargetsAwaitingCallback.clear();
+    for (const auto& window : liveWindows)
+        restoredTargetsAwaitingCallback.insert(ScrollerCore::window_key(window));
+    restoredGeometryActive = true;
 
     const auto bounds = CanvasLayoutInternal::compute_canvas_bounds(fallbackMonitor);
     restoringSnapshot = true;
@@ -627,7 +632,7 @@ bool CanvasLayout::restoreSnapshot(const ScrollerSnapshot::CanvasSnapshot &snaps
     }
 
     const auto restoredActiveWindow = activeLane && activeLane->data() ? activeLane->data()->get_active_window() : nullptr;
-    relayoutCanvas(fallbackMonitor, !workspace->m_isSpecialWorkspace);
+    relayoutCanvas(fallbackMonitor, !workspace->m_isSpecialWorkspace, true);
     if (restoredActiveWindow)
         focusManagedWindow(restoredActiveWindow, false, "restoreSnapshot");
     debugVerifyLaneCache();
@@ -725,7 +730,7 @@ Lane *CanvasLayout::resolveActiveLaneAfterRemoval(ListNode<Lane *> *laneNode, PH
 }
 
 // Recalculate every lane inside this canvas against one visible monitor.
-void CanvasLayout::relayoutCanvas(PHLMONITOR monitor, bool honor_fullscreen) {
+void CanvasLayout::relayoutCanvas(PHLMONITOR monitor, bool honor_fullscreen, bool preserve_restored_geometry) {
     const auto workspace = getCanvasWorkspace();
     if (!workspace || !monitor || lanes.empty())
         return;
@@ -733,6 +738,12 @@ void CanvasLayout::relayoutCanvas(PHLMONITOR monitor, bool honor_fullscreen) {
     // Single-lane canvases delegate the whole monitor to one lane. Multi-lane
     // canvases instead treat lanes like pages inside a larger logical strip.
     if (lanes.size() == 1) {
+        if (preserve_restored_geometry) {
+            const auto bounds = CanvasLayoutInternal::compute_canvas_bounds(monitor);
+            lanes.first()->data()->set_restored_canvas_geometry(bounds.full, bounds.max, bounds.gap);
+            lanes.first()->data()->commit_restored_geometry();
+            return;
+        }
         CanvasLayoutInternal::recalculate_workspace_lane(lanes.first()->data(), monitor, workspace, honor_fullscreen);
         return;
     }
@@ -773,8 +784,13 @@ void CanvasLayout::relayoutCanvas(PHLMONITOR monitor, bool honor_fullscreen) {
             laneBox = Box(x, max.y, w, max.h);
         }
 
-        lane->data()->set_canvas_geometry(full, laneBox, bounds.gap);
-        lane->data()->recalculate_lane_geometry();
+        if (preserve_restored_geometry) {
+            lane->data()->set_restored_canvas_geometry(full, laneBox, bounds.gap);
+            lane->data()->commit_restored_geometry();
+        } else {
+            lane->data()->set_canvas_geometry(full, laneBox, bounds.gap);
+            lane->data()->recalculate_lane_geometry();
+        }
     }
 }
 
@@ -847,8 +863,8 @@ void CanvasLayout::resizeTarget(const Vector2D &delta, SP<Layout::ITarget> targe
 
     auto lane = getLaneForWindow(window);
     if (lane == nullptr) {
-        if (window->m_realSize)
-            *window->m_realSize = Vector2D(std::max((window->m_realSize->goal() + delta).x, 20.0), std::max((window->m_realSize->goal() + delta).y, 20.0));
+        if (window->sizeAnimation())
+            *window->sizeAnimation() = Vector2D(std::max((window->sizeAnimation()->goal() + delta).x, 20.0), std::max((window->sizeAnimation()->goal() + delta).y, 20.0));
         window->updateWindowDecos();
         return;
     }
@@ -859,7 +875,7 @@ void CanvasLayout::resizeTarget(const Vector2D &delta, SP<Layout::ITarget> targe
 }
 
 // Hyprland callback: relayout the whole canvas after monitor/workspace changes.
-void CanvasLayout::recalculate(Layout::eRecalculateReason)
+void CanvasLayout::recalculate(Layout::eRecalculateReason reason)
 {
     ensureWorkspaceRuntime();
 
@@ -873,7 +889,14 @@ void CanvasLayout::recalculate(Layout::eRecalculateReason)
     if (!monitor)
         return;
 
-    relayoutCanvas(monitor, true);
+    const bool initializationRefresh = reason == Layout::RECALCULATE_REASON_UNKNOWN ||
+                                       reason == Layout::RECALCULATE_REASON_RENDER_MONITOR;
+    const bool preserveRestoredGeometry = restoredGeometryActive && initializationRefresh;
+    spdlog::debug("recalculate: reason={} restored_geometry_active={} preserve_restored_geometry={}",
+                  static_cast<int>(reason), restoredGeometryActive, preserveRestoredGeometry);
+    if (!preserveRestoredGeometry)
+        restoredGeometryActive = false;
+    relayoutCanvas(monitor, true, preserveRestoredGeometry);
 }
 
 // Explicitly reject layout messages until the plugin defines a supported protocol.
@@ -997,9 +1020,16 @@ bool CanvasLayout::onWindowCreatedTiling(PHLWINDOW window, Math::eDirection)
         spdlog::debug("onWindowCreatedTiling: window already managed window={} workspace={}",
                       static_cast<const void*>(window.get()),
                       window->workspaceID());
+        if (restoredTargetsAwaitingCallback.erase(ScrollerCore::window_key(window)) > 0) {
+            if (auto* lane = getLaneForWindow(window))
+                lane->commit_restored_geometry();
+            return false;
+        }
         recalculateWindow(window);
         return false;
     }
+
+    restoredGeometryActive = false;
 
     auto lane = getActiveLane();
     if (lane == nullptr) {
@@ -1018,6 +1048,8 @@ void CanvasLayout::onWindowRemovedTiling(PHLWINDOW window)
 {
     const auto windowPtr = static_cast<const void*>(window.get());
     const auto workspace = window ? window->workspaceID() : WORKSPACE_INVALID;
+    restoredTargetsAwaitingCallback.erase(ScrollerCore::window_key(window));
+    restoredGeometryActive = false;
     spdlog::info("onWindowRemovedTiling: window={} workspace={}", windowPtr, workspace);
 
     marks.remove(window);
@@ -1082,8 +1114,8 @@ void CanvasLayout::resizeActiveWindow(PHLWINDOW window, const Vector2D &delta,
 
     auto lane = getLaneForWindow(PWINDOW);
     if (lane == nullptr) {
-        if (PWINDOW->m_realSize)
-            *PWINDOW->m_realSize = Vector2D(std::max((PWINDOW->m_realSize->goal() + delta).x, 20.0), std::max((PWINDOW->m_realSize->goal() + delta).y, 20.0));
+        if (PWINDOW->sizeAnimation())
+            *PWINDOW->sizeAnimation() = Vector2D(std::max((PWINDOW->sizeAnimation()->goal() + delta).x, 20.0), std::max((PWINDOW->sizeAnimation()->goal() + delta).y, 20.0));
         PWINDOW->updateWindowDecos();
         return;
     }

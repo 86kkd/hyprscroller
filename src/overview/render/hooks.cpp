@@ -15,6 +15,7 @@
 #include <hyprland/src/render/Renderer.hpp>
 #include <spdlog/spdlog.h>
 
+#include "core/hyprland_runtime.h"
 #include "overview/render/pass_element.h"
 #include "overview/render/draw.h"
 #include "overview/render/state.h"
@@ -90,7 +91,7 @@ void handle_session_transition(steady_tp now) {
         spdlog::info("overview_renderer: enabled monitors={}", overview.model().monitors().size());
     } else {
         for (const auto& [monitorId, _scene] : state.scenes()) {
-            if (const auto monitor = g_pCompositor->getMonitorFromID(monitorId))
+            if (const auto monitor = ScrollerCore::HyprlandRuntime::monitorById(monitorId))
                 g_pHyprRenderer->damageMonitor(monitor);
         }
         state.clearSessionState();

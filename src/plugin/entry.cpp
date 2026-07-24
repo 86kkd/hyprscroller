@@ -24,6 +24,8 @@
 #include <cstdlib>
 #include <memory>
 #include <spdlog/spdlog.h>
+
+#include "core/hyprland_runtime.h"
 #include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <string>
@@ -134,25 +136,34 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     CanvasLayoutState::canvasRepository().initialize();
     spdlog::info("pluginInit handle={}", static_cast<const void*>(handle));
 
+    spdlog::info("pluginInit: registering config values");
     scroller::plugin_config::registerConfigValues(PHANDLE);
+    spdlog::info("pluginInit: config values registered");
 
     // Register custom dispatchers used by keybinds and user scripts.
+    spdlog::info("pluginInit: registering dispatchers");
     dispatchers::addDispatchers();
+    spdlog::info("pluginInit: dispatchers registered");
 
     // Register scroller as a custom tiled algorithm only after all config values
     // it may read during initial workspace population have been registered.
+    spdlog::info("pluginInit: registering tiled algorithm scroller");
     HyprlandAPI::addTiledAlgo(
         PHANDLE,
         "scroller",
         &typeid(CanvasLayout),
         []() -> UP<Layout::ITiledAlgorithm> { return makeUnique<CanvasLayout>(); });
+    spdlog::info("pluginInit: registering tiled algorithm scrollergrid");
     HyprlandAPI::addTiledAlgo(
         PHANDLE,
         "scrollergrid",
         &typeid(ScrollerGrid::GridLayout),
         []() -> UP<Layout::ITiledAlgorithm> { return makeUnique<ScrollerGrid::GridLayout>(); });
+    spdlog::info("pluginInit: tiled algorithms registered");
 
+    spdlog::info("pluginInit: initializing overview renderer hooks");
     Overview::initializeRendererHooks(PHANDLE);
+    spdlog::info("pluginInit: overview renderer hooks initialized");
 
     // Keep the exported plugin metadata stable for plugin discovery and UI.
     return {"hyprscroller", "scrolling window layout", "dawser", "1.0"};
@@ -160,7 +171,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 
 // Plugin shutdown hook used for final logging only.
 APICALL EXPORT void PLUGIN_EXIT() {
-    for (const auto &workspaceRef : g_pCompositor->getWorkspaces()) {
+    for (const auto &workspaceRef : ScrollerCore::HyprlandRuntime::workspaces()) {
         const auto workspace = workspaceRef.lock();
         if (!workspace)
             continue;

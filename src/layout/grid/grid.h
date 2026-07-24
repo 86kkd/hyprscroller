@@ -68,7 +68,7 @@ public:
     size_t size() const;
 
     void clear();
-    bool add_window(uintptr_t key, const GridProfile& profile);
+    bool add_window(uintptr_t key, const GridProfile& profile, const GridViewport* viewport = nullptr);
     bool remove_window(uintptr_t key);
     bool focus_window(uintptr_t key);
     bool contains(uintptr_t key) const;

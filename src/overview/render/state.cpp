@@ -9,9 +9,10 @@
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/config/ConfigManager.hpp>
 #include <hyprland/src/config/shared/animation/AnimationTree.hpp>
-#include <hyprland/src/managers/animation/AnimationManager.hpp>
+#include <hyprland/src/animation/AnimationManager.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 
+#include "core/hyprland_runtime.h"
 #include "core/window_key.h"
 #include "overview/render/animation.h"
 #include "overview/scene/geometry_utils.h"
@@ -67,7 +68,7 @@ void attach_preview_damage_callback(PHLANIMVAR<Vector2D>& animation, int monitor
         return;
 
     animation->setUpdateCallback([monitorId](auto) {
-        if (const auto monitor = g_pCompositor->getMonitorFromID(monitorId))
+        if (const auto monitor = ScrollerCore::HyprlandRuntime::monitorById(monitorId))
             g_pHyprRenderer->damageMonitor(monitor);
     });
 }
@@ -189,7 +190,7 @@ ScrollerCore::Box RenderState::animatedSelectionBox(const ScrollerCore::Box& sel
 void RenderState::rebuildPreviewAnimations(const Model& model) {
     previewAnimations_.clear();
 
-    if (!g_pAnimationManager)
+    if (!Animation::mgr())
         return;
 
     const auto config = preview_animation_config();
@@ -215,8 +216,8 @@ void RenderState::rebuildPreviewAnimations(const Model& model) {
                 animation.monitorId = monitor->m_id;
                 animation.window = target.window;
 
-                g_pAnimationManager->createAnimation(box_position(startBox), animation.position, config, AVARDAMAGE_NONE);
-                g_pAnimationManager->createAnimation(box_size(startBox), animation.size, config, AVARDAMAGE_NONE);
+                Animation::mgr()->createAnimation(box_position(startBox), animation.position, config, AVARDAMAGE_NONE);
+                Animation::mgr()->createAnimation(box_size(startBox), animation.size, config, AVARDAMAGE_NONE);
                 attach_preview_damage_callback(animation.position, monitor->m_id);
                 attach_preview_damage_callback(animation.size, monitor->m_id);
 

@@ -158,7 +158,7 @@ FocusMoveResult Stack::move_focus(Direction direction, bool focus_wrap) {
         }
     }();
 
-    if (g_pCompositor->getMonitorInDirection(monitorDirection) != nullptr)
+    if (ScrollerCore::HyprlandRuntime::monitorInDirection(monitorDirection) != nullptr)
         return FocusMoveResult::CrossMonitor;
 
     // Only once there is no monitor hand-off available do we optionally wrap to

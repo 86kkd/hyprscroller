@@ -4,7 +4,7 @@
  */
 #pragma once
 
-#include <hyprland/src/helpers/Monitor.hpp>
+#include <hyprland/src/output/Monitor.hpp>
 #include <hyprland/src/render/pass/PassElement.hpp>
 
 namespace Overview {

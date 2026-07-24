@@ -3,8 +3,9 @@
  * @brief Read-only overview snapshot helpers for `CanvasLayout`.
  */
 #include <hyprland/src/Compositor.hpp>
-#include <hyprland/src/helpers/Monitor.hpp>
+#include <hyprland/src/output/Monitor.hpp>
 
+#include "core/hyprland_runtime.h"
 #include "../lane/lane.h"
 #include "layout.h"
 
@@ -18,7 +19,7 @@ void CanvasLayout::prepareForOverviewSnapshot() {
     if (!workspace)
         return;
 
-    auto monitor = getVisibleCanvasMonitor(g_pCompositor->getMonitorFromID(workspace->monitorID()));
+    auto monitor = getVisibleCanvasMonitor(ScrollerCore::HyprlandRuntime::monitorById(workspace->monitorID()));
     if (!monitor)
         return;
 
@@ -37,7 +38,7 @@ CanvasOverviewSnapshot CanvasLayout::buildOverviewSnapshot() const {
 
     snapshot.workspaceId = workspace->m_id;
 
-    const auto monitor = getVisibleCanvasMonitor(g_pCompositor->getMonitorFromID(workspace->monitorID()));
+    const auto monitor = getVisibleCanvasMonitor(ScrollerCore::HyprlandRuntime::monitorById(workspace->monitorID()));
     snapshot.monitorId = monitor ? monitor->m_id : workspace->monitorID();
 
     // The snapshot is intentionally lightweight: it carries only monitor/workspace

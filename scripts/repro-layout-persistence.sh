@@ -80,6 +80,25 @@ wait_for_nested_ready() {
     return 1
 }
 
+wait_for_nested_monitor_size() {
+    local monitor_name="$1"
+    local attempt
+
+    for ((attempt = 0; attempt < 80; ++attempt)); do
+        if hyprctl -i "$NESTED_INSTANCE" monitors -j | jq -e \
+            --arg name "$monitor_name" \
+            --argjson width "$NESTED_MONITOR_WIDTH" \
+            --argjson height "$NESTED_MONITOR_HEIGHT" '
+                any(.[]; .name == $name and .width == $width and .height == $height)
+            ' >/dev/null; then
+            return 0
+        fi
+        sleep 0.25
+    done
+
+    return 1
+}
+
 wait_for_window_title() {
     local title="$1"
 
@@ -198,6 +217,8 @@ LAYOUT_NAME="scroller"
 KEEP_OPEN=0
 NESTED_INSTANCE=""
 NESTED_PID=""
+NESTED_MONITOR_WIDTH=1440
+NESTED_MONITOR_HEIGHT=2560
 
 cleanup() {
     if [[ "${KEEP_OPEN:-0}" -eq 1 ]]; then
@@ -249,7 +270,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-require_cmd Hyprland
+require_cmd start-hyprland
 require_cmd hyprctl
 require_cmd jq
 
@@ -266,7 +287,7 @@ SUMMARY_PATH="$RUN_DIR/summary.txt"
 RUNTIME_STATE=""
 
 cat >"$CONFIG_PATH" <<EOF
-monitor = , preferred, auto, 1
+monitor = , ${NESTED_MONITOR_WIDTH}x${NESTED_MONITOR_HEIGHT}@60, 0x0, 1
 
 plugin = $PLUGIN_PATH
 
@@ -302,13 +323,13 @@ debug {
 }
 EOF
 
-BEFORE_MAX_TIME="$(hyprctl instances -j | jq '[.[].time] | max // 0')"
-Hyprland -c "$CONFIG_PATH" >"$LOG_PATH" 2>&1 &
+BEFORE_INSTANCES="$(hyprctl instances -j | jq -c 'map(.instance)')"
+env -u HYPRLAND_INSTANCE_SIGNATURE start-hyprland -- -c "$CONFIG_PATH" >"$LOG_PATH" 2>&1 &
 NESTED_PID=$!
 
 for ((attempt = 0; attempt < 80; ++attempt)); do
-    NESTED_INSTANCE="$(hyprctl instances -j | jq -r --argjson before "$BEFORE_MAX_TIME" '
-        (map(select(.time > $before)) | max_by(.time)? | .instance) // empty
+    NESTED_INSTANCE="$(hyprctl instances -j | jq -r --argjson before "$BEFORE_INSTANCES" '
+        (map(select(.instance as $id | ($before | index($id) | not))) | max_by(.time)? | .instance) // empty
     ')"
     if [[ -n "$NESTED_INSTANCE" ]]; then
         break
@@ -319,6 +340,12 @@ done
 
 [[ -n "$NESTED_INSTANCE" ]] || die "failed to detect nested instance"
 wait_for_nested_ready || die "nested Hyprland never became ready"
+
+NESTED_MONITOR_NAME="$(hyprctl -i "$NESTED_INSTANCE" monitors -j | jq -r 'sort_by(.id) | .[0].name // empty')"
+[[ -n "$NESTED_MONITOR_NAME" ]] || die "failed to resolve nested monitor"
+hyprctl -i "$NESTED_INSTANCE" keyword monitor \
+    "$NESTED_MONITOR_NAME,${NESTED_MONITOR_WIDTH}x${NESTED_MONITOR_HEIGHT}@60,0x0,1" >/dev/null
+wait_for_nested_monitor_size "$NESTED_MONITOR_NAME" || die "nested monitor did not stabilize at requested size"
 
 launch_terminal_window layout-A
 wait_for_window_title layout-A || die "layout-A did not appear"

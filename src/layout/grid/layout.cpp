@@ -41,7 +41,9 @@ void sync_window_target_geometry(PHLWINDOW window) {
     if (!target)
         return;
 
-    target->setPositionGlobal(Hyprutils::Math::CBox(window->m_position, window->m_size));
+    target->setPositionGlobal(Hyprutils::Math::CBox(
+        ScrollerCore::HyprlandRuntime::windowPosition(window),
+        ScrollerCore::HyprlandRuntime::windowSize(window)));
 }
 
 std::vector<PHLWINDOW> live_tiled_workspace_windows(PHLWORKSPACE workspace) {
@@ -49,8 +51,8 @@ std::vector<PHLWINDOW> live_tiled_workspace_windows(PHLWORKSPACE workspace) {
     if (!workspace || !g_pCompositor)
         return windows;
 
-    windows.reserve(g_pCompositor->m_windows.size());
-    for (const auto& window : g_pCompositor->m_windows) {
+    windows.reserve(ScrollerCore::HyprlandRuntime::windows().size());
+    for (const auto& window : ScrollerCore::HyprlandRuntime::windows()) {
         if (!window || window->workspaceID() != workspace->m_id || window->m_isFloating || !window->m_isMapped || window->isHidden())
             continue;
         windows.push_back(window);
@@ -62,7 +64,7 @@ GridLayout* grid_for_workspace(WORKSPACEID workspaceId) {
     if (!g_pCompositor)
         return nullptr;
 
-    const auto workspace = g_pCompositor->getWorkspaceByID(workspaceId);
+    const auto workspace = ScrollerCore::HyprlandRuntime::workspaceById(workspaceId);
     if (!workspace || !workspace->m_space)
         return nullptr;
 
@@ -102,7 +104,7 @@ PHLMONITOR monitor_in_direction(PHLMONITOR sourceMonitor, Direction direction) {
     if (!g_pCompositor || !sourceMonitor || !monitorDirection)
         return nullptr;
 
-    return g_pCompositor->getMonitorInDirection(sourceMonitor, *monitorDirection);
+    return ScrollerCore::HyprlandRuntime::monitorInDirection(sourceMonitor, *monitorDirection);
 }
 
 } // namespace
@@ -146,7 +148,7 @@ PHLMONITOR GridLayout::resolve_monitor() const {
     }
 
     if (const auto window = reference_window())
-        return g_pCompositor->getMonitorFromID(window->monitorID());
+        return ScrollerCore::HyprlandRuntime::monitorById(window->monitorID());
 
     return ScrollerCore::monitorFromPointingOrCursor();
 }
@@ -194,7 +196,7 @@ void GridLayout::sync_active_from_workspace_focus(PHLMONITOR fallbackMonitor) {
     if (!model.contains(key) || !model.focus_window(key))
         return;
 
-    const auto monitor = visible_monitor(g_pCompositor->getMonitorFromID(focusedWindow->monitorID()));
+    const auto monitor = visible_monitor(ScrollerCore::HyprlandRuntime::monitorById(focusedWindow->monitorID()));
     model.ensure_active_visible(current_profile(monitor ? monitor : fallbackMonitor), viewport);
 }
 
@@ -211,12 +213,12 @@ bool GridLayout::manage_window(PHLWINDOW window, PHLMONITOR monitor, bool focusN
     if (!window)
         return false;
 
-    monitor = visible_monitor(monitor ? monitor : g_pCompositor->getMonitorFromID(window->monitorID()));
+    monitor = visible_monitor(monitor ? monitor : ScrollerCore::HyprlandRuntime::monitorById(window->monitorID()));
     const auto profile = current_profile(monitor);
     const auto key = ScrollerCore::window_key(window);
     windowsByKey[key] = window;
 
-    const auto added = model.add_window(key, profile);
+    const auto added = model.add_window(key, profile, &viewport);
     if (!added && focusNewWindow)
         (void)model.focus_window(key);
 
@@ -237,10 +239,13 @@ void GridLayout::relayout(PHLMONITOR monitor) {
         fullscreenKey.reset();
 
     const auto currentWorkspace = workspace();
-    if (currentWorkspace && currentWorkspace->m_hasFullscreenWindow && currentWorkspace->m_fullscreenMode == FSMODE_FULLSCREEN) {
+    if (ScrollerCore::HyprlandRuntime::workspaceHasFullscreen(currentWorkspace) &&
+        ScrollerCore::HyprlandRuntime::workspaceFullscreenMode(currentWorkspace) == Fullscreen::FSMODE_FULLSCREEN) {
         if (const auto active = active_window()) {
-            active->m_position = {bounds.full.x, bounds.full.y};
-            active->m_size = {bounds.full.w, bounds.full.h};
+            ScrollerCore::HyprlandRuntime::setWindowGeometry(
+                active,
+                {bounds.full.x, bounds.full.y},
+                {bounds.full.w, bounds.full.h});
             sync_window_target_geometry(active);
         }
         return;
@@ -254,8 +259,10 @@ void GridLayout::relayout(PHLMONITOR monitor) {
         const auto box = fullscreenKey && *fullscreenKey == item.key
             ? bounds.max
             : apply_window_border_inset(item.committedBox, it->second->getRealBorderSize());
-        it->second->m_position = {box.x, box.y};
-        it->second->m_size = {box.w, box.h};
+        ScrollerCore::HyprlandRuntime::setWindowGeometry(
+            it->second,
+            {box.x, box.y},
+            {box.w, box.h});
         sync_window_target_geometry(it->second);
     }
 }
@@ -321,7 +328,7 @@ bool GridLayout::restoreSnapshot(const ScrollerSnapshot::CanvasSnapshot& snapsho
     if (liveWindows.empty())
         return false;
 
-    const auto monitor = visible_monitor(g_pCompositor->getMonitorFromID(liveWindows.front()->monitorID()));
+    const auto monitor = visible_monitor(ScrollerCore::HyprlandRuntime::monitorById(liveWindows.front()->monitorID()));
     if (!monitor)
         return false;
 
@@ -423,7 +430,7 @@ void GridLayout::newTarget(SP<Layout::ITarget> target) {
     if (!window)
         return;
 
-    const auto monitor = g_pCompositor->getMonitorFromID(window->monitorID());
+    const auto monitor = ScrollerCore::HyprlandRuntime::monitorById(window->monitorID());
     const auto key = ScrollerCore::window_key(window);
     (void)maybeRestoreWorkspaceSnapshot();
     if (model.contains(key)) {
@@ -445,7 +452,7 @@ void GridLayout::removeTarget(SP<Layout::ITarget> target) {
     if (!window)
         return;
 
-    const auto monitor = g_pCompositor->getMonitorFromID(window->monitorID());
+    const auto monitor = ScrollerCore::HyprlandRuntime::monitorById(window->monitorID());
     const auto key = ScrollerCore::window_key(window);
     windowsByKey.erase(key);
     model.remove_window(key);
@@ -527,7 +534,7 @@ void GridLayout::move_focus(int workspace, Direction direction) {
     sync_active_from_workspace_focus(monitor);
     const auto profile = current_profile(monitor);
     const auto before = active_window();
-    const auto sourceMonitor = before ? g_pCompositor->getMonitorFromID(before->monitorID()) : monitor;
+    const auto sourceMonitor = before ? ScrollerCore::HyprlandRuntime::monitorById(before->monitorID()) : monitor;
     const auto targetMonitor = monitor_in_direction(sourceMonitor, direction);
     const auto wrap = focus_wrap_enabled();
     if (!wrap && targetMonitor && model.active_item_at_edge(direction) &&
@@ -554,7 +561,7 @@ void GridLayout::move_window(int workspace, Direction direction) {
     sync_active_from_workspace_focus(monitor);
     const auto profile = current_profile(monitor);
     const auto currentWindow = active_window();
-    const auto sourceMonitor = currentWindow ? g_pCompositor->getMonitorFromID(currentWindow->monitorID()) : monitor;
+    const auto sourceMonitor = currentWindow ? ScrollerCore::HyprlandRuntime::monitorById(currentWindow->monitorID()) : monitor;
     const auto targetMonitor = monitor_in_direction(sourceMonitor, direction);
     if (targetMonitor && model.active_item_at_edge(direction) &&
         handoffMoveWindowAcrossMonitor(workspace, direction, currentWindow, sourceMonitor, targetMonitor)) {
@@ -731,7 +738,7 @@ void GridLayout::focus_window(PHLWINDOW window) {
     if (!model.focus_window(key))
         return;
 
-    const auto monitor = g_pCompositor->getMonitorFromID(window->monitorID());
+    const auto monitor = ScrollerCore::HyprlandRuntime::monitorById(window->monitorID());
     model.ensure_active_visible(current_profile(monitor), viewport);
     relayout(monitor);
     persistSnapshot();
@@ -765,7 +772,7 @@ void GridLayout::recalculateMonitor(const int& monitorId) {
     ensure_workspace_runtime();
     const auto currentWorkspace = workspace();
     const auto monitor = currentWorkspace ? CanvasLayoutInternal::visible_monitor_for_workspace(currentWorkspace)
-                                          : g_pCompositor->getMonitorFromID(monitorId);
+                                          : ScrollerCore::HyprlandRuntime::monitorById(monitorId);
     if (!monitor || monitor->m_id != monitorId)
         return;
 
@@ -786,7 +793,7 @@ CanvasOverviewSnapshot GridLayout::buildOverviewSnapshot() const {
         return snapshot;
 
     snapshot.workspaceId = window->workspaceID();
-    const auto monitor = visible_monitor(g_pCompositor->getMonitorFromID(window->monitorID()));
+    const auto monitor = visible_monitor(ScrollerCore::HyprlandRuntime::monitorById(window->monitorID()));
     snapshot.monitorId = monitor ? monitor->m_id : window->monitorID();
     if (!monitor)
         return snapshot;
@@ -823,7 +830,7 @@ bool GridLayout::handoffFocusAcrossMonitor(int workspace,
         return false;
 
     const auto workspaceId = CanvasLayoutInternal::preferred_workspace_id(targetMonitor, workspace);
-    const auto targetWorkspace = g_pCompositor->getWorkspaceByID(workspaceId);
+    const auto targetWorkspace = ScrollerCore::HyprlandRuntime::workspaceById(workspaceId);
     auto* targetGrid = grid_for_workspace(workspaceId);
     auto* targetCanvas = CanvasLayoutInternal::get_canvas_for_workspace(workspaceId);
     PHLWINDOW targetWindow = nullptr;
@@ -868,7 +875,7 @@ bool GridLayout::handoffMoveWindowAcrossMonitor(int workspace,
     if ((!targetGrid || targetGrid == this) && !targetCanvas)
         return false;
 
-    const auto targetWorkspace = g_pCompositor->getWorkspaceByID(workspaceId);
+    const auto targetWorkspace = ScrollerCore::HyprlandRuntime::workspaceById(workspaceId);
     const auto selector = ScrollerCore::workspace_selector(targetWorkspace);
     if (!CanvasLayoutInternal::can_invoke_dispatcher("movetoworkspacesilent", selector, "grid_move_window_cross_monitor"))
         return false;

@@ -106,6 +106,9 @@ public:
     void set_canvas_geometry(const ScrollerCore::Box &full_box,
                              const ScrollerCore::Box &max_box,
                              int gap_size);
+    void set_restored_canvas_geometry(const ScrollerCore::Box &full_box,
+                                      const ScrollerCore::Box &max_box,
+                                      int gap_size);
 
     // Remove a window and re-adapt lanes and stacks, returning true on success.
     bool remove_window(PHLWINDOW window);
@@ -132,6 +135,7 @@ public:
     void toggle_maximize_active_stack();
     void fit_size(FitSize fitsize);
     void recalculate_lane_geometry();
+    void commit_restored_geometry();
     void append_restored_stack(ScrollerModel::Stack *stack);
     void set_active_stack_by_index(size_t index);
     void set_reorder(ScrollerModel::Reorder value);

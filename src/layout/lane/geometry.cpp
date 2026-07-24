@@ -279,7 +279,7 @@ void Lane::recalculate_lane_geometry() {
 
     // Hyprland-native fullscreen bypasses the normal overview/scroller viewport
     // rules. In that mode we only refresh the active stack's child-window layout.
-    if (const auto activeWindow = active->data()->get_active_window(); activeWindow && activeWindow->isFullscreen()) {
+    if (const auto activeWindow = active->data()->get_active_window(); ScrollerCore::HyprlandRuntime::windowIsFullscreen(activeWindow)) {
         active->data()->recalculate_stack_geometry(calculate_gap_x(active), gap, max);
         return;
     }
@@ -382,6 +382,11 @@ void Lane::recalculate_lane_geometry() {
                   next_inside,
                   newPos,
                   logging::summarize_stacks(stacks, mode));
+}
+
+void Lane::commit_restored_geometry() {
+    for (auto stack = stacks.first(); stack != nullptr; stack = stack->next())
+        stack->data()->recalculate_stack_geometry(calculate_gap_x(stack), gap, max);
 }
 
 void Lane::adjust_stacks(ListNode<Stack *> *stack) {

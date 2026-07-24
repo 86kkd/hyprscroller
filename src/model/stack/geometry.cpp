@@ -112,18 +112,21 @@ void Stack::scale(const Vector2D &bmin, const Vector2D &start, double scale, dou
         auto border = window->getRealBorderSize();
         auto gap0 = win == windows.first() ? 0.0 : gap;
         auto gap1 = win == windows.last() ? 0.0 : gap;
+        auto position = ScrollerCore::HyprlandRuntime::windowPosition(window);
+        auto size = ScrollerCore::HyprlandRuntime::windowSize(window);
         if (mode == Mode::Column) {
-            window->m_position = Vector2D(win->data()->get_geom_y() + border + gap0,
-                                          start.y + border + geom.y - bmin.y);
-            window->m_size.x = (window->m_size.x + 2.0 * border + gap0 + gap1) * scale - gap0 - gap1 - 2.0 * border;
-            window->m_size.y *= scale;
+            position = Vector2D(win->data()->get_geom_y() + border + gap0,
+                                start.y + border + geom.y - bmin.y);
+            size.x = (size.x + 2.0 * border + gap0 + gap1) * scale - gap0 - gap1 - 2.0 * border;
+            size.y *= scale;
         } else {
-            window->m_position = Vector2D(start.x + border + geom.x - bmin.x,
-                                          win->data()->get_geom_y() + border + gap0);
-            window->m_size.x *= scale;
-            window->m_size.y = (window->m_size.y + 2.0 * border + gap0 + gap1) * scale - gap0 - gap1 - 2.0 * border;
+            position = Vector2D(start.x + border + geom.x - bmin.x,
+                                win->data()->get_geom_y() + border + gap0);
+            size.x *= scale;
+            size.y = (size.y + 2.0 * border + gap0 + gap1) * scale - gap0 - gap1 - 2.0 * border;
         }
-        window->m_size = Vector2D(std::max(window->m_size.x, 1.0), std::max(window->m_size.y, 1.0));
+        size = Vector2D(std::max(size.x, 1.0), std::max(size.y, 1.0));
+        ScrollerCore::HyprlandRuntime::setWindowGeometry(window, position, size);
         StackInternal::sync_window_target_geometry(window);
     }
 }
@@ -201,8 +204,10 @@ void Stack::recalculate_stack_geometry(const Vector2D &gap_x, double gap, const 
         if (!activeWindow)
             return;
         active->data()->set_geom_y(StackInternal::stack_local_origin(full, mode));
-        activeWindow->m_position = Vector2D(full.x, full.y);
-        activeWindow->m_size = Vector2D(full.w, full.h);
+        ScrollerCore::HyprlandRuntime::setWindowGeometry(
+            activeWindow,
+            Vector2D(full.x, full.y),
+            Vector2D(full.w, full.h));
         StackInternal::sync_window_target_geometry(activeWindow);
         return;
     }
@@ -324,7 +329,7 @@ void Stack::adjust_windows(ListNode<Window *> *win, const Vector2D &gap_x, doubl
     }
 
     auto anchorWindow = win ? win->data()->ptr().lock() : nullptr;
-    auto monitor = anchorWindow ? g_pCompositor->getMonitorFromID(anchorWindow->monitorID()) : nullptr;
+    auto monitor = anchorWindow ? ScrollerCore::HyprlandRuntime::monitorById(anchorWindow->monitorID()) : nullptr;
     const auto monitorBox = monitor ? ScrollerCore::logical_monitor_box(monitor) : ScrollerCore::Box{};
     const auto fullCommitBox = monitor ? monitorBox : visibleBox;
     const auto fullStart = monitor ? (mode == Mode::Column ? monitorBox.x : monitorBox.y) : StackInternal::stack_local_origin(geom, mode);
@@ -382,8 +387,10 @@ void Stack::adjust_windows(ListNode<Window *> *win, const Vector2D &gap_x, doubl
         const auto logicalBox = logical_window_box(geom, mode, border, gap_x, w->data()->get_geom_y(), localSize, gap0, gap1);
         const auto minCommittedSpan = std::max(1.0, 2.0 * border + 1.0);
         const auto committedBox = safe_committed_box(logicalBox, visibleBox, fullCommitBox, minCommittedSpan);
-        window->m_position = Vector2D(committedBox.x, committedBox.y);
-        window->m_size = Vector2D(committedBox.w, committedBox.h);
+        ScrollerCore::HyprlandRuntime::setWindowGeometry(
+            window,
+            Vector2D(committedBox.x, committedBox.y),
+            Vector2D(committedBox.w, committedBox.h));
         StackInternal::sync_window_target_geometry(window);
     }
 }

@@ -213,7 +213,7 @@ struct FakeDispatcherRuntime final : CanvasLayoutInternal::DispatcherRuntime {
     }
 
     PHLMONITOR addMonitor(int id, std::string name, WORKSPACEID activeWorkspaceId = INVALID_WORKSPACE_ID) {
-        auto monitor = make_opaque_handle<CMonitor>();
+        auto monitor = make_opaque_handle<Monitor::CMonitor>();
         monitors.emplace(monitor.get(), MonitorState{std::move(name), activeWorkspaceId, INVALID_WORKSPACE_ID});
         monitorsById.emplace(id, monitor);
         monitorsByName.emplace(monitors[monitor.get()].name, monitor);

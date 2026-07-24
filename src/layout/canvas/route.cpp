@@ -3,6 +3,7 @@
 #include <hyprland/src/Compositor.hpp>
 
 #include "../../core/layout_profile.h"
+#include "core/hyprland_runtime.h"
 #include "internal.h"
 
 namespace {
@@ -43,7 +44,7 @@ PHLMONITOR resolve_monitor_in_direction(PHLMONITOR sourceMonitor, Direction dire
     if (!g_pCompositor || !sourceMonitor || !monitorDirection)
         return nullptr;
 
-    return g_pCompositor->getMonitorInDirection(sourceMonitor, *monitorDirection);
+    return ScrollerCore::HyprlandRuntime::monitorInDirection(sourceMonitor, *monitorDirection);
 }
 
 DirectionalHandoffPlan plan_directional_handoff(List<Lane *> &lanes, ListNode<Lane *> *current, PHLMONITOR sourceMonitor,

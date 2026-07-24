@@ -10,7 +10,7 @@
 #include <utility>
 
 #include <hyprland/src/Compositor.hpp>
-#include <hyprland/src/helpers/Monitor.hpp>
+#include <hyprland/src/output/Monitor.hpp>
 #include <hyprland/src/includes.hpp>
 #include <hyprland/src/layout/algorithm/Algorithm.hpp>
 #include <hyprland/src/layout/space/Space.hpp>
@@ -20,6 +20,7 @@
 #include <spdlog/spdlog.h>
 
 #include "core/direction.h"
+#include "core/hyprland_runtime.h"
 #include "layout/canvas/internal.h"
 #include "layout/canvas/layout.h"
 #include "layout/grid/layout.h"
@@ -56,7 +57,7 @@ inline bool isOverviewAcceptArg(std::string_view arg) {
 }
 
 inline CanvasLayout* getCanvasForWorkspace(const int workspaceId) {
-    const auto workspace = g_pCompositor->getWorkspaceByID(workspaceId);
+    const auto workspace = ScrollerCore::HyprlandRuntime::workspaceById(workspaceId);
     if (!workspace || !workspace->m_space)
         return nullptr;
 
@@ -72,7 +73,7 @@ inline CanvasLayout* getCanvasForWorkspace(const int workspaceId) {
 }
 
 inline ScrollerGrid::GridLayout* getGridForWorkspace(const int workspaceId) {
-    const auto workspace = g_pCompositor->getWorkspaceByID(workspaceId);
+    const auto workspace = ScrollerCore::HyprlandRuntime::workspaceById(workspaceId);
     if (!workspace || !workspace->m_space)
         return nullptr;
 
@@ -92,14 +93,14 @@ inline PHLWORKSPACE getWorkspaceForAction(PHLMONITOR monitor) {
         return nullptr;
 
     const auto specialWorkspaceId = monitor->activeSpecialWorkspaceID();
-    if (const auto specialWorkspace = g_pCompositor->getWorkspaceByID(specialWorkspaceId))
+    if (const auto specialWorkspace = ScrollerCore::HyprlandRuntime::workspaceById(specialWorkspaceId))
         return specialWorkspace;
 
     const auto activeWorkspaceId = monitor->activeWorkspaceID();
     if (activeWorkspaceId == WORKSPACE_INVALID)
         return nullptr;
 
-    return g_pCompositor->getWorkspaceByID(activeWorkspaceId);
+    return ScrollerCore::HyprlandRuntime::workspaceById(activeWorkspaceId);
 }
 
 inline PHLWORKSPACE workspaceForActionContext(int* workspace) {
@@ -110,7 +111,7 @@ inline PHLWORKSPACE workspaceForActionContext(int* workspace) {
         return nullptr;
     }
 
-    PHLMONITOR monitor = g_pCompositor->getMonitorFromCursor();
+    PHLMONITOR monitor = ScrollerCore::HyprlandRuntime::monitorFromCursor();
     if (!monitor) {
         spdlog::warn("layout_for_action: no monitor under cursor");
         if (workspace)
@@ -120,18 +121,18 @@ inline PHLWORKSPACE workspaceForActionContext(int* workspace) {
 
     const auto specialWorkspaceId = monitor->activeSpecialWorkspaceID();
     const auto activeWorkspaceId = monitor->activeWorkspaceID();
-    const auto specialWorkspace = g_pCompositor->getWorkspaceByID(specialWorkspaceId);
+    const auto specialWorkspace = ScrollerCore::HyprlandRuntime::workspaceById(specialWorkspaceId);
     const auto selectedWorkspace = getWorkspaceForAction(monitor);
     const auto workspaceId = selectedWorkspace ? selectedWorkspace->m_id : WORKSPACE_INVALID;
 
-    if (!selectedWorkspace || selectedWorkspace->m_hasFullscreenWindow) {
+    if (!selectedWorkspace || ScrollerCore::HyprlandRuntime::workspaceHasFullscreen(selectedWorkspace)) {
         spdlog::debug("layout_for_action: rejected chosen_ws={} special_ws={} active_ws={} special_exists={} exists={} fullscreen={}",
                       workspaceId,
                       specialWorkspaceId,
                       activeWorkspaceId,
                       specialWorkspace != nullptr,
                       selectedWorkspace != nullptr,
-                      selectedWorkspace ? selectedWorkspace->m_hasFullscreenWindow : false);
+                      ScrollerCore::HyprlandRuntime::workspaceHasFullscreen(selectedWorkspace));
         if (workspace)
             *workspace = -1;
         return nullptr;
