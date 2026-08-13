@@ -28,6 +28,7 @@
 #include <hyprland/src/protocols/XDGShell.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/render/pass/ClearPassElement.hpp>
+#include <hyprland/src/render/pass/TexPassElement.hpp>
 #include <hyprland/src/xwayland/XSurface.hpp>
 
 #include "overview/scene/geometry_utils.h"
@@ -392,7 +393,7 @@ void snapshotBackdropLayers(const Model& model, RenderState& state) {
     // The backdrop is captured separately from window targets so overview can
     // recreate "wallpaper beneath previews" without mutating the normal window
     // render order.
-    state.clearBackdropLayers();
+    state.clearBackdropSnapshots();
 
     for (const auto& region : model.monitors()) {
         auto monitor = region.monitor;
@@ -405,7 +406,11 @@ void snapshotBackdropLayers(const Model& model, RenderState& state) {
                 if (!layer || !layer->aliveAndVisible())
                     continue;
 
-                state.appendBackdropLayer(monitor->m_id, layer);
+                auto snapshot = g_pHyprRenderer->makeSnapshotFB(layer);
+                if (!snapshot || !snapshot->isAllocated() || !snapshot->getTexture())
+                    continue;
+
+                state.appendBackdropSnapshot(monitor->m_id, std::move(snapshot));
             }
         };
 
@@ -418,34 +423,34 @@ void enqueueMonitorBackdrop(PHLMONITOR monitor, const RenderState& state) {
     if (!monitor)
         return;
 
-    // Always paint a stable matte first, then replay captured background/bottom
-    // layer snapshots. That keeps overview visually stable even if the monitor
-    // background texture itself is changing underneath us.
+    // Queue every backdrop operation in render-pass order. Drawing a live layer
+    // texture here would happen before the queued clear executes and the clear
+    // would erase it when the pass is rendered.
     g_pHyprRenderer->m_renderPass.add(makeUnique<CClearPassElement>(CClearPassElement::SClearData{
         Style::matteBackground(),
     }));
 
-    const auto* layers = state.backdropLayersForMonitor(monitor->m_id);
-    if (!layers)
+    const auto* snapshots = state.backdropSnapshotsForMonitor(monitor->m_id);
+    if (!snapshots)
         return;
 
-    for (const auto& layerRef : *layers) {
-        auto layer = layerRef.lock();
-        if (!layer || !layer->aliveAndVisible())
+    const CRegion damage{0, 0, monitor->m_transformedSize.x, monitor->m_transformedSize.y};
+    for (const auto& snapshot : *snapshots) {
+        if (!snapshot || !snapshot->isAllocated())
             continue;
 
-        const auto surface = layer->resource();
-        const auto box = layer->logicalBox();
-        if (!surface || !surface->m_current.texture || !box)
+        const auto texture = snapshot->getTexture();
+        if (!texture)
             continue;
 
-        CHyprOpenGLImpl::STextureRenderData data;
+        CTexPassElement::SRenderData data;
+        data.tex = texture;
+        data.box = CBox{0, 0, monitor->m_transformedSize.x, monitor->m_transformedSize.y};
+        data.damage = damage;
         data.a = 1.0F;
+        data.flipEndFrame = true;
         data.blockBlurOptimization = true;
-        g_pHyprOpenGL->renderTexture(
-            surface->m_current.texture,
-            CBox{box->x - monitor->m_position.x, box->y - monitor->m_position.y, box->width, box->height},
-            data);
+        g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(std::move(data)));
     }
 }
 

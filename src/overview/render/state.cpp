@@ -78,7 +78,7 @@ void attach_preview_damage_callback(PHLANIMVAR<Vector2D>& animation, int monitor
 void RenderState::clearSessionState() {
     openedAt_.clear();
     liveScenes_.clear();
-    backdropLayers_.clear();
+    backdropSnapshots_.clear();
     selectionPulses_.clear();
     previewAnimations_.clear();
     textCache_.clear();
@@ -143,17 +143,17 @@ const std::unordered_map<int, SceneMonitor>& RenderState::scenes() const {
     return liveScenes_;
 }
 
-void RenderState::clearBackdropLayers() {
-    backdropLayers_.clear();
+void RenderState::clearBackdropSnapshots() {
+    backdropSnapshots_.clear();
 }
 
-void RenderState::appendBackdropLayer(int monitorId, PHLLSREF layer) {
-    backdropLayers_[monitorId].push_back(std::move(layer));
+void RenderState::appendBackdropSnapshot(int monitorId, SP<Render::IFramebuffer> snapshot) {
+    backdropSnapshots_[monitorId].push_back(std::move(snapshot));
 }
 
-const std::vector<PHLLSREF>* RenderState::backdropLayersForMonitor(int monitorId) const {
-    const auto it = backdropLayers_.find(monitorId);
-    return it == backdropLayers_.end() ? nullptr : &it->second;
+const std::vector<SP<Render::IFramebuffer>>* RenderState::backdropSnapshotsForMonitor(int monitorId) const {
+    const auto it = backdropSnapshots_.find(monitorId);
+    return it == backdropSnapshots_.end() ? nullptr : &it->second;
 }
 
 void RenderState::updateSelectionPulse(const SceneMonitor& scene, steady_tp now) {

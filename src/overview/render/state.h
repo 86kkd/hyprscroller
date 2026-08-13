@@ -9,8 +9,8 @@
 #include <unordered_map>
 #include <vector>
 
-#include <hyprland/src/desktop/view/LayerSurface.hpp>
 #include <hyprland/src/helpers/AnimatedVariable.hpp>
+#include <hyprland/src/render/Framebuffer.hpp>
 #include <hyprland/src/render/OpenGL.hpp>
 
 #include "overview/render/animation.h"
@@ -48,9 +48,9 @@ class RenderState {
     const SceneMonitor* sceneForMonitor(int monitorId) const;
     const std::unordered_map<int, SceneMonitor>& scenes() const;
 
-    void clearBackdropLayers();
-    void appendBackdropLayer(int monitorId, PHLLSREF layer);
-    const std::vector<PHLLSREF>* backdropLayersForMonitor(int monitorId) const;
+    void clearBackdropSnapshots();
+    void appendBackdropSnapshot(int monitorId, SP<Render::IFramebuffer> snapshot);
+    const std::vector<SP<Render::IFramebuffer>>* backdropSnapshotsForMonitor(int monitorId) const;
 
     void updateSelectionPulse(const SceneMonitor& scene, steady_tp now);
     bool selectionAnimationActive(int monitorId, steady_tp now) const;
@@ -67,7 +67,7 @@ class RenderState {
   private:
     std::unordered_map<int, steady_tp>              openedAt_;
     std::unordered_map<int, SceneMonitor>           liveScenes_;
-    std::unordered_map<int, std::vector<PHLLSREF>>  backdropLayers_;
+    std::unordered_map<int, std::vector<SP<Render::IFramebuffer>>> backdropSnapshots_;
     std::unordered_map<int, SelectionPulse>         selectionPulses_;
     std::unordered_map<std::uintptr_t, PreviewAnimation> previewAnimations_;
     std::unordered_map<std::string, SP<Render::ITexture>> textCache_;
