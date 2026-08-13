@@ -134,7 +134,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     init_logging();
     CanvasLayoutState::repository().initialize();
     CanvasLayoutState::canvasRepository().initialize();
-    spdlog::info("pluginInit handle={}", static_cast<const void*>(handle));
+    spdlog::info("pluginInit handle={} hyprland_abi={}", static_cast<const void*>(handle), __hyprland_api_get_client_hash());
 
     spdlog::info("pluginInit: registering config values");
     scroller::plugin_config::registerConfigValues(PHANDLE);

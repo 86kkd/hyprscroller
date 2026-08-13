@@ -20,6 +20,9 @@ This fork is maintained against the Hyprland versions I actually run and test.
 The focus is practical compatibility with packaged Hyprland releases first,
 instead of chasing trunk continuously.
 
+The current compatibility baseline is Arch Linux Hyprland 0.56.2. Rebuild the
+plugin after every Hyprland package update, and restart the Hyprland session
+before loading that new build.
 
 ## Requirements
 

@@ -20,6 +20,18 @@
 
 ## 1. 构建 Debug 插件
 
+Arch Linux 更新 `hyprland` 包后，先确认磁盘上的版本和当前运行中的版本一致：
+
+```bash
+Hyprland --version
+hyprctl version
+```
+
+如果两条命令显示的版本或 commit 不同，先退出并重新登录 Hyprland 会话，再构建和
+加载插件。Hyprland 插件 ABI 绑定到具体构建；不能把针对新头文件编译的插件加载到
+尚未重启的旧 Hyprland 进程中。嵌套回测也应在主会话重启后进行，避免新旧
+Aquamarine/EGL 运行库混用导致 nested compositor 在插件初始化前崩溃。
+
 先在仓库根目录构建 debug 版本：
 
 ```bash
@@ -31,6 +43,10 @@ make debug
 ```bash
 ./Debug/hyprscroller.so
 ```
+
+插件初始化成功后，`~/.hyprland/plugins/hyprscroller/hyprscroller.log` 中的
+`hyprland_abi` 字段会记录该二进制的编译目标 commit 和依赖 ABI，可用于排查加载了
+旧构建的问题。
 
 ## 2. 快速复现 overview
 
