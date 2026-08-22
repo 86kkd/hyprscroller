@@ -4,6 +4,8 @@
  */
 #include "plugin/dispatch/shared.h"
 
+#include <lua.hpp>
+
 namespace dispatchers::detail {
 namespace {
 
@@ -78,6 +80,63 @@ void registerOverviewMarkDispatchers() {
     registerDispatcher("scroller:marksdelete", dispatch_marksdelete);
     registerDispatcher("scroller:marksvisit", dispatch_marksvisit);
     registerDispatcher("scroller:marksreset", dispatch_marksreset);
+}
+
+namespace {
+
+std::string luaStringArg(lua_State* state) {
+    if (lua_gettop(state) < 1 || !lua_isstring(state, 1))
+        return {};
+
+    size_t length = 0;
+    const char* value = lua_tolstring(state, 1, &length);
+    return value ? std::string(value, length) : std::string();
+}
+
+int lua_toggle_overview(lua_State* state) {
+    dispatch_toggleoverview(luaStringArg(state));
+    return 0;
+}
+
+int lua_cancel_overview(lua_State* state) {
+    dispatch_canceloverview(luaStringArg(state));
+    return 0;
+}
+
+int lua_marks_add(lua_State* state) {
+    dispatch_marksadd(luaStringArg(state));
+    return 0;
+}
+
+int lua_marks_delete(lua_State* state) {
+    dispatch_marksdelete(luaStringArg(state));
+    return 0;
+}
+
+int lua_marks_visit(lua_State* state) {
+    dispatch_marksvisit(luaStringArg(state));
+    return 0;
+}
+
+int lua_marks_reset(lua_State* state) {
+    dispatch_marksreset(luaStringArg(state));
+    return 0;
+}
+
+void registerLuaFunction(const char* name, PLUGIN_LUA_FN function) {
+    if (!HyprlandAPI::addLuaFunction(PHANDLE, "scroller", name, function))
+        spdlog::warn("failed to register Lua function hl.plugin.scroller.{}", name);
+}
+
+} // namespace
+
+void registerOverviewMarkLuaFunctions() {
+    registerLuaFunction("toggle_overview", lua_toggle_overview);
+    registerLuaFunction("cancel_overview", lua_cancel_overview);
+    registerLuaFunction("marks_add", lua_marks_add);
+    registerLuaFunction("marks_delete", lua_marks_delete);
+    registerLuaFunction("marks_visit", lua_marks_visit);
+    registerLuaFunction("marks_reset", lua_marks_reset);
 }
 
 } // namespace dispatchers::detail

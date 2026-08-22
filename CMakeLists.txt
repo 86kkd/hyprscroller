@@ -15,6 +15,7 @@ option(HYPRSCROLLER_ENABLE_SANITIZERS "Enable ASan/UBSan in debug builds" OFF)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(DEPS REQUIRED hyprland pixman-1 libdrm)
 pkg_check_modules(HYPRLAND REQUIRED IMPORTED_TARGET hyprland)
+pkg_check_modules(LUA REQUIRED IMPORTED_TARGET lua)
 find_package(spdlog REQUIRED)
 
 # Compile flags
@@ -122,7 +123,7 @@ target_include_directories(hyprscroller PRIVATE
             /usr/include/hyprland/wlroots-hyprland/hyprland 
             /usr/include/hyprland/src
 )
-target_link_libraries(hyprscroller PRIVATE spdlog::spdlog_header_only)
+target_link_libraries(hyprscroller PRIVATE spdlog::spdlog_header_only PkgConfig::LUA)
 set_target_properties(hyprscroller PROPERTIES PREFIX "")
 
 if(BUILD_TESTING)

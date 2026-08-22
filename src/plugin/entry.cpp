@@ -145,6 +145,10 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     dispatchers::addDispatchers();
     spdlog::info("pluginInit: dispatchers registered");
 
+    spdlog::info("pluginInit: registering Lua functions");
+    dispatchers::addLuaFunctions();
+    spdlog::info("pluginInit: Lua functions registered");
+
     // Register scroller as a custom tiled algorithm only after all config values
     // it may read during initial workspace population have been registered.
     spdlog::info("pluginInit: registering tiled algorithm scroller");

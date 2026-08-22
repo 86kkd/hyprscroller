@@ -10,3 +10,8 @@ void dispatchers::addDispatchers() {
     detail::registerLayoutDispatchers();
     detail::registerOverviewMarkDispatchers();
 }
+
+void dispatchers::addLuaFunctions() {
+    detail::registerLayoutLuaFunctions();
+    detail::registerOverviewMarkLuaFunctions();
+}

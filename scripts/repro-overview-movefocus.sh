@@ -248,7 +248,11 @@ chmod +x "$LAUNCHER_PATH"
 
 BEFORE_INSTANCES="$(hyprctl instances -j | jq -c 'map(.instance)')"
 LAUNCH_RULES="[monitor $OUTER_MONITOR; float; size $WINDOW_WIDTH $WINDOW_HEIGHT; center]"
-hyprctl dispatch exec "$LAUNCH_RULES $LAUNCHER_PATH" >/dev/null
+if hyprctl status 2>/dev/null | rg -q '^configProvider: lua$'; then
+    "$LAUNCHER_PATH" &
+else
+    hyprctl dispatch exec "$LAUNCH_RULES $LAUNCHER_PATH" >/dev/null
+fi
 
 for ((attempt = 0; attempt < 80; ++attempt)); do
     NESTED_INSTANCE="$(hyprctl instances -j | jq -r --argjson before "$BEFORE_INSTANCES" '

@@ -4,6 +4,8 @@
  */
 #include "plugin/dispatch/shared.h"
 
+#include <lua.hpp>
+
 #include "core/core.h"
 
 namespace dispatchers::detail {
@@ -280,6 +282,51 @@ void registerLayoutDispatchers() {
     registerDispatcher("scroller:togglefullscreen", dispatch_togglefullscreen);
     registerDispatcher("scroller:createlane", dispatch_createlane);
     registerDispatcher("scroller:focuslane", dispatch_focuslane);
+}
+
+namespace {
+
+std::string luaStringArg(lua_State* state) {
+    if (lua_gettop(state) < 1 || !lua_isstring(state, 1))
+        return {};
+
+    size_t length = 0;
+    const char* value = lua_tolstring(state, 1, &length);
+    return value ? std::string(value, length) : std::string();
+}
+
+int lua_move_focus(lua_State* state) {
+    dispatch_movefocus(luaStringArg(state));
+    return 0;
+}
+
+int lua_focus_monitor(lua_State* state) {
+    dispatch_focusmonitor(luaStringArg(state));
+    return 0;
+}
+
+int lua_move_window(lua_State* state) {
+    dispatch_movewindow(luaStringArg(state));
+    return 0;
+}
+
+int lua_toggle_fullscreen(lua_State* state) {
+    dispatch_togglefullscreen(luaStringArg(state));
+    return 0;
+}
+
+void registerLuaFunction(const char* name, PLUGIN_LUA_FN function) {
+    if (!HyprlandAPI::addLuaFunction(PHANDLE, "scroller", name, function))
+        spdlog::warn("failed to register Lua function hl.plugin.scroller.{}", name);
+}
+
+} // namespace
+
+void registerLayoutLuaFunctions() {
+    registerLuaFunction("move_focus", lua_move_focus);
+    registerLuaFunction("focus_monitor", lua_focus_monitor);
+    registerLuaFunction("move_window", lua_move_window);
+    registerLuaFunction("toggle_fullscreen", lua_toggle_fullscreen);
 }
 
 } // namespace dispatchers::detail

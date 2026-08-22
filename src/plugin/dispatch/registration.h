@@ -12,4 +12,7 @@
 namespace dispatchers {
     // Register every `scroller:*` dispatcher into Hyprland's dispatcher table.
     void addDispatchers();
+
+    // Register functions exposed as `hl.plugin.scroller.*` to Lua configs.
+    void addLuaFunctions();
 }

@@ -269,5 +269,7 @@ inline void registerDispatcher(const char* name, Fn&& fn) {
 
 void registerLayoutDispatchers();
 void registerOverviewMarkDispatchers();
+void registerLayoutLuaFunctions();
+void registerOverviewMarkLuaFunctions();
 
 } // namespace dispatchers::detail
