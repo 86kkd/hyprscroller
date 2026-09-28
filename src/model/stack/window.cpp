@@ -9,6 +9,7 @@
 #include "model/stack/stack.h"
 
 #include "core/layout_profile.h"
+#include "core/window_key.h"
 
 namespace ScrollerModel {
 
@@ -95,8 +96,9 @@ void Window::restore_state(WindowHeight h, double geom_y, double geom_h, double 
 }
 
 ScrollerSnapshot::WindowSnapshot Window::capture_snapshot() const {
+    const auto compositorWindow = window.lock();
     return {
-        .key = window ? reinterpret_cast<uintptr_t>(window.get()) : 0,
+        .key = ScrollerCore::window_key(compositorWindow),
         .heightMode = static_cast<int>(height),
         .geomY = box_y,
         .geomH = box_h,

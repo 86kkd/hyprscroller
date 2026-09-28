@@ -112,7 +112,8 @@ std::string serialize_repository(const RepositorySnapshot &snapshots) {
             continue;
 
         const auto &canvas = it->second;
-        out << "WORKSPACE " << canvas.workspaceId << ' ' << canvas.activeLaneIndex << ' ' << canvas.lanes.size() << '\n';
+        out << "WORKSPACE " << canvas.workspaceId << ' ' << canvas.activeLaneIndex << ' '
+            << canvas.lanes.size() << ' ' << canvas.version << '\n';
         for (const auto &lane : canvas.lanes) {
             out << "LANE " << lane.mode << ' ' << lane.reorder << ' ' << (lane.ephemeral ? 1 : 0) << ' '
                 << lane.activeStackIndex << ' ' << lane.stacks.size() << '\n';
@@ -170,6 +171,7 @@ std::optional<RepositorySnapshot> deserialize_repository(std::string_view data) 
                 (version != kLegacyFormatVersion &&
                  version != kGridFormatVersion &&
                  version != kGridModeFormatVersion &&
+                 version != kFullscreenFormatVersion &&
                  version != kFormatVersion))
                 return std::nullopt;
             formatVersion = version;
@@ -183,11 +185,20 @@ std::optional<RepositorySnapshot> deserialize_repository(std::string_view data) 
         if (tokens[0] == "WORKSPACE") {
             CanvasSnapshot canvas;
             size_t laneCount = 0;
-            if (tokens.size() != 4 ||
+            if ((tokens.size() != 4 && tokens.size() != 5) ||
                 !parse_token(tokens[1], canvas.workspaceId) ||
                 !parse_size_token(tokens[2], canvas.activeLaneIndex) ||
                 !parse_size_token(tokens[3], laneCount))
                 return std::nullopt;
+            if (tokens.size() == 5) {
+                if (formatVersion < kStableWindowKeyFormatVersion ||
+                    !parse_token(tokens[4], canvas.version) ||
+                    canvas.version < kLegacyFormatVersion ||
+                    canvas.version > kFormatVersion)
+                    return std::nullopt;
+            } else {
+                canvas.version = formatVersion;
+            }
             canvas.lanes.reserve(laneCount);
             currentCanvas = &snapshots[canvas.workspaceId];
             *currentCanvas = std::move(canvas);

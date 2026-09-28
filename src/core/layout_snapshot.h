@@ -14,7 +14,9 @@ namespace ScrollerSnapshot {
 constexpr int kLegacyFormatVersion = 1;
 constexpr int kGridFormatVersion = 2;
 constexpr int kGridModeFormatVersion = 3;
-constexpr int kFormatVersion = 4;
+constexpr int kFullscreenFormatVersion = 4;
+constexpr int kStableWindowKeyFormatVersion = 5;
+constexpr int kFormatVersion = kStableWindowKeyFormatVersion;
 
 struct WindowSnapshot {
     uintptr_t key = 0;

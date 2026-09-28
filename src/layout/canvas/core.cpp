@@ -29,6 +29,7 @@
 #include <hyprland/src/output/Monitor.hpp>
 #include <hyprland/src/layout/algorithm/Algorithm.hpp>
 #include <hyprland/src/layout/space/Space.hpp>
+#include <hyprland/src/managers/fullscreen/handler/FullscreenHandler.hpp>
 #include <spdlog/spdlog.h>
 
 #include "../../core/core.h"
@@ -536,7 +537,11 @@ bool CanvasLayout::restoreSnapshot(const ScrollerSnapshot::CanvasSnapshot &snaps
     std::unordered_map<uintptr_t, PHLWINDOW> windowsByKey;
     windowsByKey.reserve(liveWindows.size());
     for (const auto &window : liveWindows)
-        windowsByKey.emplace(ScrollerCore::window_key(window), window);
+        windowsByKey.emplace(ScrollerCore::snapshot_window_key(
+                                 window,
+                                 snapshot.version,
+                                 ScrollerSnapshot::kStableWindowKeyFormatVersion),
+                             window);
 
     const auto visibleMonitor = getVisibleCanvasMonitor();
     const auto fallbackMonitor = visibleMonitor ? visibleMonitor : ScrollerCore::HyprlandRuntime::monitorById(liveWindows.front()->monitorID());
@@ -595,7 +600,10 @@ bool CanvasLayout::restoreSnapshot(const ScrollerSnapshot::CanvasSnapshot &snaps
             if (stackSnapshot.activeWindowKey != 0) {
                 const auto activeWindowKey = stackSnapshot.activeWindowKey;
                 stack->for_each_window([&](PHLWINDOW window) {
-                    if (ScrollerCore::window_key(window) == activeWindowKey)
+                    if (ScrollerCore::snapshot_window_key(
+                            window,
+                            snapshot.version,
+                            ScrollerSnapshot::kStableWindowKeyFormatVersion) == activeWindowKey)
                         stack->focus_window(window);
                 });
             }
@@ -735,6 +743,13 @@ void CanvasLayout::relayoutCanvas(PHLMONITOR monitor, bool honor_fullscreen, boo
     if (!workspace || !monitor || lanes.empty())
         return;
 
+    // Default-handled fullscreen/maximized targets are owned by Hyprland's
+    // handler. Normal model relayout would overwrite the handler's target box.
+    if (honor_fullscreen && Fullscreen::controller()->hasFullscreen(workspace, true)) {
+        m_defaultFullscreenHandler->syncTargetSizeAndPosition();
+        return;
+    }
+
     // Single-lane canvases delegate the whole monitor to one lane. Multi-lane
     // canvases instead treat lanes like pages inside a larger logical strip.
     if (lanes.size() == 1) {
@@ -817,8 +832,21 @@ void CanvasLayout::newTarget(SP<Layout::ITarget> target) {
     }
 
     spdlog::info("newTarget: window={} workspace={}", static_cast<const void*>(window.get()), window->workspaceID());
-    if (onWindowCreatedTiling(window, Math::DIRECTION_DEFAULT))
-        focusManagedWindow(window, false, "newTarget");
+    if (onWindowCreatedTiling(window, Math::DIRECTION_DEFAULT)) {
+        // During newTarget(), CWindow::layoutTarget() is not guaranteed to be
+        // bound yet, and CWindow::setBox() does not retain geometry this early.
+        // Commit the authoritative model box through the callback target itself.
+        if (auto* lane = getLaneForWindow(window)) {
+            for (const auto& entry : lane->capture_window_boxes()) {
+                if (entry.window != window)
+                    continue;
+                target->setPositionGlobal(Hyprutils::Math::CBox(
+                    Vector2D(entry.box.x, entry.box.y),
+                    Vector2D(entry.box.w, entry.box.h)));
+                break;
+            }
+        }
+    }
 }
 
 // Hyprland callback: target re-entered tiling flow and should be owned again.

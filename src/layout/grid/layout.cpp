@@ -5,6 +5,7 @@
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/layout/algorithm/Algorithm.hpp>
 #include <hyprland/src/layout/space/Space.hpp>
+#include <hyprland/src/managers/fullscreen/handler/FullscreenHandler.hpp>
 #include <hyprutils/math/Box.hpp>
 #include <spdlog/spdlog.h>
 
@@ -233,23 +234,16 @@ void GridLayout::relayout(PHLMONITOR monitor) {
     if (!monitor)
         return;
 
+    const auto currentWorkspace = workspace();
+    if (currentWorkspace && Fullscreen::controller()->hasFullscreen(currentWorkspace, true)) {
+        m_defaultFullscreenHandler->syncTargetSizeAndPosition();
+        return;
+    }
+
     const auto bounds = CanvasLayoutInternal::compute_canvas_bounds(monitor);
     const auto profile = current_profile(monitor);
     if (fullscreenKey && !model.contains(*fullscreenKey))
         fullscreenKey.reset();
-
-    const auto currentWorkspace = workspace();
-    if (ScrollerCore::HyprlandRuntime::workspaceHasFullscreen(currentWorkspace) &&
-        ScrollerCore::HyprlandRuntime::workspaceFullscreenMode(currentWorkspace) == Fullscreen::FSMODE_FULLSCREEN) {
-        if (const auto active = active_window()) {
-            ScrollerCore::HyprlandRuntime::setWindowGeometry(
-                active,
-                {bounds.full.x, bounds.full.y},
-                {bounds.full.w, bounds.full.h});
-            sync_window_target_geometry(active);
-        }
-        return;
-    }
 
     for (const auto& item : model.render(viewport, profile, bounds.full, bounds.max, bounds.gap)) {
         const auto it = windowsByKey.find(item.key);
@@ -343,14 +337,20 @@ bool GridLayout::restoreSnapshot(const ScrollerSnapshot::CanvasSnapshot& snapsho
     if (!sourceGrid.enabled || sourceGrid.items.empty())
         return false;
 
+    windowsByKey.clear();
     std::unordered_map<uintptr_t, PHLWINDOW> liveByKey;
     liveByKey.reserve(liveWindows.size());
     for (const auto& window : liveWindows)
-        liveByKey.emplace(ScrollerCore::window_key(window), window);
+        liveByKey.emplace(ScrollerCore::snapshot_window_key(
+                              window,
+                              snapshot.version,
+                              ScrollerSnapshot::kStableWindowKeyFormatVersion),
+                          window);
 
     ScrollerSnapshot::GridSnapshot filtered = sourceGrid;
     filtered.items.clear();
     filtered.activeItemIndex = -1;
+    filtered.fullscreenKey = 0;
 
     const auto activeKey = snapshot_active_key(sourceGrid);
     for (const auto& item : sourceGrid.items) {
@@ -358,29 +358,25 @@ bool GridLayout::restoreSnapshot(const ScrollerSnapshot::CanvasSnapshot& snapsho
         if (liveIt == liveByKey.end())
             continue;
 
+        const auto stableKey = ScrollerCore::window_key(liveIt->second);
         if (activeKey && item.key == *activeKey)
             filtered.activeItemIndex = static_cast<int>(filtered.items.size());
-        filtered.items.push_back(item);
+        auto restoredItem = item;
+        restoredItem.key = stableKey;
+        filtered.items.push_back(restoredItem);
+        windowsByKey[stableKey] = liveIt->second;
+        if (sourceGrid.fullscreenKey != 0 && sourceGrid.fullscreenKey == item.key)
+            filtered.fullscreenKey = stableKey;
         liveByKey.erase(liveIt);
     }
 
     restoringSnapshot = true;
-    windowsByKey.clear();
     model.clear();
     viewport = {
         .originColumn = filtered.viewportColumn,
         .originRow = filtered.viewportRow,
     };
     fullscreenKey.reset();
-
-    for (const auto& item : filtered.items) {
-        for (const auto& window : liveWindows) {
-            if (ScrollerCore::window_key(window) == item.key) {
-                windowsByKey[item.key] = window;
-                break;
-            }
-        }
-    }
 
     model.restore_snapshot(filtered);
     if (filtered.fullscreenKey != 0 && model.contains(filtered.fullscreenKey))
@@ -432,14 +428,35 @@ void GridLayout::newTarget(SP<Layout::ITarget> target) {
 
     const auto monitor = ScrollerCore::HyprlandRuntime::monitorById(window->monitorID());
     const auto key = ScrollerCore::window_key(window);
+    const auto syncCallbackTarget = [&] {
+        const auto visibleMonitor = visible_monitor(monitor);
+        if (!target || !visibleMonitor)
+            return;
+
+        const auto bounds = CanvasLayoutInternal::compute_canvas_bounds(visibleMonitor);
+        const auto profile = current_profile(visibleMonitor);
+        for (const auto& item : model.render(viewport, profile, bounds.full, bounds.max, bounds.gap)) {
+            if (item.key != key)
+                continue;
+            const auto box = fullscreenKey && *fullscreenKey == key
+                ? bounds.max
+                : apply_window_border_inset(item.committedBox, window->getRealBorderSize());
+            target->setPositionGlobal(Hyprutils::Math::CBox(
+                Vector2D(box.x, box.y),
+                Vector2D(box.w, box.h)));
+            break;
+        }
+    };
     (void)maybeRestoreWorkspaceSnapshot();
     if (model.contains(key)) {
         windowsByKey[key] = window;
         relayout(monitor);
+        syncCallbackTarget();
         return;
     }
 
     (void)manage_window(window, monitor, true);
+    syncCallbackTarget();
 }
 
 void GridLayout::movedTarget(SP<Layout::ITarget> target, std::optional<Vector2D>) {

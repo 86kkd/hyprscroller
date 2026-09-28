@@ -22,6 +22,7 @@
 #include <hyprland/src/layout/target/Target.hpp>
 
 #include "core/interval.h"
+#include "core/window_key.h"
 #include "plugin/config.h"
 
 namespace ScrollerModel::StackInternal {
@@ -373,8 +374,8 @@ ScrollerSnapshot::StackSnapshot Stack::capture_snapshot() const {
     snapshot.maximized = maxdim;
     snapshot.geom = geom;
     snapshot.memGeom = mem.geom;
-    snapshot.activeWindowKey = active && active->data()->ptr().lock()
-        ? reinterpret_cast<uintptr_t>(active->data()->ptr().lock().get())
+    snapshot.activeWindowKey = active
+        ? ScrollerCore::window_key(active->data()->ptr().lock())
         : 0;
     for_each_window_model([&](const Window *window) {
         if (window)

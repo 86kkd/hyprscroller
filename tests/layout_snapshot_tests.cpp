@@ -81,6 +81,7 @@ void test_snapshot_round_trip() {
         return;
 
     const auto &restored = it->second;
+    expect_eq(restored.version, kFormatVersion, "layout snapshot keeps current format version");
     expect_eq(restored.workspaceId, 7, "layout snapshot keeps workspace id");
     expect_eq(restored.activeLaneIndex, static_cast<size_t>(1), "layout snapshot keeps active lane index");
     expect_eq(restored.lanes.size(), static_cast<size_t>(2), "layout snapshot keeps lane count");
@@ -121,6 +122,7 @@ void test_snapshot_accepts_legacy_lane_format() {
         return;
 
     expect_true(!it->second.grid.enabled, "legacy layout snapshot leaves grid disabled");
+    expect_eq(it->second.version, ScrollerSnapshot::kLegacyFormatVersion, "legacy snapshot keeps source format version");
 }
 
 void test_snapshot_accepts_v2_grid_without_mode() {
@@ -140,6 +142,7 @@ void test_snapshot_accepts_v2_grid_without_mode() {
         return;
 
     expect_true(it->second.grid.enabled, "v2 grid snapshot keeps grid enabled");
+    expect_eq(it->second.version, ScrollerSnapshot::kGridFormatVersion, "v2 snapshot keeps source format version");
     expect_eq(it->second.grid.mode, -1, "v2 grid snapshot defaults missing mode");
     expect_eq(it->second.grid.fullscreenKey, static_cast<uintptr_t>(0), "v2 grid snapshot defaults missing fullscreen key");
 }
@@ -163,6 +166,26 @@ void test_snapshot_accepts_v3_grid_without_fullscreen_key() {
     expect_true(it->second.grid.enabled, "v3 grid snapshot keeps grid enabled");
     expect_eq(it->second.grid.mode, static_cast<int>(Mode::Row), "v3 grid snapshot keeps mode");
     expect_eq(it->second.grid.fullscreenKey, static_cast<uintptr_t>(0), "v3 grid snapshot defaults missing fullscreen key");
+}
+
+void test_snapshot_preserves_mixed_window_key_versions() {
+    const std::string mixed =
+        "VERSION 5\n"
+        "WORKSPACE 1 0 0 4\n"
+        "GRID 1 0 0 0 1 0 123\n"
+        "GRIDITEM 123 0 0 1 1\n"
+        "WORKSPACE 2 0 0 5\n"
+        "GRID 1 0 0 0 1 0 456\n"
+        "GRIDITEM 456 0 0 1 1\n";
+    const auto parsed = ScrollerSnapshot::deserialize_repository(mixed);
+    expect_true(parsed.has_value(), "layout snapshot accepts mixed key versions during migration");
+    if (!parsed)
+        return;
+
+    expect_eq(parsed->at(1).version, ScrollerSnapshot::kFullscreenFormatVersion,
+              "mixed snapshot keeps legacy pointer key version");
+    expect_eq(parsed->at(2).version, ScrollerSnapshot::kStableWindowKeyFormatVersion,
+              "mixed snapshot keeps stable window key version");
 }
 
 void test_snapshot_rejects_invalid_version() {
@@ -224,6 +247,7 @@ void run_layout_snapshot_tests() {
     test_snapshot_accepts_legacy_lane_format();
     test_snapshot_accepts_v2_grid_without_mode();
     test_snapshot_accepts_v3_grid_without_fullscreen_key();
+    test_snapshot_preserves_mixed_window_key_versions();
     test_snapshot_rejects_invalid_version();
     test_snapshot_rejects_malformed_stack_line();
     test_canvas_workspace_snapshot_round_trip();
