@@ -95,7 +95,7 @@ ScrollerCore::LocalRenderInterval stack_rendered_primary_interval(Stack *stack, 
         return {};
 
     const auto activeWindow = stack->get_active_window();
-    const auto border = activeWindow ? activeWindow->getRealBorderSize() : 0.0;
+    const auto border = activeWindow ? ScrollerCore::HyprlandRuntime::windowBorderSize(activeWindow) : 0.0;
     return ScrollerCore::rendered_local_interval(stack_primary_origin(stack, mode),
                                                  stack_primary_span(stack, mode),
                                                  border,

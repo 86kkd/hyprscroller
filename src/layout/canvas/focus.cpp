@@ -45,10 +45,10 @@ ScrollerGrid::GridLayout* grid_layout_for_workspace(WORKSPACEID workspaceId) {
         return nullptr;
 
     const auto workspace = ScrollerCore::HyprlandRuntime::workspaceById(workspaceId);
-    if (!workspace || !workspace->m_space)
+    if (!workspace || !workspace->space())
         return nullptr;
 
-    const auto algorithm = workspace->m_space->algorithm();
+    const auto algorithm = workspace->space()->algorithm();
     if (!algorithm || !algorithm->tiledAlgo())
         return nullptr;
 
@@ -80,7 +80,7 @@ void CanvasLayout::onWindowFocusChange(PHLWINDOW window)
     spdlog::info(
         "onWindowFocusChange: window={} workspace={} monitor={} canvas_ws={} lane_found={} lanes={} before_lane={} before_lane_index={} before_window={} target_lane={} target_lane_index={} target_window={} same_lane={}",
         static_cast<const void*>(window.get()),
-        window->workspaceID(),
+        ScrollerCore::HyprlandRuntime::windowWorkspaceId(window),
         window->monitorID(),
         CanvasLayoutInternal::get_workspace_id(),
         lane != nullptr,
@@ -123,7 +123,7 @@ bool CanvasLayout::syncSpecialWorkspaceVisibilityState(PHLMONITOR visibleMonitor
         specialEphemeralLaneRestorePending = false;
         return false;
     }
-    if (!workspace->m_isSpecialWorkspace) {
+    if (!ScrollerCore::HyprlandRuntime::isSpecialWorkspace(workspace)) {
         specialEphemeralLaneRestorePending = false;
         return false;
     }
@@ -135,7 +135,7 @@ bool CanvasLayout::syncSpecialWorkspaceVisibilityState(PHLMONITOR visibleMonitor
     // empty ephemeral lane. Remember that state while hidden so we can re-adopt
     // the real focused lane when the special workspace becomes visible again.
     if (CanvasLayoutInternal::should_mark_special_ephemeral_lane_for_restore(
-            workspace->m_isSpecialWorkspace,
+            ScrollerCore::HyprlandRuntime::isSpecialWorkspace(workspace),
             workspaceVisible,
             currentLane->is_ephemeral(),
             currentLane->empty())) {
@@ -150,7 +150,7 @@ bool CanvasLayout::syncSpecialWorkspaceVisibilityState(PHLMONITOR visibleMonitor
     }
 
     if (!CanvasLayoutInternal::should_restore_marked_special_ephemeral_lane(
-            workspace->m_isSpecialWorkspace,
+            ScrollerCore::HyprlandRuntime::isSpecialWorkspace(workspace),
             workspaceVisible,
             specialEphemeralLaneRestorePending,
             currentLane->is_ephemeral(),
@@ -208,9 +208,9 @@ void CanvasLayout::syncActiveStateFromWorkspaceFocus()
     const auto managed = focusedWindow && getLaneForWindow(focusedWindow) != nullptr;
 
     spdlog::debug("syncActiveStateFromWorkspaceFocus: canvas_ws={} focused_window={} focused_workspace={} focused_monitor={} managed={} current_window={}",
-                  workspace->m_id,
+                  ScrollerCore::HyprlandRuntime::workspaceId(workspace),
                   static_cast<const void*>(focusedWindow ? focusedWindow.get() : nullptr),
-                  focusedWindow ? focusedWindow->workspaceID() : WORKSPACE_INVALID,
+                  focusedWindow ? ScrollerCore::HyprlandRuntime::windowWorkspaceId(focusedWindow) : WORKSPACE_INVALID,
                   focusedWindow ? focusedWindow->monitorID() : MONITOR_INVALID,
                   managed,
                   static_cast<const void*>(currentWindow ? currentWindow.get() : nullptr));
@@ -220,7 +220,7 @@ void CanvasLayout::syncActiveStateFromWorkspaceFocus()
 
     if (adoptFocusedLane(focusedWindow, getVisibleCanvasMonitor()))
         spdlog::info("syncActiveStateFromWorkspaceFocus: adopted focused lane canvas_ws={} focused_window={}",
-                     workspace->m_id,
+                     ScrollerCore::HyprlandRuntime::workspaceId(workspace),
                      static_cast<const void*>(focusedWindow.get()));
 }
 
@@ -271,16 +271,16 @@ void CanvasLayout::activateCrossMonitorFocusTarget(CanvasLayout *targetLayout, L
     const auto targetWorkspace = targetLayout->getCanvasWorkspace();
     auto targetMonitor = targetWorkspace ? CanvasLayoutInternal::visible_monitor_for_workspace(targetWorkspace) : fallbackMonitor;
     if (targetMonitor)
-        targetLayout->relayoutCanvas(targetMonitor, targetWorkspace && !targetWorkspace->m_isSpecialWorkspace);
+        targetLayout->relayoutCanvas(targetMonitor, targetWorkspace && !ScrollerCore::HyprlandRuntime::isSpecialWorkspace(targetWorkspace));
 }
 
 // Execute the whole cross-monitor focus handoff and keep the destination canvas
 // state coherent before Hyprland focus is switched.
 void CanvasLayout::handoffFocusAcrossMonitor(int workspace, Direction direction, PHLWINDOW sourceWindow, PHLMONITOR sourceMonitor, WORKSPACEID sourceActiveWorkspaceId, WORKSPACEID sourceSpecialWorkspaceId, ListNode<Lane *> *sourceLaneNode, PHLMONITOR targetMonitor)
 {
-    const auto activeWorkspaceId = targetMonitor ? targetMonitor->activeWorkspaceID() : WORKSPACE_INVALID;
+    const auto activeWorkspaceId = targetMonitor ? ScrollerCore::HyprlandRuntime::activeWorkspaceId(targetMonitor) : WORKSPACE_INVALID;
     const auto workspaceId = CanvasLayoutInternal::preferred_workspace_id(targetMonitor, workspace);
-    const auto specialWorkspaceId = targetMonitor ? targetMonitor->activeSpecialWorkspaceID() : WORKSPACE_INVALID;
+    const auto specialWorkspaceId = targetMonitor ? ScrollerCore::HyprlandRuntime::activeSpecialWorkspaceId(targetMonitor) : WORKSPACE_INVALID;
     spdlog::info(
         "move_focus_cross_monitor: source_workspace={} direction={} source_window={} "
         "source_active_ws={} source_special_ws={} dest_active_ws={} dest_special_ws={} selected_ws={}",
@@ -339,7 +339,7 @@ void CanvasLayout::handoffFocusAcrossMonitor(int workspace, Direction direction,
         "target_layout_found={} target_lane_found={} selection={} target_pos=({}, {}) target_size=({}, {})",
         workspaceId,
         static_cast<const void*>(crossMonitorTarget ? crossMonitorTarget.get() : nullptr),
-        crossMonitorTarget ? crossMonitorTarget->workspaceID() : WORKSPACE_INVALID,
+        crossMonitorTarget ? ScrollerCore::HyprlandRuntime::windowWorkspaceId(crossMonitorTarget) : WORKSPACE_INVALID,
         targetLayout != nullptr,
         targetLane != nullptr,
         targetSelection,
@@ -382,10 +382,10 @@ void CanvasLayout::moveWindowTo(PHLWINDOW window, const std::string &direction, 
     onWindowFocusChange(window);
 
     switch (direction.front()) {
-        case 'l': move_window(window->workspaceID(), Direction::Left); break;
-        case 'r': move_window(window->workspaceID(), Direction::Right); break;
-        case 'u': move_window(window->workspaceID(), Direction::Up); break;
-        case 'd': move_window(window->workspaceID(), Direction::Down); break;
+        case 'l': move_window(ScrollerCore::HyprlandRuntime::windowWorkspaceId(window), Direction::Left); break;
+        case 'r': move_window(ScrollerCore::HyprlandRuntime::windowWorkspaceId(window), Direction::Right); break;
+        case 'u': move_window(ScrollerCore::HyprlandRuntime::windowWorkspaceId(window), Direction::Up); break;
+        case 'd': move_window(ScrollerCore::HyprlandRuntime::windowWorkspaceId(window), Direction::Down); break;
         default: break;
     }
 }
@@ -475,8 +475,8 @@ void CanvasLayout::move_focus(int workspace, Direction direction)
     const auto activeCanvasMonitor = getVisibleCanvasMonitor();
     const auto sourceMonitor = before ? ScrollerCore::HyprlandRuntime::monitorById(before->monitorID())
                                      : (activeCanvasMonitor ? activeCanvasMonitor : ScrollerCore::monitorFromPointingOrCursor());
-    const auto beforeActiveWorkspaceId = sourceMonitor ? sourceMonitor->activeWorkspaceID() : WORKSPACE_INVALID;
-    const auto beforeSpecialWorkspaceId = sourceMonitor ? sourceMonitor->activeSpecialWorkspaceID() : WORKSPACE_INVALID;
+    const auto beforeActiveWorkspaceId = sourceMonitor ? ScrollerCore::HyprlandRuntime::activeWorkspaceId(sourceMonitor) : WORKSPACE_INVALID;
+    const auto beforeSpecialWorkspaceId = sourceMonitor ? ScrollerCore::HyprlandRuntime::activeSpecialWorkspaceId(sourceMonitor) : WORKSPACE_INVALID;
     auto sourceLaneNode = activeLane;
     spdlog::info("move_focus: workspace={} direction={} lane_found={} before={}",
                  workspace, ScrollerCore::direction_name(direction), lane != nullptr,

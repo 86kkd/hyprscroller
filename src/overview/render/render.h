@@ -7,10 +7,14 @@
 #include <hyprland/src/output/Monitor.hpp>
 #include <hyprland/src/plugins/HookSystem.hpp>
 
+namespace Render {
+class CRenderContext;
+}
+
 namespace Overview {
 
 bool initializeRendererHooks(HANDLE handle);
 void shutdownRendererHooks(HANDLE handle);
-void fullRenderMonitor(PHLMONITOR monitor);
+void fullRenderMonitor(Render::CRenderContext& ctx, PHLMONITOR monitor);
 
 } // namespace Overview

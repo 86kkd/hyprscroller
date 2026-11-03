@@ -31,10 +31,10 @@ ScrollerGrid::GridLayout* grid_layout_for_workspace(WORKSPACEID workspaceId) {
         return nullptr;
 
     const auto workspace = ScrollerCore::HyprlandRuntime::workspaceById(workspaceId);
-    if (!workspace || !workspace->m_space)
+    if (!workspace || !workspace->space())
         return nullptr;
 
-    const auto algorithm = workspace->m_space->algorithm();
+    const auto algorithm = workspace->space()->algorithm();
     if (!algorithm || !algorithm->tiledAlgo())
         return nullptr;
 

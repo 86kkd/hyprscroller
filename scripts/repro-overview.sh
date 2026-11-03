@@ -36,10 +36,8 @@ require_cmd() {
     command -v "$1" >/dev/null 2>&1 || die "missing required command: $1"
 }
 
-quote_command() {
-    local quoted
-    printf -v quoted '%q ' "$@"
-    printf '%s' "${quoted% }"
+lua_string() {
+    jq -Rn --arg value "$1" '$value'
 }
 
 detect_outer_monitor() {
@@ -87,9 +85,10 @@ pick_preview_candidates() {
 }
 
 launch_nested_exec() {
-    local command
-    command=$(quote_command "$@")
-    hyprctl -i "$NESTED_INSTANCE" dispatch exec "$command" >/dev/null
+    local command quoted
+    printf -v command '%q ' "$@"
+    quoted="$(lua_string "${command% }")"
+    hyprctl -i "$NESTED_INSTANCE" dispatch "hl.dsp.exec_cmd($quoted)" >/dev/null
 }
 
 nested_client_count() {
@@ -136,6 +135,20 @@ instance_exists() {
 wait_for_instance_exit() {
     for ((attempt = 0; attempt < 80; ++attempt)); do
         if ! instance_exists; then
+            return 0
+        fi
+
+        sleep 0.25
+    done
+
+    return 1
+}
+
+wait_for_nested_output() {
+    for ((attempt = 0; attempt < 80; ++attempt)); do
+        if hyprctl -i "$NESTED_INSTANCE" monitors -j | jq -e '
+            any(.[]; .name != "FALLBACK" and .width > 0 and .height > 0)
+        ' >/dev/null; then
             return 0
         fi
 
@@ -230,7 +243,7 @@ cleanup() {
     fi
 
     if [[ -n "${NESTED_INSTANCE:-}" ]]; then
-        hyprctl -i "$NESTED_INSTANCE" dispatch exit >/dev/null 2>&1 || true
+        hyprctl -i "$NESTED_INSTANCE" dispatch "hl.dsp.exit()" >/dev/null 2>&1 || true
     fi
 }
 
@@ -296,12 +309,9 @@ CONFIG_PATH="$RUN_DIR/hyprland.conf"
 LOG_PATH="$RUN_DIR/hyprland.log"
 LAUNCHER_PATH="$RUN_DIR/launch-nested.sh"
 PREVIEW_TERMINAL_PATH="$RUN_DIR/preview-terminal.sh"
-FINISHER_PATH="$RUN_DIR/finish-overview.sh"
 
 cat >"$CONFIG_PATH" <<EOF
 monitor = , preferred, auto, 1
-
-plugin = $PLUGIN_PATH
 
 env = XCURSOR_SIZE,24
 
@@ -353,8 +363,9 @@ EOF
 chmod +x "$PREVIEW_TERMINAL_PATH"
 
 BEFORE_INSTANCES="$(hyprctl instances -j | jq -c 'map(.instance)')"
-LAUNCH_RULES="[monitor $OUTER_MONITOR; float; size $WINDOW_WIDTH $WINDOW_HEIGHT; center]"
-hyprctl dispatch exec "$LAUNCH_RULES $LAUNCHER_PATH" >/dev/null
+LAUNCHER_LUA="$(lua_string "$LAUNCHER_PATH")"
+MONITOR_LUA="$(lua_string "$OUTER_MONITOR")"
+hyprctl dispatch "hl.dsp.exec_cmd($LAUNCHER_LUA, { monitor = $MONITOR_LUA, floating = true, size = {$WINDOW_WIDTH, $WINDOW_HEIGHT}, center = true })" >/dev/null
 
 for ((attempt = 0; attempt < 80; ++attempt)); do
     NESTED_INSTANCE="$(hyprctl instances -j | jq -r --argjson before "$BEFORE_INSTANCES" '
@@ -379,6 +390,12 @@ NESTED_SOCKET="$(hyprctl instances -j | jq -r --arg instance "$NESTED_INSTANCE" 
     map(select(.instance == $instance)) | .[0].wl_socket // empty
 ')"
 [[ -n "$NESTED_SOCKET" ]] || die "could not resolve nested Wayland socket"
+wait_for_nested_output || die "nested Hyprland did not create a non-zero Wayland output"
+
+hyprctl -i "$NESTED_INSTANCE" plugin load "$PLUGIN_PATH" >/dev/null
+hyprctl -i "$NESTED_INSTANCE" plugin list | grep -q "Plugin hyprscroller" || die "nested Hyprland did not load hyprscroller"
+hyprctl -i "$NESTED_INSTANCE" eval "hl.config({ general = { layout = 'scroller' } })" >/dev/null
+hyprctl -i "$NESTED_INSTANCE" getoption general:layout | grep -q "str: scroller" || die "nested Hyprland did not activate the scroller layout"
 
 launch_preview_window
 
@@ -389,20 +406,14 @@ done
 
 wait_for_nested_client_count 5 || die "timed out waiting for preview window plus four terminals"
 
-cat >"$FINISHER_PATH" <<EOF
-#!/usr/bin/env bash
 sleep 1
-hyprctl dispatch scroller:toggleoverview
+hyprctl -i "$NESTED_INSTANCE" eval "hl.plugin.scroller.toggle_overview()" >/dev/null
 sleep $OVERVIEW_HOLD_SECONDS
-$(if [[ "$KEEP_OPEN" -eq 1 ]]; then printf ':\n'; else printf 'hyprctl dispatch exit\n'; fi)
-EOF
-chmod +x "$FINISHER_PATH"
-
-launch_nested_exec "$FINISHER_PATH"
 
 if [[ "$KEEP_OPEN" -eq 1 ]]; then
-    sleep $((OVERVIEW_HOLD_SECONDS + 1))
+    :
 else
+    hyprctl -i "$NESTED_INSTANCE" dispatch "hl.dsp.exit()" >/dev/null
     wait_for_instance_exit || die "timed out waiting for nested Hyprland to exit"
 fi
 
@@ -415,7 +426,7 @@ printf 'run dir:         %s\n' "$RUN_DIR"
 printf 'config:          %s\n' "$CONFIG_PATH"
 printf 'log:             %s\n' "$LOG_PATH"
 if [[ "$KEEP_OPEN" -eq 1 ]]; then
-    printf 'exit command:    hyprctl -i %q dispatch exit\n' "$NESTED_INSTANCE"
+    printf 'exit command:    hyprctl -i %q dispatch "hl.dsp.exit()"\n' "$NESTED_INSTANCE"
 else
     printf 'result:          nested overview test completed and exited\n'
 fi

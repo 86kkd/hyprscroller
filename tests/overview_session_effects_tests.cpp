@@ -160,7 +160,7 @@ struct FakeSessionEffectsRuntime final : Overview::SessionEffects::Runtime {
     }
 
     PHLWORKSPACE addWorkspace(WORKSPACEID id, MONITORID monitorId, bool special = false) {
-        auto workspace = make_opaque_handle<CWorkspace>();
+        auto workspace = make_opaque_handle<Workspace::CHLWorkspace>();
         workspaces.emplace(workspace.get(), WorkspaceState{
             .id = id,
             .monitorId = monitorId,

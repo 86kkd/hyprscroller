@@ -5,6 +5,7 @@
 #include <hyprland/src/SharedDefs.hpp>
 #include <hyprland/src/desktop/DesktopTypes.hpp>
 
+#include "core/types.h"
 #include "dispatch_logic.h"
 
 namespace CanvasLayoutInternal {

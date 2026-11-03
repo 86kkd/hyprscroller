@@ -122,9 +122,9 @@ APICALL EXPORT std::string PLUGIN_API_VERSION() {
     return HYPRLAND_API_VERSION;
 }
 
-// Register config values, dispatchers, and the tiled algorithm implementation.
+// Register config values, Lua commands, and the tiled algorithm implementation.
 // For code readers, this is the root of the plugin's runtime graph:
-// Hyprland loads the plugin -> `PLUGIN_INIT` runs -> dispatchers are registered
+// Hyprland loads the plugin -> `PLUGIN_INIT` runs -> Lua commands are registered
 // -> `CanvasLayout` is registered as the `scroller` tiled algorithm.
 //
 // The returned description tuple is shown by Hyprland/plugin tooling as:
@@ -139,11 +139,6 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     spdlog::info("pluginInit: registering config values");
     scroller::plugin_config::registerConfigValues(PHANDLE);
     spdlog::info("pluginInit: config values registered");
-
-    // Register custom dispatchers used by keybinds and user scripts.
-    spdlog::info("pluginInit: registering dispatchers");
-    dispatchers::addDispatchers();
-    spdlog::info("pluginInit: dispatchers registered");
 
     spdlog::info("pluginInit: registering Lua functions");
     dispatchers::addLuaFunctions();
@@ -179,10 +174,10 @@ APICALL EXPORT void PLUGIN_EXIT() {
         const auto workspace = workspaceRef.lock();
         if (!workspace)
             continue;
-        if (auto *layout = CanvasLayoutInternal::get_canvas_for_workspace(workspace->m_id))
+        if (auto *layout = CanvasLayoutInternal::get_canvas_for_workspace(ScrollerCore::HyprlandRuntime::workspaceId(workspace)))
             layout->persistCurrentSnapshot();
-        if (workspace->m_space) {
-            if (const auto algorithm = workspace->m_space->algorithm()) {
+        if (workspace->space()) {
+            if (const auto algorithm = workspace->space()->algorithm()) {
                 const auto& tiled = algorithm->tiledAlgo();
                 if (!tiled)
                     continue;

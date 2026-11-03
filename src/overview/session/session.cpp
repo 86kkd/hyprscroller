@@ -396,7 +396,7 @@ bool Session::finalizeCanvasTarget(const Target& target, bool warpCursor) {
 }
 
 bool Session::finalizeCanvasOrigin(const OriginState& origin) {
-    if (!origin.window || !origin.window->m_isMapped)
+    if (!origin.window || !origin.window->mapped())
         return true;
 
     const auto target = Target{
@@ -460,7 +460,7 @@ bool Session::restoreOrigin() {
         if (canvasRepo.find(originCanvasId_))
             canvasRepo.ensureCanvasHasVisibleMembers(originCanvasId_);
         const auto& origin = model_.origin();
-        const auto restoreWindow = origin.window && origin.window->m_isMapped;
+        const auto restoreWindow = origin.window && origin.window->mapped();
         if (!activateCanvas(originCanvasId_, origin.monitorId, !restoreWindow, "overview_restore_canvas"))
             return false;
         return finalizeCanvasOrigin(origin);

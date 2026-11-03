@@ -54,7 +54,7 @@ std::vector<PHLWINDOW> live_tiled_workspace_windows(PHLWORKSPACE workspace) {
 
     windows.reserve(ScrollerCore::HyprlandRuntime::windows().size());
     for (const auto& window : ScrollerCore::HyprlandRuntime::windows()) {
-        if (!window || window->workspaceID() != workspace->m_id || window->m_isFloating || !window->m_isMapped || window->isHidden())
+        if (!window || ScrollerCore::HyprlandRuntime::windowWorkspaceId(window) != ScrollerCore::HyprlandRuntime::workspaceId(workspace) || window->isFloating() || !window->mapped() || window->isHidden())
             continue;
         windows.push_back(window);
     }
@@ -66,10 +66,10 @@ GridLayout* grid_for_workspace(WORKSPACEID workspaceId) {
         return nullptr;
 
     const auto workspace = ScrollerCore::HyprlandRuntime::workspaceById(workspaceId);
-    if (!workspace || !workspace->m_space)
+    if (!workspace || !workspace->space())
         return nullptr;
 
-    const auto algorithm = workspace->m_space->algorithm();
+    const auto algorithm = workspace->space()->algorithm();
     if (!algorithm)
         return nullptr;
 
@@ -127,7 +127,7 @@ void GridLayout::ensure_workspace_runtime() {
         return;
     }
 
-    if (workspaceRuntimeId == currentWorkspace->m_id)
+    if (workspaceRuntimeId == ScrollerCore::HyprlandRuntime::workspaceId(currentWorkspace))
         return;
 
     if (workspaceRuntimeId != WORKSPACE_INVALID) {
@@ -138,7 +138,7 @@ void GridLayout::ensure_workspace_runtime() {
         fullscreenKey.reset();
     }
 
-    workspaceRuntimeId = currentWorkspace->m_id;
+    workspaceRuntimeId = ScrollerCore::HyprlandRuntime::workspaceId(currentWorkspace);
     snapshotRestoreAttempted = false;
 }
 
@@ -190,7 +190,7 @@ void GridLayout::sync_active_from_workspace_focus(PHLMONITOR fallbackMonitor) {
         return;
 
     const auto focusedWindow = currentWorkspace->getLastFocusedWindow();
-    if (!focusedWindow || focusedWindow->workspaceID() != currentWorkspace->m_id)
+    if (!focusedWindow || ScrollerCore::HyprlandRuntime::windowWorkspaceId(focusedWindow) != ScrollerCore::HyprlandRuntime::workspaceId(currentWorkspace))
         return;
 
     const auto key = ScrollerCore::window_key(focusedWindow);
@@ -252,7 +252,7 @@ void GridLayout::relayout(PHLMONITOR monitor) {
 
         const auto box = fullscreenKey && *fullscreenKey == item.key
             ? bounds.max
-            : apply_window_border_inset(item.committedBox, it->second->getRealBorderSize());
+            : apply_window_border_inset(item.committedBox, ScrollerCore::HyprlandRuntime::windowBorderSize(it->second));
         ScrollerCore::HyprlandRuntime::setWindowGeometry(
             it->second,
             {box.x, box.y},
@@ -267,7 +267,7 @@ std::optional<ScrollerSnapshot::CanvasSnapshot> GridLayout::captureSnapshot() co
         return std::nullopt;
 
     ScrollerSnapshot::CanvasSnapshot snapshot;
-    snapshot.workspaceId = currentWorkspace->m_id;
+    snapshot.workspaceId = ScrollerCore::HyprlandRuntime::workspaceId(currentWorkspace);
     snapshot.grid = model.capture_snapshot(viewport);
     if (fullscreenKey && model.contains(*fullscreenKey))
         snapshot.grid.fullscreenKey = *fullscreenKey;
@@ -291,7 +291,7 @@ void GridLayout::persistSnapshot() {
         });
         if (!fullyManaged) {
             spdlog::debug("grid persistSnapshot: preserving last complete snapshot during partial detach workspace={} live_windows={}",
-                          currentWorkspace->m_id,
+                          ScrollerCore::HyprlandRuntime::workspaceId(currentWorkspace),
                           liveWindows.size());
             return;
         }
@@ -310,12 +310,12 @@ void GridLayout::clearPersistedSnapshot() {
     if (!currentWorkspace)
         return;
 
-    CanvasLayoutState::repository().erase(currentWorkspace->m_id);
+    CanvasLayoutState::repository().erase(ScrollerCore::HyprlandRuntime::workspaceId(currentWorkspace));
 }
 
 bool GridLayout::restoreSnapshot(const ScrollerSnapshot::CanvasSnapshot& snapshot) {
     const auto currentWorkspace = workspace();
-    if (!currentWorkspace || snapshot.workspaceId != currentWorkspace->m_id)
+    if (!currentWorkspace || snapshot.workspaceId != ScrollerCore::HyprlandRuntime::workspaceId(currentWorkspace))
         return false;
 
     const auto liveWindows = live_tiled_workspace_windows(currentWorkspace);
@@ -387,7 +387,7 @@ bool GridLayout::restoreSnapshot(const ScrollerSnapshot::CanvasSnapshot& snapsho
     }
 
     if (const auto focusedWindow = currentWorkspace->getLastFocusedWindow()) {
-        if (focusedWindow->workspaceID() == currentWorkspace->m_id)
+        if (ScrollerCore::HyprlandRuntime::windowWorkspaceId(focusedWindow) == ScrollerCore::HyprlandRuntime::workspaceId(currentWorkspace))
             (void)model.focus_window(ScrollerCore::window_key(focusedWindow));
     }
 
@@ -396,7 +396,7 @@ bool GridLayout::restoreSnapshot(const ScrollerSnapshot::CanvasSnapshot& snapsho
     restoringSnapshot = false;
     persistSnapshot();
     spdlog::info("grid restore_snapshot: workspace={} restored_items={} live_windows={} migrated_legacy={}",
-                 currentWorkspace->m_id,
+                 ScrollerCore::HyprlandRuntime::workspaceId(currentWorkspace),
                  sourceGrid.items.size(),
                  liveWindows.size(),
                  !snapshot.grid.enabled);
@@ -413,7 +413,7 @@ bool GridLayout::maybeRestoreWorkspaceSnapshot() {
         return false;
 
     CanvasLayoutState::repository().initialize();
-    const auto snapshot = CanvasLayoutState::repository().find(currentWorkspace->m_id);
+    const auto snapshot = CanvasLayoutState::repository().find(ScrollerCore::HyprlandRuntime::workspaceId(currentWorkspace));
     if (!snapshot || (!snapshot->grid.enabled && snapshot->lanes.empty()))
         return false;
 
@@ -440,7 +440,7 @@ void GridLayout::newTarget(SP<Layout::ITarget> target) {
                 continue;
             const auto box = fullscreenKey && *fullscreenKey == key
                 ? bounds.max
-                : apply_window_border_inset(item.committedBox, window->getRealBorderSize());
+                : apply_window_border_inset(item.committedBox, ScrollerCore::HyprlandRuntime::windowBorderSize(window));
             target->setPositionGlobal(Hyprutils::Math::CBox(
                 Vector2D(box.x, box.y),
                 Vector2D(box.w, box.h)));
@@ -741,7 +741,7 @@ void GridLayout::focus_active_window(const char* context) {
         spdlog::warn("{}: failed to focus grid window window={} workspace={} monitor={}",
                      context ? context : "grid_focus",
                      static_cast<const void*>(window.get()),
-                     window->workspaceID(),
+                     ScrollerCore::HyprlandRuntime::windowWorkspaceId(window),
                      window->monitorID());
     }
 }
@@ -809,7 +809,7 @@ CanvasOverviewSnapshot GridLayout::buildOverviewSnapshot() const {
     if (!window)
         return snapshot;
 
-    snapshot.workspaceId = window->workspaceID();
+    snapshot.workspaceId = ScrollerCore::HyprlandRuntime::windowWorkspaceId(window);
     const auto monitor = visible_monitor(ScrollerCore::HyprlandRuntime::monitorById(window->monitorID()));
     snapshot.monitorId = monitor ? monitor->m_id : window->monitorID();
     if (!monitor)
@@ -824,7 +824,7 @@ CanvasOverviewSnapshot GridLayout::buildOverviewSnapshot() const {
 
         const auto box = fullscreenKey && *fullscreenKey == item.key
             ? bounds.max
-            : apply_window_border_inset(item.logicalBox, it->second->getRealBorderSize());
+            : apply_window_border_inset(item.logicalBox, ScrollerCore::HyprlandRuntime::windowBorderSize(it->second));
         snapshot.windows.push_back({
             .window = it->second,
             .box = box,

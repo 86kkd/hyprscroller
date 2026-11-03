@@ -9,7 +9,6 @@
 #include "model/stack/internal.h"
 
 #include <hyprland/src/Compositor.hpp>
-#include <hyprland/src/managers/KeybindManager.hpp>
 
 #include "core/layout_profile.h"
 

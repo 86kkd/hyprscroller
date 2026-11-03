@@ -15,20 +15,20 @@ namespace Overview {
 OverviewPassElement::OverviewPassElement(PHLMONITOR monitor) : monitor_(monitor) {
 }
 
-std::vector<UP<IPassElement>> OverviewPassElement::draw() {
+std::vector<UP<IPassElement>> OverviewPassElement::draw(Render::CRenderContext& ctx) {
     // The pass element itself owns no draw logic; it simply forwards to the
     // overview renderer using the monitor it was created for.
-    fullRenderMonitor(monitor_);
+    fullRenderMonitor(ctx, monitor_);
     return {};
 }
 
-bool OverviewPassElement::needsLiveBlur() {
+bool OverviewPassElement::needsLiveBlur(Render::CRenderContext&) {
     // Overview draws its own complete overlay and does not require Hyprland to
     // perform live blur sampling behind this pass element.
     return false;
 }
 
-bool OverviewPassElement::needsPrecomputeBlur() {
+bool OverviewPassElement::needsPrecomputeBlur(Render::CRenderContext&) {
     // Same reasoning as above: no precomputed blur input is needed either.
     return false;
 }
@@ -37,7 +37,7 @@ ePassElementType OverviewPassElement::type() {
     return EK_CUSTOM;
 }
 
-std::optional<CBox> OverviewPassElement::boundingBox() {
+std::optional<CBox> OverviewPassElement::boundingBox(Render::CRenderContext&) {
     if (!monitor_)
         return std::nullopt;
 
@@ -46,7 +46,7 @@ std::optional<CBox> OverviewPassElement::boundingBox() {
     return CBox{{}, monitor_->m_size};
 }
 
-CRegion OverviewPassElement::opaqueRegion() {
+CRegion OverviewPassElement::opaqueRegion(Render::CRenderContext&) {
     // Returning an empty opaque region keeps compositor assumptions conservative:
     // overview should not claim it fully occludes underlying content.
     return {};

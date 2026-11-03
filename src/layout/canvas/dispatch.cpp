@@ -10,6 +10,8 @@
 #include <string>
 
 #include <hyprland/src/Compositor.hpp>
+#include <hyprland/src/config/shared/actions/ConfigActions.hpp>
+#include <hyprland/src/desktop/state/ViewState.hpp>
 #include <hyprland/src/output/Monitor.hpp>
 #include <spdlog/spdlog.h>
 
@@ -25,26 +27,48 @@ namespace {
 class HyprlandDispatcherRuntime final : public CanvasLayoutInternal::DispatcherRuntime {
 public:
     bool hasDispatcherRegistry() const override {
-        return static_cast<bool>(g_pKeybindManager);
+        return true;
     }
 
     bool hasDispatcher(const char *dispatcher) const override {
-        if (!g_pKeybindManager)
+        if (!dispatcher)
             return false;
-
-        return g_pKeybindManager->m_dispatchers.contains(dispatcher);
+        const std::string_view name(dispatcher);
+        return name == "focusmonitor" || name == "workspace" || name == "focuswindow" ||
+               name == "movetoworkspacesilent" || name == "movefocus" || name == "movewindow";
     }
 
     bool invokeDispatcher(const char *dispatcher, std::string_view arg) const override {
-        if (!g_pKeybindManager)
+        if (!dispatcher)
             return false;
 
-        const auto it = g_pKeybindManager->m_dispatchers.find(dispatcher);
-        if (it == g_pKeybindManager->m_dispatchers.end())
+        const std::string name(dispatcher);
+        const std::string argument(arg);
+        if (name == "focusmonitor") {
+            for (const auto& monitor : ScrollerCore::HyprlandRuntime::monitors()) {
+                if (monitor && monitor->m_name == argument)
+                    return Config::Actions::focusMonitor(monitor).has_value();
+            }
             return false;
+        }
+        if (name == "workspace")
+            return Config::Actions::changeWorkspace(argument).has_value();
+        if (name == "movetoworkspacesilent")
+            return Config::Actions::moveToWorkspace(argument, true).has_value();
+        if (name == "focuswindow") {
+            const auto window = Desktop::viewState()->query().selector(argument).mappedOnly().runWindow();
+            return window && Config::Actions::focus(window).has_value();
+        }
 
-        it->second(std::string(arg));
-        return true;
+        if (arg.empty())
+            return false;
+        const auto direction = Math::fromChar(arg.front());
+        if (name == "movefocus")
+            return Config::Actions::moveFocus(direction).has_value();
+        if (name == "movewindow")
+            return Config::Actions::moveInDirection(direction).has_value();
+
+        return false;
     }
 
     PHLMONITOR getMonitorFromID(int monitorId) const override {
@@ -64,11 +88,11 @@ public:
     }
 
     WORKSPACEID workspaceID(PHLWORKSPACE workspace) const override {
-        return workspace ? workspace->m_id : WORKSPACE_INVALID;
+        return workspace ? ScrollerCore::HyprlandRuntime::workspaceId(workspace) : WORKSPACE_INVALID;
     }
 
     bool isWorkspaceSpecial(PHLWORKSPACE workspace) const override {
-        return workspace && workspace->m_isSpecialWorkspace;
+        return workspace && ScrollerCore::HyprlandRuntime::isSpecialWorkspace(workspace);
     }
 
     std::string workspaceSelector(PHLWORKSPACE workspace) const override {
@@ -79,13 +103,16 @@ public:
         if (!monitor)
             return false;
 
+        if (!Config::Actions::focusMonitor(monitor))
+            return false;
+
         if (workspace) {
-            if (workspace->m_isSpecialWorkspace)
-                monitor->changeWorkspace(workspace->m_id, false, false, false);
-            else
-                monitor->changeWorkspace(workspace, false, false, false);
+            if (!Config::Actions::changeWorkspace(workspace))
+                return false;
         } else if (fallbackWorkspaceId != WORKSPACE_INVALID) {
-            monitor->changeWorkspace(fallbackWorkspaceId, false, false, false);
+            const auto fallbackWorkspace = ScrollerCore::HyprlandRuntime::workspaceById(fallbackWorkspaceId);
+            if (!fallbackWorkspace || !Config::Actions::changeWorkspace(fallbackWorkspace))
+                return false;
         }
 
         return isWorkspaceActiveOnMonitor(monitor, workspace, fallbackWorkspaceId);
@@ -96,13 +123,13 @@ public:
             return false;
 
         if (workspace) {
-            return workspace->m_isSpecialWorkspace
-                ? monitor->activeSpecialWorkspaceID() == workspace->m_id
-                : monitor->activeWorkspaceID() == workspace->m_id;
+            return ScrollerCore::HyprlandRuntime::isSpecialWorkspace(workspace)
+                ? ScrollerCore::HyprlandRuntime::activeSpecialWorkspaceId(monitor) == ScrollerCore::HyprlandRuntime::workspaceId(workspace)
+                : ScrollerCore::HyprlandRuntime::activeWorkspaceId(monitor) == ScrollerCore::HyprlandRuntime::workspaceId(workspace);
         }
 
         if (fallbackWorkspaceId != WORKSPACE_INVALID)
-            return monitor->activeWorkspaceID() == fallbackWorkspaceId;
+            return ScrollerCore::HyprlandRuntime::activeWorkspaceId(monitor) == fallbackWorkspaceId;
 
         return true;
     }
@@ -112,7 +139,7 @@ public:
     }
 
     WORKSPACEID windowWorkspaceID(PHLWINDOW window) const override {
-        return window ? window->workspaceID() : WORKSPACE_INVALID;
+        return window ? ScrollerCore::HyprlandRuntime::windowWorkspaceId(window) : WORKSPACE_INVALID;
     }
 
     void warpCursorToWindow(PHLWINDOW window) const override {

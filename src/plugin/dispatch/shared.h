@@ -58,10 +58,10 @@ inline bool isOverviewAcceptArg(std::string_view arg) {
 
 inline CanvasLayout* getCanvasForWorkspace(const int workspaceId) {
     const auto workspace = ScrollerCore::HyprlandRuntime::workspaceById(workspaceId);
-    if (!workspace || !workspace->m_space)
+    if (!workspace || !workspace->space())
         return nullptr;
 
-    const auto algorithm = workspace->m_space->algorithm();
+    const auto algorithm = workspace->space()->algorithm();
     if (!algorithm)
         return nullptr;
 
@@ -74,10 +74,10 @@ inline CanvasLayout* getCanvasForWorkspace(const int workspaceId) {
 
 inline ScrollerGrid::GridLayout* getGridForWorkspace(const int workspaceId) {
     const auto workspace = ScrollerCore::HyprlandRuntime::workspaceById(workspaceId);
-    if (!workspace || !workspace->m_space)
+    if (!workspace || !workspace->space())
         return nullptr;
 
-    const auto algorithm = workspace->m_space->algorithm();
+    const auto algorithm = workspace->space()->algorithm();
     if (!algorithm)
         return nullptr;
 
@@ -92,11 +92,11 @@ inline PHLWORKSPACE getWorkspaceForAction(PHLMONITOR monitor) {
     if (!monitor)
         return nullptr;
 
-    const auto specialWorkspaceId = monitor->activeSpecialWorkspaceID();
+    const auto specialWorkspaceId = ScrollerCore::HyprlandRuntime::activeSpecialWorkspaceId(monitor);
     if (const auto specialWorkspace = ScrollerCore::HyprlandRuntime::workspaceById(specialWorkspaceId))
         return specialWorkspace;
 
-    const auto activeWorkspaceId = monitor->activeWorkspaceID();
+    const auto activeWorkspaceId = ScrollerCore::HyprlandRuntime::activeWorkspaceId(monitor);
     if (activeWorkspaceId == WORKSPACE_INVALID)
         return nullptr;
 
@@ -119,11 +119,11 @@ inline PHLWORKSPACE workspaceForActionContext(int* workspace) {
         return nullptr;
     }
 
-    const auto specialWorkspaceId = monitor->activeSpecialWorkspaceID();
-    const auto activeWorkspaceId = monitor->activeWorkspaceID();
+    const auto specialWorkspaceId = ScrollerCore::HyprlandRuntime::activeSpecialWorkspaceId(monitor);
+    const auto activeWorkspaceId = ScrollerCore::HyprlandRuntime::activeWorkspaceId(monitor);
     const auto specialWorkspace = ScrollerCore::HyprlandRuntime::workspaceById(specialWorkspaceId);
     const auto selectedWorkspace = getWorkspaceForAction(monitor);
-    const auto workspaceId = selectedWorkspace ? selectedWorkspace->m_id : WORKSPACE_INVALID;
+    const auto workspaceId = selectedWorkspace ? ScrollerCore::HyprlandRuntime::workspaceId(selectedWorkspace) : WORKSPACE_INVALID;
 
     if (!selectedWorkspace || ScrollerCore::HyprlandRuntime::workspaceHasFullscreen(selectedWorkspace)) {
         spdlog::debug("layout_for_action: rejected chosen_ws={} special_ws={} active_ws={} special_exists={} exists={} fullscreen={}",
@@ -154,7 +154,7 @@ inline CanvasLayout* layoutForAction(int* workspace) {
     if (!selectedWorkspace)
         return nullptr;
 
-    auto* layout = getCanvasForWorkspace(selectedWorkspace->m_id);
+    auto* layout = getCanvasForWorkspace(ScrollerCore::HyprlandRuntime::workspaceId(selectedWorkspace));
     if (layout)
         layout->prepareForActionContext();
     return layout;
@@ -165,7 +165,7 @@ inline ScrollerGrid::GridLayout* gridLayoutForAction(int* workspace) {
     if (!selectedWorkspace)
         return nullptr;
 
-    return getGridForWorkspace(selectedWorkspace->m_id);
+    return getGridForWorkspace(ScrollerCore::HyprlandRuntime::workspaceId(selectedWorkspace));
 }
 
 inline WorkspaceActionLayout workspaceLayoutForAction() {
@@ -259,16 +259,6 @@ inline void closeOverviewIfActive(bool acceptSelection) {
         overview.close(acceptSelection);
 }
 
-template <typename Fn>
-inline void registerDispatcher(const char* name, Fn&& fn) {
-    HyprlandAPI::addDispatcherV2(PHANDLE, name, [fn = std::forward<Fn>(fn)](const std::string& arg) -> SDispatchResult {
-        fn(arg);
-        return {};
-    });
-}
-
-void registerLayoutDispatchers();
-void registerOverviewMarkDispatchers();
 void registerLayoutLuaFunctions();
 void registerOverviewMarkLuaFunctions();
 

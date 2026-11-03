@@ -12,7 +12,7 @@
 #include <unordered_map>
 
 #include <hyprland/src/Compositor.hpp>
-#include <hyprland/src/desktop/Workspace.hpp>
+#include <hyprland/src/workspace/HLWorkspace.hpp>
 #include <hyprland/src/layout/algorithm/Algorithm.hpp>
 #include <hyprland/src/layout/space/Space.hpp>
 
@@ -29,7 +29,7 @@ namespace {
 // Overview intentionally ignores floating/unmapped windows so navigation and
 // rendering only deal with tiled content produced by the canvas layout.
 bool is_tiled_overview_window(PHLWINDOW window) {
-    return window && window->m_isMapped && !window->m_isFloating;
+    return window && window->mapped() && !window->isFloating();
 }
 
 MonitorRegion make_monitor_region(PHLMONITOR monitor) {
@@ -66,10 +66,10 @@ const CanvasLayoutState::CanvasWorkspaceRecord* find_canvas_record(const std::ve
 
 ScrollerGrid::GridLayout* grid_layout_for_workspace(WORKSPACEID workspaceId) {
     const auto workspace = ScrollerCore::HyprlandRuntime::workspaceById(workspaceId);
-    if (!workspace || !workspace->m_space)
+    if (!workspace || !workspace->space())
         return nullptr;
 
-    const auto algorithm = workspace->m_space->algorithm();
+    const auto algorithm = workspace->space()->algorithm();
     if (!algorithm || !algorithm->tiledAlgo())
         return nullptr;
 

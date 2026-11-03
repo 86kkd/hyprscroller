@@ -6,7 +6,7 @@
 
 #include <string>
 
-#include <hyprland/src/desktop/Workspace.hpp>
+#include "hyprland_runtime.h"
 
 namespace ScrollerCore {
 
@@ -14,10 +14,10 @@ inline std::string workspace_selector(PHLWORKSPACE workspace) {
     if (!workspace)
         return {};
 
-    if (!workspace->m_name.empty())
-        return workspace->m_name;
+    if (!workspace->displayName().empty())
+        return workspace->displayName();
 
-    return std::to_string(workspace->m_id);
+    return std::to_string(ScrollerCore::HyprlandRuntime::workspaceId(workspace));
 }
 
 } // namespace ScrollerCore

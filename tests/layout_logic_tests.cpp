@@ -221,7 +221,7 @@ struct FakeDispatcherRuntime final : CanvasLayoutInternal::DispatcherRuntime {
     }
 
     PHLWORKSPACE addWorkspace(WORKSPACEID id, std::string selector, bool special = false) {
-        auto workspace = make_opaque_handle<CWorkspace>();
+        auto workspace = make_opaque_handle<Workspace::CHLWorkspace>();
         workspaces.emplace(workspace.get(), WorkspaceState{id, std::move(selector), special});
         workspacesBySelector.emplace(workspaces[workspace.get()].selector, workspace);
         return workspace;

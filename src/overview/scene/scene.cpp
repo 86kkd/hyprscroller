@@ -15,7 +15,8 @@
 
 #include <algorithm>
 #include <hyprland/src/Compositor.hpp>
-#include <hyprland/src/desktop/Workspace.hpp>
+#include <hyprland/src/desktop/view/window/WindowMetadata.hpp>
+#include <hyprland/src/workspace/HLWorkspace.hpp>
 
 #include "core/hyprland_runtime.h"
 #include "overview/scene/geometry_utils.h"
@@ -57,10 +58,10 @@ std::string workspace_label(PHLWORKSPACE workspace, WORKSPACEID workspaceId) {
     if (!workspace)
         return std::to_string(workspaceId);
 
-    if (!workspace->m_name.empty())
-        return workspace->m_name;
+    if (!workspace->displayName().empty())
+        return workspace->displayName();
 
-    return std::to_string(workspace->m_id);
+    return std::to_string(ScrollerCore::HyprlandRuntime::workspaceId(workspace));
 }
 
 std::string empty_target_label(const Target& target) {
@@ -72,8 +73,8 @@ std::string window_target_label(PHLWINDOW window) {
     if (!window)
         return "window";
 
-    if (!window->m_title.empty())
-        return window->m_title;
+    if (!window->metadata().title().empty())
+        return window->metadata().title();
 
     return "window";
 }
@@ -112,7 +113,7 @@ std::optional<SceneMonitor> buildSceneForMonitor(PHLMONITOR monitor, const Model
         sceneWorkspace.contentBox = sceneWorkspace.box;
 
         const auto workspaceRef = ScrollerCore::HyprlandRuntime::workspaceById(workspace.workspaceId);
-        sceneWorkspace.special = workspaceRef ? workspaceRef->m_isSpecialWorkspace : false;
+        sceneWorkspace.special = workspaceRef ? ScrollerCore::HyprlandRuntime::isSpecialWorkspace(workspaceRef) : false;
         sceneWorkspace.label = workspace_label(workspaceRef, workspace.workspaceId);
 
         sceneWorkspace.targets.reserve(workspace.targets.size());

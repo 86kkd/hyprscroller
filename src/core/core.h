@@ -13,7 +13,7 @@
 
 #include <hyprland/src/output/Monitor.hpp>
 #include <hyprland/src/layout/target/Target.hpp>
-#include <hyprland/src/desktop/view/Window.hpp>
+#include <hyprland/src/desktop/view/window/Window.hpp>
 
 #include "core/hyprland_runtime.h"
 

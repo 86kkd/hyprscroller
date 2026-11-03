@@ -26,7 +26,7 @@ void CanvasLayout::prepareForOverviewSnapshot() {
     // Snapshot preparation is read-only at the overview layer, but it still
     // asks the canvas to relayout first so window boxes reflect the latest
     // monitor state, gaps, and fullscreen rules.
-    relayoutCanvas(monitor, !workspace->m_isSpecialWorkspace);
+    relayoutCanvas(monitor, !ScrollerCore::HyprlandRuntime::isSpecialWorkspace(workspace));
 }
 
 CanvasOverviewSnapshot CanvasLayout::buildOverviewSnapshot() const {
@@ -36,7 +36,7 @@ CanvasOverviewSnapshot CanvasLayout::buildOverviewSnapshot() const {
     if (!workspace)
         return snapshot;
 
-    snapshot.workspaceId = workspace->m_id;
+    snapshot.workspaceId = ScrollerCore::HyprlandRuntime::workspaceId(workspace);
 
     const auto monitor = getVisibleCanvasMonitor(ScrollerCore::HyprlandRuntime::monitorById(workspace->monitorID()));
     snapshot.monitorId = monitor ? monitor->m_id : workspace->monitorID();

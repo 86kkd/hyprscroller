@@ -9,7 +9,7 @@
 #include "overview/session/effects.h"
 
 #include <hyprland/src/Compositor.hpp>
-#include <hyprland/src/desktop/Workspace.hpp>
+#include <hyprland/src/workspace/HLWorkspace.hpp>
 #include <hyprland/src/layout/algorithm/Algorithm.hpp>
 #include <hyprland/src/layout/space/Space.hpp>
 
@@ -24,10 +24,10 @@ namespace {
 constexpr MONITORID INVALID_MONITOR_ID = static_cast<MONITORID>(-1);
 
 ScrollerGrid::GridLayout* grid_layout_for_workspace(PHLWORKSPACE workspace) {
-    if (!workspace || !workspace->m_space)
+    if (!workspace || !workspace->space())
         return nullptr;
 
-    const auto algorithm = workspace->m_space->algorithm();
+    const auto algorithm = workspace->space()->algorithm();
     if (!algorithm || !algorithm->tiledAlgo())
         return nullptr;
 
@@ -71,7 +71,7 @@ class HyprlandSessionEffectsRuntime final : public Runtime {
     }
 
     WORKSPACEID workspaceId(PHLWORKSPACE workspace) const override {
-        return workspace ? workspace->m_id : WORKSPACE_INVALID;
+        return workspace ? ScrollerCore::HyprlandRuntime::workspaceId(workspace) : WORKSPACE_INVALID;
     }
 
     MONITORID workspaceMonitorId(PHLWORKSPACE workspace) const override {
@@ -79,7 +79,7 @@ class HyprlandSessionEffectsRuntime final : public Runtime {
     }
 
     bool isWorkspaceSpecial(PHLWORKSPACE workspace) const override {
-        return workspace && workspace->m_isSpecialWorkspace;
+        return workspace && ScrollerCore::HyprlandRuntime::isSpecialWorkspace(workspace);
     }
 
     PHLWINDOW workspaceLastFocusedWindow(PHLWORKSPACE workspace) const override {
@@ -91,7 +91,7 @@ class HyprlandSessionEffectsRuntime final : public Runtime {
     }
 
     bool isWindowMapped(PHLWINDOW window) const override {
-        return window && window->m_isMapped;
+        return window && window->mapped();
     }
 
     PHLMONITOR visibleMonitorForWorkspace(PHLWORKSPACE workspace) const override {
@@ -102,7 +102,7 @@ class HyprlandSessionEffectsRuntime final : public Runtime {
         if (!workspace || !window)
             return;
 
-        auto* layout = CanvasLayoutInternal::get_canvas_for_workspace(workspace->m_id);
+        auto* layout = CanvasLayoutInternal::get_canvas_for_workspace(ScrollerCore::HyprlandRuntime::workspaceId(workspace));
         if (!layout) {
             if (auto* gridLayout = grid_layout_for_workspace(workspace)) {
                 gridLayout->focus_window(window);
@@ -119,7 +119,7 @@ class HyprlandSessionEffectsRuntime final : public Runtime {
         if (!workspace)
             return;
 
-        auto* layout = CanvasLayoutInternal::get_canvas_for_workspace(workspace->m_id);
+        auto* layout = CanvasLayoutInternal::get_canvas_for_workspace(ScrollerCore::HyprlandRuntime::workspaceId(workspace));
         if (!layout) {
             if (auto* gridLayout = grid_layout_for_workspace(workspace))
                 gridLayout->prepareForOverviewSnapshot();

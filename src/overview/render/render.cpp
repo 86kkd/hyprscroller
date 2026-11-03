@@ -17,7 +17,7 @@
 
 namespace Overview {
 
-void fullRenderMonitor(PHLMONITOR monitor) {
+void fullRenderMonitor(Render::CRenderContext& ctx, PHLMONITOR monitor) {
     if (!monitor || !session().active())
         return;
 
@@ -27,7 +27,7 @@ void fullRenderMonitor(PHLMONITOR monitor) {
     if (!scene)
         return;
 
-    drawSceneMonitor(*scene, std::chrono::steady_clock::now(), renderState());
+    drawSceneMonitor(ctx, *scene, std::chrono::steady_clock::now(), renderState());
 }
 
 bool initializeRendererHooks(HANDLE handle) {

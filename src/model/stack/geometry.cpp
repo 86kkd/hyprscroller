@@ -86,7 +86,7 @@ std::vector<WindowGeometryEntry> Stack::capture_window_boxes(const Vector2D &gap
 
         const auto gap0 = win == windows.first() ? 0.0 : gap;
         const auto gap1 = win == windows.last() ? 0.0 : gap;
-        const auto border = window->getRealBorderSize();
+        const auto border = ScrollerCore::HyprlandRuntime::windowBorderSize(window);
         boxes.push_back({
             .window = window,
             .box = logical_window_box(geom, mode, border, gap_x, win->data()->get_geom_y(), win->data()->get_geom_h(), gap0, gap1),
@@ -109,7 +109,7 @@ void Stack::scale(const Vector2D &bmin, const Vector2D &start, double scale, dou
         PHLWINDOW window = win->data()->ptr().lock();
         if (!window)
             continue;
-        auto border = window->getRealBorderSize();
+        auto border = ScrollerCore::HyprlandRuntime::windowBorderSize(window);
         auto gap0 = win == windows.first() ? 0.0 : gap;
         auto gap1 = win == windows.last() ? 0.0 : gap;
         auto position = ScrollerCore::HyprlandRuntime::windowPosition(window);
@@ -346,7 +346,7 @@ void Stack::adjust_windows(ListNode<Window *> *win, const Vector2D &gap_x, doubl
     for (auto w = windows.first(); w != nullptr; w = w->next()) {
         auto *wdata = w->data();
         const auto window = wdata->ptr().lock();
-        const auto border = window ? window->getRealBorderSize() : 0.0;
+        const auto border = window ? ScrollerCore::HyprlandRuntime::windowBorderSize(window) : 0.0;
         const auto gap0 = w == windows.first() ? 0.0 : gap;
         const auto gap1 = w == windows.last() ? 0.0 : gap;
         const auto rendered = ScrollerCore::rendered_local_interval(wdata->get_geom_y(), wdata->get_geom_h(), border, gap0, gap1);
@@ -382,7 +382,7 @@ void Stack::adjust_windows(ListNode<Window *> *win, const Vector2D &gap_x, doubl
             continue;
         auto gap0 = w == windows.first() ? 0.0 : gap;
         auto gap1 = w == windows.last() ? 0.0 : gap;
-        auto border = window->getRealBorderSize();
+        auto border = ScrollerCore::HyprlandRuntime::windowBorderSize(window);
         const auto localSize = w->data()->get_geom_h();
         const auto logicalBox = logical_window_box(geom, mode, border, gap_x, w->data()->get_geom_y(), localSize, gap0, gap1);
         const auto minCommittedSpan = std::max(1.0, 2.0 * border + 1.0);
@@ -403,7 +403,7 @@ void Stack::resize_active_window(const ScrollerCore::Box &bounds, const Vector2D
     if (!activeWindow)
         return;
 
-    auto border = activeWindow->getRealBorderSize();
+    auto border = ScrollerCore::HyprlandRuntime::windowBorderSize(activeWindow);
     // A pointer drag can resize along two logical axes at once:
     // - stackDelta changes the outer stack size inside the lane
     // - windowDelta changes the active child size inside that stack
@@ -427,7 +427,7 @@ void Stack::resize_active_window(const ScrollerCore::Box &bounds, const Vector2D
                 return;
             if (win == active)
                 wh += windowDelta;
-            if (wh <= 0.0 || wh + 2.0 * window->getRealBorderSize() + gap0 + gap1 > StackInternal::stack_local_span(geom, mode))
+            if (wh <= 0.0 || wh + 2.0 * ScrollerCore::HyprlandRuntime::windowBorderSize(window) + gap0 + gap1 > StackInternal::stack_local_span(geom, mode))
                 return;
         }
     }

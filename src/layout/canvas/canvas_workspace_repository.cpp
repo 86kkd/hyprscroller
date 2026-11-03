@@ -10,7 +10,7 @@
 #include <system_error>
 
 #include <hyprland/src/Compositor.hpp>
-#include <hyprland/src/desktop/Workspace.hpp>
+#include <hyprland/src/workspace/HLWorkspace.hpp>
 #include <hyprland/src/output/Monitor.hpp>
 
 #include "core/hyprland_runtime.h"
@@ -109,7 +109,7 @@ WORKSPACEID next_workspace_id(const ScrollerCanvasSnapshot::RepositorySnapshot& 
             const auto workspace = workspaceRef.lock();
             if (!workspace)
                 continue;
-            maxWorkspaceId = std::max(maxWorkspaceId, workspace->m_id);
+            maxWorkspaceId = std::max(maxWorkspaceId, ScrollerCore::HyprlandRuntime::workspaceId(workspace));
         }
     }
     for (const auto& canvas : snapshot.canvases) {
@@ -256,12 +256,12 @@ std::vector<CanvasWorkspaceMember> CanvasWorkspaceRepository::currentVisibleMemb
         if (!monitor)
             continue;
 
-        const auto workspaceId = CanvasLayoutInternal::preferred_workspace_id(monitor, monitor->activeWorkspaceID());
+        const auto workspaceId = CanvasLayoutInternal::preferred_workspace_id(monitor, ScrollerCore::HyprlandRuntime::activeWorkspaceId(monitor));
         const auto workspace = ScrollerCore::HyprlandRuntime::workspaceById(workspaceId);
         members.push_back({
             .monitorId = static_cast<int>(monitor->m_id),
             .workspaceId = workspaceId,
-            .special = workspace ? workspace->m_isSpecialWorkspace : false,
+            .special = workspace ? ScrollerCore::HyprlandRuntime::isSpecialWorkspace(workspace) : false,
         });
     }
 

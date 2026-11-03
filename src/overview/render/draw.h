@@ -8,11 +8,15 @@
 #include "overview/render/state.h"
 #include "overview/scene/scene.h"
 
+namespace Render {
+class CRenderContext;
+}
+
 namespace Overview {
 
 void snapshotWindowTargets(const Model& model);
 void snapshotBackdropLayers(const Model& model, RenderState& state);
-void enqueueMonitorBackdrop(PHLMONITOR monitor, const RenderState& state);
-void drawSceneMonitor(const SceneMonitor& scene, steady_tp now, RenderState& state);
+void enqueueMonitorBackdrop(Render::CRenderContext& ctx, PHLMONITOR monitor, const RenderState& state);
+void drawSceneMonitor(Render::CRenderContext& ctx, const SceneMonitor& scene, steady_tp now, RenderState& state);
 
 } // namespace Overview

@@ -31,14 +31,14 @@ CHyprSignalListener g_renderStageListener = nullptr;
 CHyprSignalListener g_keyboardKeyListener = nullptr;
 
 bool no_overview_modifiers_remaining() {
-    constexpr uint32_t kTransientModifierMask =
-        HL_MODIFIER_SHIFT |
-        HL_MODIFIER_CTRL |
-        HL_MODIFIER_ALT |
-        HL_MODIFIER_MOD2 |
-        HL_MODIFIER_MOD3 |
-        HL_MODIFIER_META |
-        HL_MODIFIER_MOD5;
+    constexpr Input::ModifierMask kTransientModifierMask =
+        Input::HL_MODIFIER_SHIFT |
+        Input::HL_MODIFIER_CTRL |
+        Input::HL_MODIFIER_ALT |
+        Input::HL_MODIFIER_MOD2 |
+        Input::HL_MODIFIER_MOD3 |
+        Input::HL_MODIFIER_META |
+        Input::HL_MODIFIER_MOD5;
 
     if (!g_pSeatManager)
         return true;
@@ -49,7 +49,7 @@ bool no_overview_modifiers_remaining() {
 
     // Hold-to-preview overview should commit once the last transient modifier
     // (super/alt/ctrl/shift-style keys) has been released.
-    return (keyboard->getModifiers() & kTransientModifierMask) == 0;
+    return !static_cast<bool>(keyboard->getModifiers() & kTransientModifierMask);
 }
 
 void damage_monitor_if_animating(PHLMONITOR monitor, steady_tp now) {
@@ -137,17 +137,18 @@ bool initializeRendererHooksImpl(HANDLE handle) {
             damage_monitor_if_animating(monitor, now);
         });
 
-        g_renderStageListener = Event::bus()->m_events.render.stage.listen([](eRenderStage stage) {
-            if (stage != RENDER_POST_WINDOWS)
+        g_renderStageListener = Event::bus()->m_events.render.stage.listen([](const Event::SRenderStageEvent& event) {
+            if (event.stage != RENDER_POST_WINDOWS || !event.context)
                 return;
 
-            const auto monitor = g_pHyprRenderer->m_renderData.pMonitor.lock();
+            auto& ctx = event.context->get();
+            const auto monitor = event.monitor;
             if (!monitor || !session().active())
                 return;
 
             if (renderState().sceneForMonitor(monitor->m_id)) {
-                enqueueMonitorBackdrop(monitor, renderState());
-                g_pHyprRenderer->m_renderPass.add(makeUnique<OverviewPassElement>(monitor));
+                enqueueMonitorBackdrop(ctx, monitor, renderState());
+                g_pHyprRenderer->addPassElement(ctx, makeUnique<OverviewPassElement>(monitor));
             }
         });
 
@@ -184,7 +185,9 @@ void shutdownRendererHooksImpl(HANDLE handle) {
     g_renderStageListener = nullptr;
     g_keyboardKeyListener = nullptr;
     renderState().clearAll();
-    g_pHyprRenderer->m_renderPass.removeAllOfType("OverviewPassElement");
+    auto& ctx = g_pHyprRenderer->context();
+    if (ctx.active())
+        ctx.m_pass.removeAllOfType("OverviewPassElement");
     spdlog::info("overview_renderer_shutdown");
 }
 

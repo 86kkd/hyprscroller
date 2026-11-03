@@ -1,6 +1,11 @@
 #pragma once
 
+#include <cstdint>
+
 #include <hyprutils/math/Vector2D.hpp>
+
+using WORKSPACEID = int64_t;
+inline constexpr WORKSPACEID WORKSPACE_INVALID = -1;
 
 enum class Direction { Left, Right, Up, Down, Begin, End, Center };
 enum class FitSize { Active, Visible, All, ToEnd, ToBeg };

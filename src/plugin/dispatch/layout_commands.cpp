@@ -101,7 +101,7 @@ void dispatch_focusmonitor(std::string arg) {
         return;
     }
 
-    const auto targetWorkspaceId = CanvasLayoutInternal::preferred_workspace_id(targetMonitor, targetMonitor->activeWorkspaceID());
+    const auto targetWorkspaceId = CanvasLayoutInternal::preferred_workspace_id(targetMonitor, ScrollerCore::HyprlandRuntime::activeWorkspaceId(targetMonitor));
     const auto targetWorkspace = ScrollerCore::HyprlandRuntime::workspaceById(targetWorkspaceId);
     if (!CanvasLayoutInternal::focus_monitor_workspace(targetMonitor,
                                                        targetWorkspace,
@@ -269,21 +269,6 @@ void dispatch_focuslane(std::string arg) {
 
 } // namespace
 
-void registerLayoutDispatchers() {
-    registerDispatcher("scroller:cyclesize", dispatch_cyclesize);
-    registerDispatcher("scroller:movefocus", dispatch_movefocus);
-    registerDispatcher("scroller:focusmonitor", dispatch_focusmonitor);
-    registerDispatcher("scroller:movewindow", dispatch_movewindow);
-    registerDispatcher("scroller:alignwindow", dispatch_alignwindow);
-    registerDispatcher("scroller:admitwindow", dispatch_admitwindow);
-    registerDispatcher("scroller:expelwindow", dispatch_expelwindow);
-    registerDispatcher("scroller:setmode", dispatch_setmode);
-    registerDispatcher("scroller:fitsize", dispatch_fitsize);
-    registerDispatcher("scroller:togglefullscreen", dispatch_togglefullscreen);
-    registerDispatcher("scroller:createlane", dispatch_createlane);
-    registerDispatcher("scroller:focuslane", dispatch_focuslane);
-}
-
 namespace {
 
 std::string luaStringArg(lua_State* state) {
@@ -300,6 +285,11 @@ int lua_move_focus(lua_State* state) {
     return 0;
 }
 
+int lua_cycle_size(lua_State* state) {
+    dispatch_cyclesize(luaStringArg(state));
+    return 0;
+}
+
 int lua_focus_monitor(lua_State* state) {
     dispatch_focusmonitor(luaStringArg(state));
     return 0;
@@ -310,8 +300,43 @@ int lua_move_window(lua_State* state) {
     return 0;
 }
 
+int lua_align_window(lua_State* state) {
+    dispatch_alignwindow(luaStringArg(state));
+    return 0;
+}
+
+int lua_admit_window(lua_State* state) {
+    dispatch_admitwindow(luaStringArg(state));
+    return 0;
+}
+
+int lua_expel_window(lua_State* state) {
+    dispatch_expelwindow(luaStringArg(state));
+    return 0;
+}
+
+int lua_set_mode(lua_State* state) {
+    dispatch_setmode(luaStringArg(state));
+    return 0;
+}
+
+int lua_fit_size(lua_State* state) {
+    dispatch_fitsize(luaStringArg(state));
+    return 0;
+}
+
 int lua_toggle_fullscreen(lua_State* state) {
     dispatch_togglefullscreen(luaStringArg(state));
+    return 0;
+}
+
+int lua_create_lane(lua_State* state) {
+    dispatch_createlane(luaStringArg(state));
+    return 0;
+}
+
+int lua_focus_lane(lua_State* state) {
+    dispatch_focuslane(luaStringArg(state));
     return 0;
 }
 
@@ -323,10 +348,18 @@ void registerLuaFunction(const char* name, PLUGIN_LUA_FN function) {
 } // namespace
 
 void registerLayoutLuaFunctions() {
+    registerLuaFunction("cycle_size", lua_cycle_size);
     registerLuaFunction("move_focus", lua_move_focus);
     registerLuaFunction("focus_monitor", lua_focus_monitor);
     registerLuaFunction("move_window", lua_move_window);
+    registerLuaFunction("align_window", lua_align_window);
+    registerLuaFunction("admit_window", lua_admit_window);
+    registerLuaFunction("expel_window", lua_expel_window);
+    registerLuaFunction("set_mode", lua_set_mode);
+    registerLuaFunction("fit_size", lua_fit_size);
     registerLuaFunction("toggle_fullscreen", lua_toggle_fullscreen);
+    registerLuaFunction("create_lane", lua_create_lane);
+    registerLuaFunction("focus_lane", lua_focus_lane);
 }
 
 } // namespace dispatchers::detail

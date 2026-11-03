@@ -73,15 +73,6 @@ void dispatch_marksreset(std::string arg) {
 
 } // namespace
 
-void registerOverviewMarkDispatchers() {
-    registerDispatcher("scroller:toggleoverview", dispatch_toggleoverview);
-    registerDispatcher("scroller:canceloverview", dispatch_canceloverview);
-    registerDispatcher("scroller:marksadd", dispatch_marksadd);
-    registerDispatcher("scroller:marksdelete", dispatch_marksdelete);
-    registerDispatcher("scroller:marksvisit", dispatch_marksvisit);
-    registerDispatcher("scroller:marksreset", dispatch_marksreset);
-}
-
 namespace {
 
 std::string luaStringArg(lua_State* state) {

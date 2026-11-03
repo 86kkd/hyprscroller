@@ -20,7 +20,7 @@ This fork is maintained against the Hyprland versions I actually run and test.
 The focus is practical compatibility with packaged Hyprland releases first,
 instead of chasing trunk continuously.
 
-The current compatibility baseline is Arch Linux Hyprland 0.56.2. Rebuild the
+The current compatibility baseline is Arch Linux Hyprland 0.57.0. Rebuild the
 plugin after every Hyprland package update, and restart the Hyprland session
 before loading that new build.
 
@@ -105,11 +105,11 @@ You can enable or disable it via `hyprpm enable hyprscroller` and
 
 ## Configuration
 
-If you are not using `hyprpm`, to make Hyprland load the plugin, add this to
-your configuration.
+Hyprland 0.57 removed the legacy `plugin = ...` config keyword. If you are not
+using `hyprpm`, load the plugin from your Lua configuration:
 
-``` conf
-plugin = ~/.config/hypr/plugins/hyprscroller.so
+``` lua
+hl.plugin.load(os.getenv("HOME") .. "/.config/hypr/plugins/hyprscroller.so")
 ```
 
 Instead, if you use `hyprpm`, it should be as simple as adding this to
@@ -132,27 +132,26 @@ general {
 ```
 
 
-## Dispatchers
+## Lua commands
 
-The plugin adds the following dispatchers:
+Hyprland 0.57 no longer registers plugin dispatchers. The plugin exposes the
+following functions under `hl.plugin.scroller` instead:
 
-| Dispatcher                | Description                                                                                                                 |
-|---------------------------|-----------------------------------------------------------------------------------------------------------------------------|
-| `scroller:movefocus`      | A replacement for `movefocus`, takes a direction as argument.                                                               |
-| `scroller:movewindow`     | A replacement for `movewindow`, takes a direction as argument.                                                              |
-| `scroller:setmode`        | Set mode: `r/row` (default), `c/col/column`. Sets the working mode. Affects most dispatchers and new window creation.       |
-| `scroller:cyclesize`      | Resize the focused column width (*row* mode), or the active window height (*column* mode).                                  |
-| `scroller:alignwindow`    | Align window on the screen, `l/left`, `c/center`, `r/right` (*row* mode), `c/center`, `u/up`, `d/down` (*col* mode)         |
-| `scroller:admitwindow`    | Push the current window below the active one of the column to its left.                                                     |
-| `scroller:expelwindow`    | Pop the current window out of its column and place it on a new column to the right.                                         |
-| `scroller:fitsize`        | Resize columns (*row* mode) or windows (*col* mode) so they fit on the screen: `active`, `visible`, `all`, `toend`, `tobeg` |
-| `scroller:togglefullscreen` | Toggle scroller fullscreen for the active window. In *row* mode it expands horizontally to the monitor width; in *column* mode it expands vertically to the monitor height. |
-| `scroller:focusmonitor`   | Move monitor focus in normal mode, or move the focused canvas workspace preview in overview mode.                          |
-| `scroller:toggleoverview` | Toggle the read-only monitor/workspace/window overview overlay                                                             |
-| `scroller:marksadd`       | Add a named mark. Argument is the name of the mark                                                                          |
-| `scroller:marksdelete`    | Delete a named mark. Argument is the name of the mark                                                                       |
-| `scroller:marksvisit`     | Visit a named mark. Argument is the name of the mark                                                                        |
-| `scroller:marksreset`     | Delete all marks                                                                                                            |
+| Lua function | Description |
+|--------------|-------------|
+| `move_focus(direction)` | Move focus inside the layout, or move the overview selection. |
+| `focus_monitor(direction)` | Move monitor focus, or select another canvas in overview. |
+| `move_window(direction)` | Move the active window in the requested direction. |
+| `cycle_size(step)` | Cycle the active stack size with `next` or `prev`. |
+| `align_window(direction)` | Align the active stack or window. |
+| `admit_window()` / `expel_window()` | Move a window into or out of an adjacent stack. |
+| `set_mode(mode)` | Select `row` or `col` mode. |
+| `fit_size(scope)` | Fit `active`, `visible`, `all`, `toend`, or `tobeg`. |
+| `toggle_fullscreen()` | Toggle scroller-managed fullscreen expansion. |
+| `create_lane(direction)` / `focus_lane(direction)` | Create or focus a lane. |
+| `toggle_overview(action)` / `cancel_overview()` | Open, accept, or cancel overview. |
+| `marks_add(name)` / `marks_delete(name)` | Add or delete a mark. |
+| `marks_visit(name)` / `marks_reset()` | Visit a mark or clear all marks. |
 
 ## Fullscreen behavior
 
@@ -343,7 +342,27 @@ plugin {
 
 ## Key bindings
 
-As an example, you could set some key bindings in your `hyprland.conf` like this:
+On Hyprland 0.57, bind the plugin Lua functions after calling
+`hl.plugin.load(...)`. The callback resolves the plugin function when the key is
+pressed, after asynchronous plugin loading has completed:
+
+``` lua
+hl.bind("SUPER + LEFT", function() hl.plugin.scroller.move_focus("l") end)
+hl.bind("SUPER + RIGHT", function() hl.plugin.scroller.move_focus("r") end)
+hl.bind("SUPER + CTRL + LEFT", function() hl.plugin.scroller.move_window("l") end)
+hl.bind("SUPER + CTRL + RIGHT", function() hl.plugin.scroller.move_window("r") end)
+hl.bind("SUPER + BRACKETLEFT", function() hl.plugin.scroller.set_mode("row") end)
+hl.bind("SUPER + BRACKETRIGHT", function() hl.plugin.scroller.set_mode("col") end)
+hl.bind("SUPER + TAB", function() hl.plugin.scroller.toggle_overview() end)
+```
+
+The repository's [ChangeLayout helper](./examples/ChangeLayout.sh) installs the
+same Lua-compatible bindings dynamically when switching layouts.
+
+### Legacy pre-0.57 configuration
+
+The dispatcher-based examples below apply only to older Hyprland releases and
+are retained as a migration reference. They do not register on Hyprland 0.57.
 
 ``` conf
 # Move focus with mainMod + arrow keys

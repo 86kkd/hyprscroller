@@ -109,7 +109,7 @@ std::vector<PHLWINDOW> live_tiled_workspace_windows(PHLWORKSPACE workspace) {
 
     windows.reserve(ScrollerCore::HyprlandRuntime::windows().size());
     for (const auto &window : ScrollerCore::HyprlandRuntime::windows()) {
-        if (!window || window->workspaceID() != workspace->m_id || window->m_isFloating || !window->m_isMapped || window->isHidden())
+        if (!window || ScrollerCore::HyprlandRuntime::windowWorkspaceId(window) != ScrollerCore::HyprlandRuntime::workspaceId(workspace) || window->isFloating() || !window->mapped() || window->isHidden())
             continue;
         windows.push_back(window);
     }
@@ -167,11 +167,11 @@ void CanvasLayout::ensureWorkspaceRuntime() {
         return;
     }
 
-    if (workspaceRuntimeId == workspace->m_id && m_workspaceActiveCallback)
+    if (workspaceRuntimeId == ScrollerCore::HyprlandRuntime::workspaceId(workspace) && m_workspaceActiveCallback)
         return;
 
     snapshotRestoreAttempted = false;
-    workspaceRuntimeId = workspace->m_id;
+    workspaceRuntimeId = ScrollerCore::HyprlandRuntime::workspaceId(workspace);
     m_workspaceActiveCallback = workspace->m_events.activeChanged.listen([this] {
         // Special workspaces can disappear without their hidden canvas ticking.
         // When the active state flips, resync hidden-canvas bookkeeping first,
@@ -182,7 +182,7 @@ void CanvasLayout::ensureWorkspaceRuntime() {
         syncHiddenSpecialWorkspaceCanvases();
         const auto monitor = CanvasLayoutInternal::visible_monitor_for_workspace(workspace);
         if (syncSpecialWorkspaceVisibilityState(monitor) && monitor)
-            relayoutCanvas(monitor, !workspace->m_isSpecialWorkspace);
+            relayoutCanvas(monitor, !ScrollerCore::HyprlandRuntime::isSpecialWorkspace(workspace));
     });
 }
 
@@ -387,7 +387,7 @@ bool CanvasLayout::focusManagedWindow(PHLWINDOW window, bool warpCursor, const c
                  ctx,
                  CanvasLayoutInternal::get_workspace_id(),
                  static_cast<const void*>(window.get()),
-                 window->workspaceID(),
+                 ScrollerCore::HyprlandRuntime::windowWorkspaceId(window),
                  window->monitorID());
     syncActiveStateFromWorkspaceFocus();
     return false;
@@ -449,7 +449,7 @@ void CanvasLayout::prepareForActionContext() {
     const auto workspace = getCanvasWorkspace();
     const auto monitor = getVisibleCanvasMonitor();
     if (syncSpecialWorkspaceVisibilityState(monitor) && workspace && monitor)
-        relayoutCanvas(monitor, !workspace->m_isSpecialWorkspace);
+        relayoutCanvas(monitor, !ScrollerCore::HyprlandRuntime::isSpecialWorkspace(workspace));
 }
 
 std::optional<ScrollerSnapshot::CanvasSnapshot> CanvasLayout::captureSnapshot() const {
@@ -458,7 +458,7 @@ std::optional<ScrollerSnapshot::CanvasSnapshot> CanvasLayout::captureSnapshot() 
         return std::nullopt;
 
     ScrollerSnapshot::CanvasSnapshot snapshot;
-    snapshot.workspaceId = workspace->m_id;
+    snapshot.workspaceId = ScrollerCore::HyprlandRuntime::workspaceId(workspace);
 
     size_t storedLaneIndex = 0;
     bool foundActiveLane = false;
@@ -499,7 +499,7 @@ void CanvasLayout::persistSnapshot() {
         });
         if (!fullyManaged) {
             spdlog::debug("persistSnapshot: preserving last complete snapshot during partial detach workspace={} live_windows={}",
-                          workspace->m_id,
+                          ScrollerCore::HyprlandRuntime::workspaceId(workspace),
                           liveWindows.size());
             return;
         }
@@ -522,12 +522,12 @@ void CanvasLayout::clearPersistedSnapshot() {
     if (!workspace)
         return;
 
-    CanvasLayoutState::repository().erase(workspace->m_id);
+    CanvasLayoutState::repository().erase(ScrollerCore::HyprlandRuntime::workspaceId(workspace));
 }
 
 bool CanvasLayout::restoreSnapshot(const ScrollerSnapshot::CanvasSnapshot &snapshot) {
     const auto workspace = getCanvasWorkspace();
-    if (!workspace || snapshot.workspaceId != workspace->m_id)
+    if (!workspace || snapshot.workspaceId != ScrollerCore::HyprlandRuntime::workspaceId(workspace))
         return false;
 
     const auto liveWindows = live_tiled_workspace_windows(workspace);
@@ -640,7 +640,7 @@ bool CanvasLayout::restoreSnapshot(const ScrollerSnapshot::CanvasSnapshot &snaps
     }
 
     const auto restoredActiveWindow = activeLane && activeLane->data() ? activeLane->data()->get_active_window() : nullptr;
-    relayoutCanvas(fallbackMonitor, !workspace->m_isSpecialWorkspace, true);
+    relayoutCanvas(fallbackMonitor, !ScrollerCore::HyprlandRuntime::isSpecialWorkspace(workspace), true);
     if (restoredActiveWindow)
         focusManagedWindow(restoredActiveWindow, false, "restoreSnapshot");
     debugVerifyLaneCache();
@@ -648,7 +648,7 @@ bool CanvasLayout::restoreSnapshot(const ScrollerSnapshot::CanvasSnapshot &snaps
     restoringSnapshot = false;
     persistSnapshot();
     spdlog::info("restore_snapshot: workspace={} restored_lanes={} live_windows={}",
-                 workspace->m_id,
+                 ScrollerCore::HyprlandRuntime::workspaceId(workspace),
                  snapshot.lanes.size(),
                  liveWindows.size());
     return true;
@@ -664,7 +664,7 @@ bool CanvasLayout::maybeRestoreWorkspaceSnapshot() {
         return false;
 
     CanvasLayoutState::repository().initialize();
-    const auto snapshot = CanvasLayoutState::repository().find(workspace->m_id);
+    const auto snapshot = CanvasLayoutState::repository().find(ScrollerCore::HyprlandRuntime::workspaceId(workspace));
     if (!snapshot)
         return false;
 
@@ -676,7 +676,7 @@ void CanvasLayout::relayoutVisibleCanvas(PHLMONITOR fallbackMonitor) {
     const auto workspace = getCanvasWorkspace();
     const auto monitor = getVisibleCanvasMonitor(fallbackMonitor);
     if (workspace && monitor)
-        relayoutCanvas(monitor, !workspace->m_isSpecialWorkspace);
+        relayoutCanvas(monitor, !ScrollerCore::HyprlandRuntime::isSpecialWorkspace(workspace));
 }
 
 // Remove an empty lane and repair active-lane state around the removal point.
@@ -827,11 +827,11 @@ void CanvasLayout::newTarget(SP<Layout::ITarget> target) {
     if (hasPendingManualCrossMonitorInsertion(window)) {
         spdlog::debug("newTarget: deferring manual cross-monitor registration window={} workspace={}",
                       static_cast<const void*>(window.get()),
-                      window->workspaceID());
+                      ScrollerCore::HyprlandRuntime::windowWorkspaceId(window));
         return;
     }
 
-    spdlog::info("newTarget: window={} workspace={}", static_cast<const void*>(window.get()), window->workspaceID());
+    spdlog::info("newTarget: window={} workspace={}", static_cast<const void*>(window.get()), ScrollerCore::HyprlandRuntime::windowWorkspaceId(window));
     if (onWindowCreatedTiling(window, Math::DIRECTION_DEFAULT)) {
         // During newTarget(), CWindow::layoutTarget() is not guaranteed to be
         // bound yet, and CWindow::setBox() does not retain geometry this early.
@@ -864,7 +864,7 @@ void CanvasLayout::movedTarget(SP<Layout::ITarget> target, std::optional<Vector2
     if (hasPendingManualCrossMonitorInsertion(window)) {
         spdlog::debug("movedTarget: deferring manual cross-monitor registration window={} workspace={}",
                       static_cast<const void*>(window.get()),
-                      window->workspaceID());
+                      ScrollerCore::HyprlandRuntime::windowWorkspaceId(window));
         return;
     }
 
@@ -893,7 +893,7 @@ void CanvasLayout::resizeTarget(const Vector2D &delta, SP<Layout::ITarget> targe
     if (lane == nullptr) {
         if (window->sizeAnimation())
             *window->sizeAnimation() = Vector2D(std::max((window->sizeAnimation()->goal() + delta).x, 20.0), std::max((window->sizeAnimation()->goal() + delta).y, 20.0));
-        window->updateWindowDecos();
+        window->presentation().updateDecorations();
         return;
     }
 
@@ -989,19 +989,19 @@ void CanvasLayout::moveTargetInDirection(SP<Layout::ITarget> t, Math::eDirection
     switch (direction) {
         case Math::DIRECTION_LEFT:
             onWindowFocusChange(window);
-            move_window(window->workspaceID(), Direction::Left);
+            move_window(ScrollerCore::HyprlandRuntime::windowWorkspaceId(window), Direction::Left);
             break;
         case Math::DIRECTION_RIGHT:
             onWindowFocusChange(window);
-            move_window(window->workspaceID(), Direction::Right);
+            move_window(ScrollerCore::HyprlandRuntime::windowWorkspaceId(window), Direction::Right);
             break;
         case Math::DIRECTION_UP:
             onWindowFocusChange(window);
-            move_window(window->workspaceID(), Direction::Up);
+            move_window(ScrollerCore::HyprlandRuntime::windowWorkspaceId(window), Direction::Up);
             break;
         case Math::DIRECTION_DOWN:
             onWindowFocusChange(window);
-            move_window(window->workspaceID(), Direction::Down);
+            move_window(ScrollerCore::HyprlandRuntime::windowWorkspaceId(window), Direction::Down);
             break;
         default:
             return;
@@ -1047,7 +1047,7 @@ bool CanvasLayout::onWindowCreatedTiling(PHLWINDOW window, Math::eDirection)
     if (getLaneForWindow(window) != nullptr) {
         spdlog::debug("onWindowCreatedTiling: window already managed window={} workspace={}",
                       static_cast<const void*>(window.get()),
-                      window->workspaceID());
+                      ScrollerCore::HyprlandRuntime::windowWorkspaceId(window));
         if (restoredTargetsAwaitingCallback.erase(ScrollerCore::window_key(window)) > 0) {
             if (auto* lane = getLaneForWindow(window))
                 lane->commit_restored_geometry();
@@ -1075,7 +1075,7 @@ bool CanvasLayout::onWindowCreatedTiling(PHLWINDOW window, Math::eDirection)
 void CanvasLayout::onWindowRemovedTiling(PHLWINDOW window)
 {
     const auto windowPtr = static_cast<const void*>(window.get());
-    const auto workspace = window ? window->workspaceID() : WORKSPACE_INVALID;
+    const auto workspace = window ? ScrollerCore::HyprlandRuntime::windowWorkspaceId(window) : WORKSPACE_INVALID;
     restoredTargetsAwaitingCallback.erase(ScrollerCore::window_key(window));
     restoredGeometryActive = false;
     spdlog::info("onWindowRemovedTiling: window={} workspace={}", windowPtr, workspace);
@@ -1144,7 +1144,7 @@ void CanvasLayout::resizeActiveWindow(PHLWINDOW window, const Vector2D &delta,
     if (lane == nullptr) {
         if (PWINDOW->sizeAnimation())
             *PWINDOW->sizeAnimation() = Vector2D(std::max((PWINDOW->sizeAnimation()->goal() + delta).x, 20.0), std::max((PWINDOW->sizeAnimation()->goal() + delta).y, 20.0));
-        PWINDOW->updateWindowDecos();
+        PWINDOW->presentation().updateDecorations();
         return;
     }
 

@@ -24,6 +24,7 @@
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/config/shared/complex/ComplexDataTypes.hpp>
 #include <hyprland/src/desktop/view/LayerSurface.hpp>
+#include <hyprland/src/desktop/view/window/WindowPresentation.hpp>
 #include <hyprland/src/protocols/LayerShell.hpp>
 #include <hyprland/src/protocols/XDGShell.hpp>
 #include <hyprland/src/render/Renderer.hpp>
@@ -75,7 +76,7 @@ SP<Render::ITexture> get_text_texture(RenderState& state, const std::string& tex
     return texture;
 }
 
-void draw_text(RenderState& state, const std::string& text, const Box& box, const Box& bounds, const CHyprColor& color, int pt, int weight = 400) {
+void draw_text(Render::CRenderContext& ctx, RenderState& state, const std::string& text, const Box& box, const Box& bounds, const CHyprColor& color, int pt, int weight = 400) {
     const auto clipped = intersectBox(box, bounds);
     if (!clipped || clipped->w <= 4.0 || clipped->h <= 4.0)
         return;
@@ -101,10 +102,10 @@ void draw_text(RenderState& state, const std::string& text, const Box& box, cons
     CHyprOpenGLImpl::STextureRenderData data;
     data.a = static_cast<float>(color.a);
     data.blockBlurOptimization = true;
-    g_pHyprOpenGL->renderTexture(texture, to_cbox(*finalBox), data);
+    g_pHyprOpenGL->renderTexture(ctx, texture, to_cbox(*finalBox), data);
 }
 
-void draw_rect(const Box& box, const Box& bounds, const CHyprColor& color, int round, float roundingPower = 2.0F) {
+void draw_rect(Render::CRenderContext& ctx, const Box& box, const Box& bounds, const CHyprColor& color, int round, float roundingPower = 2.0F) {
     const auto clipped = intersectBox(box, bounds);
     if (!clipped)
         return;
@@ -112,10 +113,10 @@ void draw_rect(const Box& box, const Box& bounds, const CHyprColor& color, int r
     CHyprOpenGLImpl::SRectRenderData data;
     data.round = round;
     data.roundingPower = roundingPower;
-    g_pHyprOpenGL->renderRect(to_cbox(*clipped), color, data);
+    g_pHyprOpenGL->renderRect(ctx, to_cbox(*clipped), color, data);
 }
 
-void draw_outline_panel(const Box& box, const Box& bounds, const CHyprColor& color, int round, float roundingPower = 2.0F, double borderWidth = Style::kOutlineBorderWidth) {
+void draw_outline_panel(Render::CRenderContext& ctx, const Box& box, const Box& bounds, const CHyprColor& color, int round, float roundingPower = 2.0F, double borderWidth = Style::kOutlineBorderWidth) {
     const auto clipped = intersectBox(box, bounds);
     if (!clipped || clipped->w <= 2.0 || clipped->h <= 2.0 || borderWidth <= 0.0)
         return;
@@ -127,7 +128,7 @@ void draw_outline_panel(const Box& box, const Box& bounds, const CHyprColor& col
     data.roundingPower = roundingPower;
     data.borderSize = std::max(1, iround(borderWidth));
     data.a = 1.0F;
-    g_pHyprOpenGL->renderBorder(to_cbox(*clipped), gradient, data);
+    g_pHyprOpenGL->renderBorder(ctx, to_cbox(*clipped), gradient, data);
 }
 
 struct PreviewShape {
@@ -143,24 +144,6 @@ Box animated_window_draw_box(const RenderState& state, int monitorId, const Scen
     return scaled_target_box(state.animatedPreviewBox(monitorId, target.window, target.box), overlayAlpha);
 }
 
-struct ScopedRenderDataState {
-    Vector2D uvTopLeft;
-    Vector2D uvBottomRight;
-    PHLWINDOWREF currentWindow;
-
-    ScopedRenderDataState()
-        : uvTopLeft(g_pHyprRenderer->m_renderData.primarySurfaceUVTopLeft)
-        , uvBottomRight(g_pHyprRenderer->m_renderData.primarySurfaceUVBottomRight)
-        , currentWindow(g_pHyprRenderer->m_renderData.currentWindow) {
-    }
-
-    ~ScopedRenderDataState() {
-        g_pHyprRenderer->m_renderData.primarySurfaceUVTopLeft = uvTopLeft;
-        g_pHyprRenderer->m_renderData.primarySurfaceUVBottomRight = uvBottomRight;
-        g_pHyprRenderer->m_renderData.currentWindow = currentWindow;
-    }
-};
-
 // Snapshot previews try to mimic the live window's rounded-corner style after
 // the preview has been scaled down into overview space.
 PreviewShape preview_shape_for_window(const SceneTarget& target, const Box& box) {
@@ -175,8 +158,8 @@ PreviewShape preview_shape_for_window(const SceneTarget& target, const Box& box)
     const auto scale = std::min(box.w / std::max(1.0, sourceBox.w),
                                 box.h / std::max(1.0, sourceBox.h));
     const auto maxRound = std::max(4, iround(std::min(box.w, box.h) * 0.5));
-    shape.round = std::clamp(iround(target.window->rounding() * scale), 4, maxRound);
-    shape.roundingPower = target.window->roundingPower();
+    shape.round = std::clamp(iround(target.window->presentation().rounding() * scale), 4, maxRound);
+    shape.roundingPower = target.window->presentation().roundingPower();
     return shape;
 }
 
@@ -187,17 +170,7 @@ SP<CWLSurfaceResource> resolve_window_main_surface(PHLWINDOW window) {
     if (!window)
         return nullptr;
 
-    if (const auto xdgSurface = window->m_xdgSurface.lock()) {
-        if (const auto surface = xdgSurface->m_surface.lock())
-            return surface;
-    }
-
-    if (const auto xwaylandSurface = window->m_xwaylandSurface.lock()) {
-        if (const auto surface = xwaylandSurface->m_surface.lock())
-            return surface;
-    }
-
-    return window->getSolitaryResource();
+    return window->resource();
 }
 
 // For live-surface previews, use the window's real main-surface box as the
@@ -228,8 +201,8 @@ Vector2D surface_uv_bottom_right(SP<CWLSurfaceResource> surface) {
 
 // Overview draws directly from the window's live wl_surface tree. This avoids
 // depending on Hyprland's private snapshot framebuffer cache, which is no
-// longer exposed through the 0.55 render API.
-bool draw_window_surface_tree(const SceneTarget& target, const Box& box, const Box& bounds) {
+// longer exposed through the current render API.
+bool draw_window_surface_tree(Render::CRenderContext& ctx, const SceneTarget& target, const Box& box, const Box& bounds) {
     if (!target.window)
         return false;
 
@@ -237,7 +210,7 @@ bool draw_window_surface_tree(const SceneTarget& target, const Box& box, const B
     if (!clipped || clipped->w <= 4.0 || clipped->h <= 4.0)
         return false;
 
-    const auto monitor = g_pHyprRenderer->m_renderData.pMonitor.lock();
+    const auto monitor = ctx.m_data.pMonitor.lock();
     const auto sourceMonitor = target.window->m_monitor.lock();
     if (!monitor || !sourceMonitor || sourceMonitor->m_id != monitor->m_id)
         return false;
@@ -270,15 +243,15 @@ bool draw_window_surface_tree(const SceneTarget& target, const Box& box, const B
 
     // Save every mutable render-state field we touch so overview drawing leaves
     // the surrounding render pass exactly as it found it.
-    const ScopedRenderDataState renderStateGuard;
+    const auto renderStateGuard = ctx.saveDrawState();
 
     // Use explicit viewport UVs when the surface has a source crop; otherwise
     // leave custom UV disabled so Hyprland samples the full texture.
     const auto surfaceUVTL = surface_uv_top_left(mainSurface);
     const auto surfaceUVBR = surface_uv_bottom_right(mainSurface);
-    g_pHyprRenderer->m_renderData.primarySurfaceUVTopLeft = surfaceUVTL;
-    g_pHyprRenderer->m_renderData.primarySurfaceUVBottomRight = surfaceUVBR;
-    g_pHyprRenderer->m_renderData.currentWindow = nullptr;
+    ctx.m_data.primarySurfaceUVTopLeft = surfaceUVTL;
+    ctx.m_data.primarySurfaceUVBottomRight = surfaceUVBR;
+    ctx.m_data.currentWindow = nullptr;
 
     const auto shape = preview_shape_for_window(target, {centeredTarget.x, centeredTarget.y, centeredTarget.width, centeredTarget.height});
     CHyprOpenGLImpl::STextureRenderData data;
@@ -287,7 +260,7 @@ bool draw_window_surface_tree(const SceneTarget& target, const Box& box, const B
     data.roundingPower = shape.roundingPower;
     data.allowCustomUV = surfaceUVTL.x >= 0.0 && surfaceUVBR.x >= 0.0;
     data.blockBlurOptimization = true;
-    g_pHyprOpenGL->renderTexture(texture, centeredTarget, data);
+    g_pHyprOpenGL->renderTexture(ctx, texture, centeredTarget, data);
 
     rootResource->breadthfirst(
         [&](SP<CWLSurfaceResource> surface, const Vector2D& offset, void*) {
@@ -310,22 +283,22 @@ bool draw_window_surface_tree(const SceneTarget& target, const Box& box, const B
 
             const auto surfaceUVTL = surface_uv_top_left(surface);
             const auto surfaceUVBR = surface_uv_bottom_right(surface);
-            g_pHyprRenderer->m_renderData.primarySurfaceUVTopLeft = surfaceUVTL;
-            g_pHyprRenderer->m_renderData.primarySurfaceUVBottomRight = surfaceUVBR;
-            g_pHyprRenderer->m_renderData.currentWindow = nullptr;
+            ctx.m_data.primarySurfaceUVTopLeft = surfaceUVTL;
+            ctx.m_data.primarySurfaceUVBottomRight = surfaceUVBR;
+            ctx.m_data.currentWindow = nullptr;
 
             CHyprOpenGLImpl::STextureRenderData subsurfaceData;
             subsurfaceData.a = 1.0F;
             subsurfaceData.allowCustomUV = surfaceUVTL.x >= 0.0 && surfaceUVBR.x >= 0.0;
             subsurfaceData.blockBlurOptimization = true;
-            g_pHyprOpenGL->renderTexture(subsurfaceTexture, to_cbox(*clippedDrawBox), subsurfaceData);
+            g_pHyprOpenGL->renderTexture(ctx, subsurfaceTexture, to_cbox(*clippedDrawBox), subsurfaceData);
         },
         nullptr);
 
     return true;
 }
 
-void draw_window_preview(RenderState& state, const SceneTarget& target, const Box& drawBox, const Box& bounds, double overlayAlpha) {
+void draw_window_preview(Render::CRenderContext& ctx, RenderState& state, const SceneTarget& target, const Box& drawBox, const Box& bounds, double overlayAlpha) {
     // The preview draw order is:
     // 1. shadow
     // 2. live surface, then matte fallback
@@ -336,19 +309,21 @@ void draw_window_preview(RenderState& state, const SceneTarget& target, const Bo
     const auto border = Style::previewBorder(target.selected, static_cast<float>(0.92 * overlayAlpha));
     const auto shadowAlpha = target.selected ? 0.22F : 0.14F;
     if (const auto shadowBox = intersectBox(previewBox, bounds); shadowBox && shadowBox->w > 4.0 && shadowBox->h > 4.0) {
-        g_pHyprOpenGL->renderRoundedShadow(to_cbox(*shadowBox), previewShape.round, previewShape.roundingPower, 18,
-                                           Style::previewShadow(shadowAlpha * overlayAlpha), 1.0F);
+        const Config::CGradientValueData shadowGradient(Style::previewShadow(shadowAlpha * overlayAlpha));
+        const auto presentation = target.window ? target.window->presentation().renderPresentation() : Render::SWindowRenderPresentation{};
+        g_pHyprOpenGL->renderRoundedShadow(ctx, to_cbox(*shadowBox), previewShape.round, previewShape.roundingPower, 18,
+                                           shadowGradient, 1.0F, presentation);
     }
 
-    if (!draw_window_surface_tree(target, previewBox, bounds)) {
-        draw_rect(previewBox,
+    if (!draw_window_surface_tree(ctx, target, previewBox, bounds)) {
+        draw_rect(ctx, previewBox,
                   bounds,
                   Style::previewFallbackFill(target.selected, static_cast<float>((target.selected ? 0.82 : 0.74) * overlayAlpha)),
                   previewShape.round,
                   previewShape.roundingPower);
     }
 
-    draw_outline_panel(drawBox, bounds, border, previewShape.round + 2, previewShape.roundingPower);
+    draw_outline_panel(ctx, drawBox, bounds, border, previewShape.round + 2, previewShape.roundingPower);
 
     const auto titleBackdrop = Box{
         previewBox.x + Style::kTitleBackdropInset,
@@ -358,11 +333,11 @@ void draw_window_preview(RenderState& state, const SceneTarget& target, const Bo
         std::min(Style::kTitleBackdropMaxHeight, std::max(Style::kTitleBackdropMinHeight, previewBox.h * Style::kTitleBackdropHeightRatio)),
     };
     if (titleBackdrop.w > 8.0 && titleBackdrop.h > 8.0)
-        draw_rect(titleBackdrop,
+        draw_rect(ctx, titleBackdrop,
                   bounds,
                   Style::titleBackdrop(static_cast<float>(0.72 * overlayAlpha)),
                   Style::kTitleBackdropRound);
-    draw_text(state,
+    draw_text(ctx, state,
               target.label,
               {titleBackdrop.x + Style::kTitleTextInsetX,
                titleBackdrop.y + Style::kTitleTextInsetY,
@@ -384,7 +359,7 @@ void draw_empty_target(const SceneTarget& target, const Box& bounds, double over
 
 void snapshotWindowTargets(const Model& model) {
     // Window previews are drawn from live surface textures. Keep this lifecycle
-    // hook so session setup remains explicit even though 0.56 no longer exposes
+    // hook so session setup remains explicit even though Hyprland no longer exposes
     // the old renderer snapshot cache.
     (void)model;
 }
@@ -403,7 +378,7 @@ void snapshotBackdropLayers(const Model& model, RenderState& state) {
         const auto snapshotLayerList = [&](const auto& layerList) {
             for (const auto& layerRef : layerList) {
                 auto layer = layerRef.lock();
-                if (!layer || !layer->aliveAndVisible())
+                if (!layer || !layer->mapped())
                     continue;
 
                 auto snapshot = g_pHyprRenderer->makeSnapshotFB(layer);
@@ -419,14 +394,14 @@ void snapshotBackdropLayers(const Model& model, RenderState& state) {
     }
 }
 
-void enqueueMonitorBackdrop(PHLMONITOR monitor, const RenderState& state) {
+void enqueueMonitorBackdrop(Render::CRenderContext& ctx, PHLMONITOR monitor, const RenderState& state) {
     if (!monitor)
         return;
 
     // Queue every backdrop operation in render-pass order. Drawing a live layer
     // texture here would happen before the queued clear executes and the clear
     // would erase it when the pass is rendered.
-    g_pHyprRenderer->m_renderPass.add(makeUnique<CClearPassElement>(CClearPassElement::SClearData{
+    g_pHyprRenderer->addPassElement(ctx, makeUnique<CClearPassElement>(CClearPassElement::SClearData{
         Style::matteBackground(),
     }));
 
@@ -448,13 +423,12 @@ void enqueueMonitorBackdrop(PHLMONITOR monitor, const RenderState& state) {
         data.box = CBox{0, 0, monitor->m_transformedSize.x, monitor->m_transformedSize.y};
         data.damage = damage;
         data.a = 1.0F;
-        data.flipEndFrame = true;
         data.blockBlurOptimization = true;
-        g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(std::move(data)));
+        g_pHyprRenderer->addPassElement(ctx, makeUnique<CTexPassElement>(std::move(data)));
     }
 }
 
-void drawSceneMonitor(const SceneMonitor& scene, steady_tp now, RenderState& state) {
+void drawSceneMonitor(Render::CRenderContext& ctx, const SceneMonitor& scene, steady_tp now, RenderState& state) {
     const auto progress = state.overlayProgress(scene.monitorId, now, true);
     if (progress <= 0.0)
         return;
@@ -469,7 +443,7 @@ void drawSceneMonitor(const SceneMonitor& scene, steady_tp now, RenderState& sta
         for (const auto& target : workspace.targets) {
             if (target.type == TargetType::Window) {
                 const auto drawBox = animated_window_draw_box(state, scene.monitorId, target, progress);
-                draw_window_preview(state, target, drawBox, scene.box, progress);
+                draw_window_preview(ctx, state, target, drawBox, scene.box, progress);
                 if (target.selected)
                     selectionBox = drawBox;
             } else {
@@ -487,7 +461,7 @@ void drawSceneMonitor(const SceneMonitor& scene, steady_tp now, RenderState& sta
 
     if (selectionBox) {
         const auto animatedSelectionBox = state.animatedSelectionBox(*selectionBox, scene.monitorId, now);
-        draw_outline_panel(centerScaleBox(animatedSelectionBox, Style::kSelectionOutlineScale),
+        draw_outline_panel(ctx, centerScaleBox(animatedSelectionBox, Style::kSelectionOutlineScale),
                            scene.box,
                            Style::selectionOutline(static_cast<float>(0.96 * progress)),
                            18,
